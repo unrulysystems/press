@@ -8,6 +8,55 @@ export type PageVisibility = (typeof PAGE_VISIBILITIES)[number]
 
 export type UserRole = 'user' | 'admin'
 
+export const RESERVED_COLLECTION_SLUGS = [
+  'api',
+  'p',
+  'c',
+  'login',
+  'logout',
+  'cli',
+  'assets',
+  'admin',
+  'docs',
+] as const
+
+export type CollectionSlug = string & { readonly __brand: 'CollectionSlug' }
+export type FileSlug = string & { readonly __brand: 'FileSlug' }
+export type SlugKind = 'collection' | 'file'
+
+export class SlugValidationError extends Error {
+  constructor(
+    readonly kind: SlugKind,
+    message: string,
+  ) {
+    super(`${kind} slug: ${message}`)
+    this.name = 'SlugValidationError'
+  }
+}
+
+const collectionSlugPattern = /^[a-z0-9][a-z0-9-]{0,62}$/
+const fileSlugPattern = /^[a-z0-9][a-z0-9._-]{0,120}\.html$/
+
+export function parseCollectionSlug(value: string): CollectionSlug {
+  if (!collectionSlugPattern.test(value)) {
+    throw new SlugValidationError('collection', 'must match ^[a-z0-9][a-z0-9-]{0,62}$')
+  }
+  if ((RESERVED_COLLECTION_SLUGS as readonly string[]).includes(value)) {
+    throw new SlugValidationError('collection', `"${value}" is reserved`)
+  }
+  return value as CollectionSlug
+}
+
+export function parseFileSlug(value: string): FileSlug {
+  if (!fileSlugPattern.test(value)) {
+    throw new SlugValidationError('file', 'must match ^[a-z0-9][a-z0-9._-]{0,120}\\.html$')
+  }
+  if (value.includes('..')) {
+    throw new SlugValidationError('file', 'must not contain ".."')
+  }
+  return value as FileSlug
+}
+
 export type AuthenticatedViewer = {
   readonly kind: 'authenticated'
   readonly userId: string
