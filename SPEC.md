@@ -257,4 +257,28 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 
 ## Test traceability
 
-Added during TDD (map REQ-\* → test file:line). Not yet populated.
+| Requirement  | Test file(s)                                                                                                                      |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| REQ-CFG-001  | `packages/core/src/config.test.ts`, `apps/web/src/server/config.test.ts`                                                          |
+| REQ-CFG-002  | `packages/core/src/config.test.ts`, `apps/web/src/server/config.test.ts`, `e2e/publish.spec.ts`                                   |
+| REQ-AUTH-002 | `apps/web/src/server/config.test.ts`, `e2e/auth.spec.ts`, `e2e/publish.spec.ts`                                                   |
+| REQ-AUTH-003 | `e2e/auth.spec.ts`                                                                                                                |
+| REQ-AUTH-007 | `apps/web/src/server/config.test.ts`, `e2e/auth.spec.ts`                                                                          |
+| REQ-ACL-001  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
+| REQ-ACL-002  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
+| REQ-ACL-003  | `packages/core/src/acl.test.ts`, `apps/web/src/db/schema.test.ts`, `e2e/publish.spec.ts`                                          |
+| REQ-ACL-004  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
+| REQ-ACL-005  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
+| REQ-ACL-006  | `packages/core/src/acl.test.ts`, `apps/web/src/db/schema.test.ts`, `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts` |
+| REQ-PUB-001  | `e2e/publish.spec.ts`                                                                                                             |
+| REQ-PUB-002  | `packages/core/src/slug.test.ts`, `e2e/publish.spec.ts`                                                                           |
+| REQ-PUB-003  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
+| REQ-PUB-004  | `e2e/publish.spec.ts`                                                                                                             |
+| REQ-PUB-005  | `apps/web/src/publish/passwords.test.ts`, `e2e/publish.spec.ts`                                                                   |
+| REQ-PUB-006  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
+| REQ-PUB-007  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
+| REQ-PUB-008  | `e2e/publish.spec.ts`                                                                                                             |
+| REQ-PUB-009  | `e2e/publish.spec.ts`                                                                                                             |
+| REQ-SRV-001  | `e2e/publish.spec.ts`                                                                                                             |
+| REQ-SRV-002  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
+| REQ-SRV-003  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |

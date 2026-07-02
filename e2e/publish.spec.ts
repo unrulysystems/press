@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { expect, request as playwrightRequest, test } from '@playwright/test'
+
+import type { APIRequestContext, APIResponse } from '@playwright/test'
 
 import { findUserIdByEmail, mintApiTokenForUser } from '../apps/web/src/auth/apiTokens'
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
@@ -28,6 +31,13 @@ const actors = {} as {
   secondUser: SeedActor
   admin: SeedActor
 }
+
+const servedPageHeaders = {
+  'content-security-policy': 'sandbox allow-scripts allow-popups',
+  'x-content-type-options': 'nosniff',
+  'referrer-policy': 'no-referrer',
+  'cache-control': 'no-store',
+} as const
 
 function authHeaders(token: string, extra?: Record<string, string>): Record<string, string> {
   return {
@@ -73,6 +83,36 @@ async function exists(path: string): Promise<boolean> {
     }
     throw error
   }
+}
+
+async function signIn(
+  baseURL: string | undefined,
+  key: keyof typeof localnetUsers,
+): Promise<APIRequestContext> {
+  const context = await playwrightRequest.newContext({ baseURL })
+  const response = await context.post('/api/auth/sign-in/email', {
+    headers: { 'content-type': 'application/json' },
+    data: {
+      email: localnetUsers[key].email,
+      password: localnetUsers[key].password,
+      rememberMe: true,
+    },
+  })
+  expect(response.status(), `sign-in ${localnetUsers[key].email}`).toBe(200)
+  return context
+}
+
+async function expectServedOk(response: APIResponse): Promise<string> {
+  expect(response.status()).toBe(200)
+  const headers = response.headers()
+  for (const [name, value] of Object.entries(servedPageHeaders)) {
+    expect(headers[name], `${name} header`).toBe(value)
+  }
+  return await response.text()
+}
+
+function basicAuth(password: string): string {
+  return `Basic ${Buffer.from(`press:${password}`).toString('base64')}`
 }
 
 async function expectAudit(input: {
@@ -141,12 +181,18 @@ test('publish endpoint enforces bearer auth, validation, storage, overwrite, and
   })
   expect(cookieOnly.status()).toBe(401)
 
-  const invalidSlug = await api.put(`/api/pages/${collectionSlug}/a..b.html`, {
-    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: body,
-  })
-  expect(invalidSlug.status()).toBe(400)
-  expect(await exists(blobPath(collectionSlug, 'a..b.html'))).toBe(false)
+  for (const invalidFileSlug of ['a..b.html', '..%2Fevil.html', 'reports%2Fevil.html']) {
+    const invalidSlug = await api.put(`/api/pages/${collectionSlug}/${invalidFileSlug}`, {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+      data: body,
+    })
+    expect(invalidSlug.status(), `${invalidFileSlug} rejected`).toBe(400)
+  }
+  expect(await blobDirectoryEntries(collectionSlug)).toEqual([])
+  for (const invalidFileSlug of ['a..b.html', '..%2Fevil.html', 'reports%2Fevil.html']) {
+    const traversalServe = await api.get(`/p/${collectionSlug}/${invalidFileSlug}`)
+    expect(traversalServe.status(), `${invalidFileSlug} not served`).toBe(404)
+  }
 
   const invalidType = await api.put(`/api/pages/${collectionSlug}/wrong-type.html`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
@@ -298,48 +344,109 @@ test('password publishing, patching, listing, reroll, and admin unpublish stay a
   })
 
   const inheritedPrivateFile = 'inherits-private.html'
+  const inheritedPrivateBody = '<!doctype html><title>Inherited Private</title>'
   const inheritedPrivate = await api.put(`/api/pages/${collectionSlug}/${inheritedPrivateFile}`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: '<!doctype html><title>Inherited Private</title>',
+    data: inheritedPrivateBody,
   })
   expect(inheritedPrivate.status()).toBe(200)
   expect(await inheritedPrivate.json()).toMatchObject({ visibility: 'private' })
+  await expectAudit({
+    collectionSlug,
+    fileSlug: inheritedPrivateFile,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(inheritedPrivateBody),
+  })
 
   const publicDefaultsCollection = `${runSlug}-public-default`
+  const publicSeedBody = '<!doctype html><title>Seed</title>'
   const publicSeed = await api.put(`/api/pages/${publicDefaultsCollection}/seed.html`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: '<!doctype html><title>Seed</title>',
+    data: publicSeedBody,
   })
   expect(publicSeed.status()).toBe(200)
+  await expectAudit({
+    collectionSlug: publicDefaultsCollection,
+    fileSlug: 'seed.html',
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(publicSeedBody),
+  })
   const publicDefaultPatch = await api.patch(`/api/collections/${publicDefaultsCollection}`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
     data: { defaultVisibility: 'public' },
   })
   expect(publicDefaultPatch.status()).toBe(200)
+  await expectAudit({
+    collectionSlug: publicDefaultsCollection,
+    action: 'visibility-change',
+    userId: actors.owner.id,
+  })
+  const inheritedPublicBody = '<!doctype html><title>Inherited Public</title>'
   const inheritedPublic = await api.put(`/api/pages/${publicDefaultsCollection}/inherited.html`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: '<!doctype html><title>Inherited Public</title>',
+    data: inheritedPublicBody,
   })
   expect(inheritedPublic.status()).toBe(200)
   expect(await inheritedPublic.json()).toMatchObject({ visibility: 'public' })
+  await expectAudit({
+    collectionSlug: publicDefaultsCollection,
+    fileSlug: 'inherited.html',
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(inheritedPublicBody),
+  })
 
   const defaultDefaultsCollection = `${runSlug}-default-default`
+  const inheritedDefaultBody = '<!doctype html><title>Inherited Default</title>'
   const inheritedDefault = await api.put(`/api/pages/${defaultDefaultsCollection}/inherited.html`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: '<!doctype html><title>Inherited Default</title>',
+    data: inheritedDefaultBody,
   })
   expect(inheritedDefault.status()).toBe(200)
   expect(await inheritedDefault.json()).toMatchObject({ visibility: 'default' })
+  await expectAudit({
+    collectionSlug: defaultDefaultsCollection,
+    fileSlug: 'inherited.html',
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(inheritedDefaultBody),
+  })
 
   const privateFile = 'private.html'
-  await api.put(`/api/pages/${collectionSlug}/${privateFile}?visibility=private`, {
-    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: '<!doctype html><title>Private</title>',
+  const privateBody = '<!doctype html><title>Private</title>'
+  const privatePublish = await api.put(
+    `/api/pages/${collectionSlug}/${privateFile}?visibility=private`,
+    {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+      data: privateBody,
+    },
+  )
+  expect(privatePublish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug: privateFile,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(privateBody),
   })
   const publicFile = 'public.html'
-  await api.put(`/api/pages/${collectionSlug}/${publicFile}?visibility=public`, {
-    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-    data: '<!doctype html><title>Public</title>',
+  const publicBody = '<!doctype html><title>Public</title>'
+  const publicPublish = await api.put(
+    `/api/pages/${collectionSlug}/${publicFile}?visibility=public`,
+    {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+      data: publicBody,
+    },
+  )
+  expect(publicPublish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug: publicFile,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(publicBody),
   })
 
   const secondPages = await api.get(`/api/collections/${collectionSlug}/pages`, {
@@ -401,6 +508,294 @@ test('password publishing, patching, listing, reroll, and admin unpublish stay a
   })
 })
 
+test('Anonymous GET of a public page -> 200 with sandbox CSP', async ({
+  baseURL,
+  context,
+  page: browserPage,
+}) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const collectionSlug = `${runSlug}-srv-public`
+  const fileSlug = 'public.html'
+  const body =
+    '<!doctype html><title>Sandbox</title><body>public<script>document.body.dataset.cookie=document.cookie||"empty"</script></body>'
+  const response = await api.put(`/api/pages/${collectionSlug}/${fileSlug}?visibility=public`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(response.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+
+  const served = await api.get(`/p/${collectionSlug}/${fileSlug}`)
+  expect(await expectServedOk(served)).toBe(body)
+
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  await context.addCookies([
+    {
+      name: 'press_e2e_cookie',
+      value: 'leak-me',
+      url: baseURL,
+    },
+  ])
+  const browserResponse = await browserPage.goto(`/p/${collectionSlug}/${fileSlug}`)
+  expect(browserResponse?.status()).toBe(200)
+  for (const [name, value] of Object.entries(servedPageHeaders)) {
+    expect(browserResponse?.headers()[name], `${name} browser header`).toBe(value)
+  }
+  await expect(browserPage.locator('body')).not.toHaveAttribute('data-cookie', /press_e2e_cookie/)
+})
+
+test('Anonymous browser GET of a default page -> 302 to /login; non-HTML -> 401', async ({
+  baseURL,
+}) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const collectionSlug = `${runSlug}-srv-default-anon`
+  const fileSlug = 'default.html'
+  const body = '<!doctype html><title>Default</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+
+  const browserGet = await api.get(`/p/${collectionSlug}/${fileSlug}`, {
+    headers: { accept: 'text/html' },
+    maxRedirects: 0,
+  })
+  expect(browserGet.status()).toBe(302)
+  expect(browserGet.headers().location).toBe(`/login?next=%2Fp%2F${collectionSlug}%2F${fileSlug}`)
+
+  const nonHtml = await api.get(`/p/${collectionSlug}/${fileSlug}`, {
+    headers: { accept: 'application/json' },
+  })
+  expect(nonHtml.status()).toBe(401)
+})
+
+test('Authenticated wrong-domain user GET of a default page -> 403', async ({ baseURL }) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const wrongDomain = await signIn(baseURL, 'wrongDomain')
+  const collectionSlug = `${runSlug}-srv-wrong-domain`
+  const fileSlug = 'default.html'
+  const body = '<!doctype html><title>Default Forbidden</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+
+  const served = await wrongDomain.get(`/p/${collectionSlug}/${fileSlug}`)
+  expect(served.status()).toBe(403)
+})
+
+test('Authenticated allowed-domain user GET of a default page -> 200', async ({ baseURL }) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const secondUser = await signIn(baseURL, 'secondUser')
+  const collectionSlug = `${runSlug}-srv-domain`
+  const fileSlug = 'default.html'
+  const body = '<!doctype html><title>Default Allowed</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+
+  const served = await secondUser.get(`/p/${collectionSlug}/${fileSlug}`)
+  expect(await expectServedOk(served)).toBe(body)
+})
+
+test('private page: allowlisted external user -> 200; non-allowlisted same-domain -> 403; owner -> 200', async ({
+  baseURL,
+}) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const external = await signIn(baseURL, 'external')
+  const secondUser = await signIn(baseURL, 'secondUser')
+  const owner = await signIn(baseURL, 'owner')
+  const collectionSlug = `${runSlug}-srv-private`
+  const fileSlug = 'private.html'
+  const body = '<!doctype html><title>Private</title>'
+  const publish = await api.put(
+    `/api/pages/${collectionSlug}/${fileSlug}?visibility=private&allow=${encodeURIComponent(localnetUsers.external.email)}`,
+    {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+      data: body,
+    },
+  )
+  expect(publish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+
+  expect(await expectServedOk(await external.get(`/p/${collectionSlug}/${fileSlug}`))).toBe(body)
+  expect((await secondUser.get(`/p/${collectionSlug}/${fileSlug}`)).status()).toBe(403)
+  expect(await expectServedOk(await owner.get(`/p/${collectionSlug}/${fileSlug}`))).toBe(body)
+})
+
+test('password page: no credentials -> 401 + Basic challenge; correct password -> 200; wrong password -> 401; owner session -> 200', async ({
+  baseURL,
+}) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const owner = await signIn(baseURL, 'owner')
+  const collectionSlug = `${runSlug}-srv-password`
+  const fileSlug = 'password.html'
+  const body = '<!doctype html><title>Password</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  const publishBody = (await publish.json()) as { password: string }
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+    secretNotPresent: publishBody.password,
+  })
+
+  const noCredentials = await api.get(`/p/${collectionSlug}/${fileSlug}`)
+  expect(noCredentials.status()).toBe(401)
+  expect(noCredentials.headers()['www-authenticate']).toBe('Basic realm="press"')
+
+  const correctPassword = await api.get(`/p/${collectionSlug}/${fileSlug}`, {
+    headers: { authorization: basicAuth(publishBody.password) },
+  })
+  expect(await expectServedOk(correctPassword)).toBe(body)
+
+  const wrongPassword = await api.get(`/p/${collectionSlug}/${fileSlug}`, {
+    headers: { authorization: basicAuth('wrong-password') },
+  })
+  expect(wrongPassword.status()).toBe(401)
+  expect(wrongPassword.headers()['www-authenticate']).toBe('Basic realm="press"')
+
+  expect(await expectServedOk(await owner.get(`/p/${collectionSlug}/${fileSlug}`))).toBe(body)
+})
+
+test('Unpublish via API archives; subsequent GET -> 404; ACL-filtered list endpoints no longer include it', async ({
+  baseURL,
+}) => {
+  const api = await playwrightRequest.newContext({ baseURL })
+  const collectionSlug = `${runSlug}-srv-unpublish`
+  const fileSlug = 'gone.html'
+  const body = '<!doctype html><title>Gone</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}?visibility=public`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+  expect(await expectServedOk(await api.get(`/p/${collectionSlug}/${fileSlug}`))).toBe(body)
+
+  const deleted = await api.delete(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(deleted.status()).toBe(200)
+  const archived = await findPage(db, collectionSlug, fileSlug)
+  expect(archived?.archivedAt).toBeInstanceOf(Date)
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'unpublish',
+    userId: actors.owner.id,
+    contentHash: hashBody(body),
+  })
+
+  expect((await api.get(`/p/${collectionSlug}/${fileSlug}`)).status()).toBe(404)
+
+  const pages = await api.get(`/api/collections/${collectionSlug}/pages`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(pages.status()).toBe(200)
+  expect(
+    ((await pages.json()) as { pages: { file: string }[] }).pages.map((entry) => entry.file),
+  ).not.toContain(fileSlug)
+
+  const collections = await api.get('/api/collections', {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(collections.status()).toBe(200)
+  expect(
+    ((await collections.json()) as { collections: { slug: string }[] }).collections.map(
+      (entry) => entry.slug,
+    ),
+  ).not.toContain(collectionSlug)
+})
+
+test('Boot with credential auth enabled in production -> refuses to start', async () => {
+  const stderr = await new Promise<string>((resolve, reject) => {
+    const child = spawn('bun', ['apps/web/src/setupServer.ts'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        PRESS_BASE_URL: 'https://press.example.test',
+        PRESS_ALLOWED_DOMAINS: 'send.it',
+        PRESS_ADMIN_EMAILS: 'admin@send.it',
+        DATABASE_URL: 'postgres://press:press@127.0.0.1:1/press',
+        PRESS_STORAGE_DIR: storageDir(),
+        BETTER_AUTH_SECRET: 'localnet-secret-at-least-32-bytes',
+        GOOGLE_CLIENT_ID: 'google-client-id',
+        GOOGLE_CLIENT_SECRET: 'google-client-secret',
+        PRESS_ENABLE_CREDENTIAL_AUTH: '1',
+      },
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    let output = ''
+    child.stderr.on('data', (chunk) => {
+      output += String(chunk)
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code === 0) {
+        reject(new Error('server config probe unexpectedly exited 0'))
+        return
+      }
+      resolve(output)
+    })
+  })
+
+  expect(stderr).toContain('PRESS_ENABLE_CREDENTIAL_AUTH')
+  expect(stderr).toContain('production')
+})
+
 test('transaction rollback restores the previous blob when audit insert fails', async ({
   baseURL,
 }) => {
@@ -414,6 +809,13 @@ test('transaction rollback restores the previous blob when audit insert fails', 
   })
   expect(original.status()).toBe(200)
   expect(await blobDirectoryEntries(collectionSlug)).toEqual([fileSlug])
+  await expectAudit({
+    collectionSlug,
+    fileSlug,
+    action: 'publish',
+    userId: actors.owner.id,
+    contentHash: hashBody(originalBody),
+  })
 
   await installFailingAuditTrigger(db, collectionSlug)
 
