@@ -10,48 +10,33 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
-  typecheck:
-    name: Typecheck
+  verify:
+    name: Check, Test, E2E
     runs-on: ubuntu-latest
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /tmp/press-ms-playwright
     steps:
       - uses: actions/checkout@v4
-      - uses: nubjs/setup-nub@v0
-      - run: nub ci
-      - run: nub run typecheck
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
       - uses: nubjs/setup-nub@v0
-      - run: nub ci
-      - run: nub run lint
 
-  format:
-    name: Format Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: nubjs/setup-nub@v0
-      - run: nub ci
-      - run: nub run format:check
+      - uses: oven-sh/setup-bun@v2
 
-  knip:
-    name: Unused Dependencies
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: nubjs/setup-nub@v0
-      - run: nub ci
-      - run: nub run knip
+      - name: Install dependencies
+        run: nub ci
 
-  jscpd:
-    name: Code Duplication
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: nubjs/setup-nub@v0
-      - run: nub ci
-      - run: nub run jscpd
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+
+      - name: Check
+        run: nub run check
+
+      - name: Unit tests
+        run: nub run test
+
+      - name: E2E
+        run: nub run e2e

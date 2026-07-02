@@ -30,6 +30,9 @@ Thumbs.db
 
 # Testing
 coverage/
+playwright-report/
+test-results/
+.press/
 
 # Nix
 result
@@ -46,3 +49,6 @@ test-from-template/
 
 # Local dev notes
 CLAUDE.local.md
+
+# Agent runtime artifacts
+.rl/
