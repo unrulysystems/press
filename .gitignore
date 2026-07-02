@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Compiled JS in src (should be in dist)
+packages/*/src/*.js
+packages/*/src/*.d.ts
+apps/*/src/*.js
+apps/*/src/*.d.ts
+
+# Environment
+.env
+.env.local
+.env.*.local
+.envrc.private
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing
+coverage/
+
+# Nix
+result
+.direnv/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temporary
+tmp/
+temp/
+test-from-template/
+
+# Local dev notes
+CLAUDE.local.md
