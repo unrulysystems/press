@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { stat } from 'node:fs/promises'
+import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { expect, request as playwrightRequest, test } from '@playwright/test'
@@ -41,11 +41,26 @@ function hashBody(body: string): string {
 }
 
 function blobPath(collectionSlug: string, fileSlug: string): string {
-  const storageDir = process.env.PRESS_STORAGE_DIR
-  if (!storageDir) {
+  return join(storageDir(), collectionSlug, fileSlug)
+}
+
+function storageDir(): string {
+  const value = process.env.PRESS_STORAGE_DIR
+  if (!value) {
     throw new Error('PRESS_STORAGE_DIR missing from e2e environment')
   }
-  return join(storageDir, collectionSlug, fileSlug)
+  return value
+}
+
+async function blobDirectoryEntries(collectionSlug: string): Promise<string[]> {
+  try {
+    return (await readdir(join(storageDir(), collectionSlug))).toSorted()
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return []
+    }
+    throw error
+  }
 }
 
 async function exists(path: string): Promise<boolean> {
@@ -158,6 +173,7 @@ test('publish endpoint enforces bearer auth, validation, storage, overwrite, and
     visibility: 'public',
   })
   expect(await exists(blobPath(collectionSlug, fileSlug))).toBe(true)
+  expect(await blobDirectoryEntries(collectionSlug)).toEqual([fileSlug])
 
   const storedCollection = await findCollection(db, collectionSlug)
   expect(storedCollection?.ownerId).toBe(actors.owner.id)
@@ -193,6 +209,8 @@ test('publish endpoint enforces bearer auth, validation, storage, overwrite, and
     title: 'Updated Report',
     visibility: 'public',
   })
+  expect(await blobDirectoryEntries(collectionSlug)).toEqual([fileSlug])
+  expect(await readFile(blobPath(collectionSlug, fileSlug), 'utf8')).toBe(overwriteBody)
   await expectAudit({
     collectionSlug,
     fileSlug,
@@ -269,6 +287,50 @@ test('password publishing, patching, listing, reroll, and admin unpublish stay a
     userId: actors.owner.id,
   })
 
+  const rejectedPasswordDefault = await api.patch(`/api/collections/${collectionSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { defaultVisibility: 'password' },
+  })
+  expect(rejectedPasswordDefault.status()).toBe(400)
+  expect(await rejectedPasswordDefault.json()).toEqual({
+    error:
+      'defaultVisibility must be one of default, public, private; password is page-explicit only',
+  })
+
+  const inheritedPrivateFile = 'inherits-private.html'
+  const inheritedPrivate = await api.put(`/api/pages/${collectionSlug}/${inheritedPrivateFile}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Inherited Private</title>',
+  })
+  expect(inheritedPrivate.status()).toBe(200)
+  expect(await inheritedPrivate.json()).toMatchObject({ visibility: 'private' })
+
+  const publicDefaultsCollection = `${runSlug}-public-default`
+  const publicSeed = await api.put(`/api/pages/${publicDefaultsCollection}/seed.html`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Seed</title>',
+  })
+  expect(publicSeed.status()).toBe(200)
+  const publicDefaultPatch = await api.patch(`/api/collections/${publicDefaultsCollection}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { defaultVisibility: 'public' },
+  })
+  expect(publicDefaultPatch.status()).toBe(200)
+  const inheritedPublic = await api.put(`/api/pages/${publicDefaultsCollection}/inherited.html`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Inherited Public</title>',
+  })
+  expect(inheritedPublic.status()).toBe(200)
+  expect(await inheritedPublic.json()).toMatchObject({ visibility: 'public' })
+
+  const defaultDefaultsCollection = `${runSlug}-default-default`
+  const inheritedDefault = await api.put(`/api/pages/${defaultDefaultsCollection}/inherited.html`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Inherited Default</title>',
+  })
+  expect(inheritedDefault.status()).toBe(200)
+  expect(await inheritedDefault.json()).toMatchObject({ visibility: 'default' })
+
   const privateFile = 'private.html'
   await api.put(`/api/pages/${collectionSlug}/${privateFile}?visibility=private`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
@@ -339,12 +401,19 @@ test('password publishing, patching, listing, reroll, and admin unpublish stay a
   })
 })
 
-test('transaction rollback removes the fsynced blob when audit insert fails', async ({
+test('transaction rollback restores the previous blob when audit insert fails', async ({
   baseURL,
 }) => {
   const api = await playwrightRequest.newContext({ baseURL })
   const collectionSlug = `${runSlug}-rollback`
   const fileSlug = 'rollback.html'
+  const originalBody = '<!doctype html><title>Original</title>'
+  const original = await api.put(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: originalBody,
+  })
+  expect(original.status()).toBe(200)
+  expect(await blobDirectoryEntries(collectionSlug)).toEqual([fileSlug])
 
   await installFailingAuditTrigger(db, collectionSlug)
 
@@ -358,7 +427,7 @@ test('transaction rollback removes the fsynced blob when audit insert fails', as
     await removeFailingAuditTrigger(db)
   }
 
-  expect(await findCollection(db, collectionSlug)).toBeUndefined()
-  expect(await findPage(db, collectionSlug, fileSlug)).toBeUndefined()
-  expect(await exists(blobPath(collectionSlug, fileSlug))).toBe(false)
+  expect(await blobDirectoryEntries(collectionSlug)).toEqual([fileSlug])
+  expect(await readFile(blobPath(collectionSlug, fileSlug), 'utf8')).toBe(originalBody)
+  expect((await findPage(db, collectionSlug, fileSlug))?.title).toBe('Original')
 })

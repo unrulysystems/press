@@ -6,6 +6,10 @@ export const PAGE_VISIBILITIES = ['default', 'public', 'password', 'private'] as
 
 export type PageVisibility = (typeof PAGE_VISIBILITIES)[number]
 
+export const COLLECTION_DEFAULT_VISIBILITIES = ['default', 'public', 'private'] as const
+
+export type CollectionDefaultVisibility = (typeof COLLECTION_DEFAULT_VISIBILITIES)[number]
+
 export type UserRole = 'user' | 'admin'
 
 export const RESERVED_COLLECTION_SLUGS = [
@@ -81,13 +85,14 @@ export type AclOperation =
 export type CollectionAcl = {
   readonly slug: string
   readonly ownerId: string
-  readonly defaultVisibility?: PageVisibility | null
+  readonly defaultVisibility?: CollectionDefaultVisibility | null
 }
 
 export type PageAcl = {
   readonly collectionSlug: string
   readonly fileSlug: string
   readonly visibility?: PageVisibility | null
+  readonly passwordHash?: string | null
   readonly allowlist: readonly string[]
 }
 
@@ -186,6 +191,12 @@ function decideReadAcl(
     case 'password':
       if (isOwnerOrAdmin(viewer, collection)) {
         return allow(resolvedVisibility)
+      }
+      if (!page.passwordHash) {
+        return deny(
+          viewer.kind === 'basic-password' ? 'password-invalid' : 'password-required',
+          resolvedVisibility,
+        )
       }
       if (viewer.kind !== 'basic-password') {
         return deny('password-required', resolvedVisibility)

@@ -25,6 +25,7 @@ const pageBase: PageAcl = {
   collectionSlug: 'reports',
   fileSlug: 'launch.html',
   visibility: 'default',
+  passwordHash: 'argon2-hash',
   allowlist: ['external@example.net'],
 }
 
@@ -187,6 +188,23 @@ describe('decideAcl private allowlists', () => {
       allowed: false,
       reason: 'email-not-allowlisted',
       resolvedVisibility: 'private',
+    })
+  })
+})
+
+describe('decideAcl password material', () => {
+  test('denies basic-auth viewers when password visibility has no hash', () => {
+    expect(
+      decideAcl(
+        viewers.passwordVerified,
+        { ...pageBase, visibility: 'password', passwordHash: null },
+        collection,
+        config,
+      ),
+    ).toEqual({
+      allowed: false,
+      reason: 'password-invalid',
+      resolvedVisibility: 'password',
     })
   })
 })

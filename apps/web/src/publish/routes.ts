@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 import {
+  COLLECTION_DEFAULT_VISIBILITIES,
   PAGE_VISIBILITIES,
   SlugValidationError,
   decideAcl,
@@ -18,6 +19,7 @@ import { archiveBlob, installBlob, removeTempBlob, writeTempBlob } from './stora
 import type {
   AclOperation,
   AuthenticatedViewer,
+  CollectionDefaultVisibility,
   CollectionSlug,
   FileSlug,
   PageVisibility,
@@ -124,6 +126,37 @@ function parseOptionalVisibilityPatch(value: unknown): PageVisibility | null | u
   return parseVisibility(value, 'visibility')
 }
 
+function parseCollectionDefaultVisibility(
+  value: string | null,
+  field: string,
+): CollectionDefaultVisibility | null {
+  if (value === null) {
+    return null
+  }
+  if ((COLLECTION_DEFAULT_VISIBILITIES as readonly string[]).includes(value)) {
+    return value as CollectionDefaultVisibility
+  }
+  throw new HttpError(
+    400,
+    `${field} must be one of ${COLLECTION_DEFAULT_VISIBILITIES.join(', ')}; password is page-explicit only`,
+  )
+}
+
+function parseOptionalCollectionDefaultVisibilityPatch(
+  value: unknown,
+): CollectionDefaultVisibility | null | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+  if (value === null) {
+    return null
+  }
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'defaultVisibility must be a string or null')
+  }
+  return parseCollectionDefaultVisibility(value, 'defaultVisibility')
+}
+
 function parseOptionalString(value: unknown, field: string): string | undefined {
   if (value === undefined) {
     return undefined
@@ -222,27 +255,37 @@ async function readHtmlBody(request: Request): Promise<Uint8Array> {
   return body
 }
 
-function pageAcl(row: Pick<PageRow, 'collectionSlug' | 'fileSlug' | 'visibility' | 'allowlist'>) {
+function pageAcl(
+  row: Pick<PageRow, 'collectionSlug' | 'fileSlug' | 'visibility' | 'passwordHash' | 'allowlist'>,
+) {
   return {
     collectionSlug: row.collectionSlug,
     fileSlug: row.fileSlug,
     visibility: row.visibility,
+    passwordHash: row.passwordHash,
     allowlist: row.allowlist,
   }
 }
 
 function collectionAcl(row: Pick<CollectionRow, 'slug' | 'ownerId' | 'defaultVisibility'>) {
+  const defaultVisibility = parseCollectionDefaultVisibility(
+    row.defaultVisibility,
+    'collection.defaultVisibility',
+  )
   return {
     slug: row.slug,
     ownerId: row.ownerId,
-    defaultVisibility: row.defaultVisibility,
+    defaultVisibility,
   }
 }
 
 function assertMutationAllowed(input: {
   readonly user: AuthenticatedViewer
   readonly collection: Pick<CollectionRow, 'slug' | 'ownerId' | 'defaultVisibility'>
-  readonly page: Pick<PageRow, 'collectionSlug' | 'fileSlug' | 'visibility' | 'allowlist'>
+  readonly page: Pick<
+    PageRow,
+    'collectionSlug' | 'fileSlug' | 'visibility' | 'passwordHash' | 'allowlist'
+  >
   readonly operation: AclOperation
 }): void {
   const decision = decideAcl(input.user, pageAcl(input.page), collectionAcl(input.collection), {
@@ -256,7 +299,7 @@ function assertMutationAllowed(input: {
 
 function resolvedVisibility(
   pageVisibility: PageVisibility | null | undefined,
-  collectionVisibility: PageVisibility | null | undefined,
+  collectionVisibility: CollectionDefaultVisibility | null | undefined,
 ): PageVisibility {
   return pageVisibility ?? collectionVisibility ?? 'default'
 }
@@ -345,8 +388,12 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
         collectionSlug: route.collectionSlug,
         fileSlug: route.fileSlug,
         visibility: requestedVisibility ?? null,
+        passwordHash: null,
         allowlist: requestedAllowlist ?? [],
-      } satisfies Pick<PageRow, 'collectionSlug' | 'fileSlug' | 'visibility' | 'allowlist'>),
+      } satisfies Pick<
+        PageRow,
+        'collectionSlug' | 'fileSlug' | 'visibility' | 'passwordHash' | 'allowlist'
+      >),
     operation:
       existingPage && !existingPage.archivedAt ? { kind: 'overwrite' } : { kind: 'publish' },
   })
@@ -362,6 +409,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
     body,
   )
   let rollbackBlob: (() => Promise<void>) | undefined
+  let commitBlob: (() => Promise<void>) | undefined
   let tempInstalled = false
 
   try {
@@ -403,8 +451,12 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
             collectionSlug: route.collectionSlug,
             fileSlug: route.fileSlug,
             visibility: requestedVisibility ?? null,
+            passwordHash: null,
             allowlist: requestedAllowlist ?? [],
-          } satisfies Pick<PageRow, 'collectionSlug' | 'fileSlug' | 'visibility' | 'allowlist'>),
+          } satisfies Pick<
+            PageRow,
+            'collectionSlug' | 'fileSlug' | 'visibility' | 'passwordHash' | 'allowlist'
+          >),
         operation: { kind: action },
       })
 
@@ -426,6 +478,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
       )
       tempInstalled = true
       rollbackBlob = blob.rollback
+      commitBlob = blob.commit
 
       const pageValues = {
         id: txPage?.id ?? randomUUID(),
@@ -473,11 +526,16 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
         collectionSlug: route.collectionSlug,
         fileSlug: route.fileSlug,
         title,
-        visibility: resolvedVisibility(visibility, txCollection.defaultVisibility),
+        visibility: resolvedVisibility(visibility, collectionAcl(txCollection).defaultVisibility),
         ...(generatedPassword ? { password: generatedPassword } : {}),
       })
     })
+    const cleanupBlob = commitBlob
     rollbackBlob = undefined
+    commitBlob = undefined
+    if (cleanupBlob) {
+      await cleanupBlob()
+    }
     return json(result)
   } catch (error) {
     if (rollbackBlob) {
@@ -565,7 +623,7 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
       title: title ?? existingPage.title,
       visibility: resolvedVisibility(
         visibility === undefined ? existingPage.visibility : visibility,
-        existingCollection.defaultVisibility,
+        collectionAcl(existingCollection).defaultVisibility,
       ),
       ...(password ? { password } : {}),
     })
@@ -713,7 +771,7 @@ export async function collectionsIndexEndpoint(request: Request): Promise<Respon
       collections: [...collections.values()].map((row) => ({
         slug: row.slug,
         title: row.title,
-        defaultVisibility: row.defaultVisibility,
+        defaultVisibility: collectionAcl(row).defaultVisibility,
       })),
     })
   } catch (error) {
@@ -747,6 +805,7 @@ async function listCollectionPages(
   if (!existingCollection) {
     throw new HttpError(404, 'collection not found')
   }
+  const existingCollectionDefault = collectionAcl(existingCollection).defaultVisibility
 
   const rows = await db.query.page.findMany({
     where: and(eq(page.collectionSlug, collectionSlug), isNull(page.archivedAt)),
@@ -765,7 +824,7 @@ async function listCollectionPages(
         collection: row.collectionSlug,
         file: row.fileSlug,
         title: row.title,
-        visibility: resolvedVisibility(row.visibility, existingCollection.defaultVisibility),
+        visibility: resolvedVisibility(row.visibility, existingCollectionDefault),
         contentHash: row.contentHash,
         updatedAt: row.updatedAt.toISOString(),
       })),
@@ -784,7 +843,7 @@ async function patchCollection(
     throw new HttpError(400, 'request body must be a JSON object')
   }
   const input = body as Record<string, unknown>
-  const defaultVisibility = parseOptionalVisibilityPatch(input.defaultVisibility)
+  const defaultVisibility = parseOptionalCollectionDefaultVisibilityPatch(input.defaultVisibility)
   if (defaultVisibility === null) {
     throw new HttpError(400, 'defaultVisibility cannot be null')
   }
@@ -799,13 +858,15 @@ async function patchCollection(
   if (!existingCollection) {
     throw new HttpError(404, 'collection not found')
   }
+  const existingCollectionDefault = collectionAcl(existingCollection).defaultVisibility
   assertMutationAllowed({
     user: viewer,
     collection: existingCollection,
     page: {
       collectionSlug,
       fileSlug: 'index.html',
-      visibility: defaultVisibility ?? existingCollection.defaultVisibility,
+      visibility: defaultVisibility ?? existingCollectionDefault,
+      passwordHash: null,
       allowlist: [],
     },
     operation: { kind: 'change-visibility' },
@@ -831,7 +892,7 @@ async function patchCollection(
     collection: {
       slug: collectionSlug,
       title: title === undefined ? existingCollection.title : title,
-      defaultVisibility: defaultVisibility ?? existingCollection.defaultVisibility,
+      defaultVisibility: defaultVisibility ?? existingCollectionDefault,
     },
   })
 }

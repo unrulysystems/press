@@ -1,14 +1,16 @@
 import { describe, expect, test } from 'bun:test'
 import { decideAcl } from '@press/core'
-import type { CollectionAcl, PageAcl } from '@press/core'
+import type { CollectionAcl, CollectionDefaultVisibility, PageAcl } from '@press/core'
 import type { InferSelectModel } from 'drizzle-orm'
 
 import { collection, page } from './schema'
 
-type CollectionAclRow = Pick<
-  InferSelectModel<typeof collection>,
-  'slug' | 'ownerId' | 'defaultVisibility'
->
+type CollectionAclRow = Omit<
+  Pick<InferSelectModel<typeof collection>, 'slug' | 'ownerId' | 'defaultVisibility'>,
+  'defaultVisibility'
+> & {
+  readonly defaultVisibility: CollectionDefaultVisibility
+}
 type PageAclRow = Pick<
   InferSelectModel<typeof page>,
   'collectionSlug' | 'fileSlug' | 'visibility' | 'allowlist'

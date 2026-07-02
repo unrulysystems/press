@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import type { CollectionSlug, FileSlug } from '@press/core'
 
 type BlobInstall = {
+  readonly commit: () => Promise<void>
   readonly rollback: () => Promise<void>
 }
 
@@ -99,6 +100,13 @@ export async function installBlob(
   await fsyncDir(directory)
 
   return {
+    async commit() {
+      if (!hadExisting) {
+        return
+      }
+      await unlink(rollbackPath)
+      await fsyncDir(directory)
+    },
     async rollback() {
       await rm(targetPath, { force: true })
       if (hadExisting) {
@@ -127,6 +135,7 @@ export async function archiveBlob(
   await fsyncDir(dirname(targetPath))
 
   return {
+    async commit() {},
     async rollback() {
       if (await exists(targetPath)) {
         await rename(targetPath, sourcePath)
