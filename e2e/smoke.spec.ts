@@ -8,6 +8,9 @@ const colorSchemes = ['light', 'dark'] as const
 const allowedFontFamilies = new Set(Object.values(designTokens.fontFamilies))
 const allowedFontSizes = new Set(Object.values(designTokens.typeScale))
 const allowedSpacing = new Set(Object.values(designTokens.spacingScale))
+const designScopeSelector = '[data-design-scope]'
+const designSampleSelector = `${designScopeSelector} *`
+const feedEntrySelector = '[data-feed-entry]'
 
 async function collectRequests(page: Page, run: () => Promise<void>): Promise<Request[]> {
   const requests: Request[] = []
@@ -16,6 +19,12 @@ async function collectRequests(page: Page, run: () => Promise<void>): Promise<Re
   })
   await run()
   return requests
+}
+
+async function gotoHome(page: Page): Promise<void> {
+  await page.goto('/')
+  await page.locator(designScopeSelector).waitFor()
+  await page.locator(designSampleSelector).first().waitFor()
 }
 
 function pixelValue(raw: string): number {
@@ -42,7 +51,7 @@ for (const colorScheme of colorSchemes) {
     for (const width of widths) {
       test(`has no horizontal scroll at ${width}px`, async ({ page }) => {
         await page.setViewportSize({ width, height: 900 })
-        await page.goto('/')
+        await gotoHome(page)
 
         const dimensions = await page.evaluate(() => ({
           body: document.body.scrollWidth,
@@ -57,7 +66,7 @@ for (const colorScheme of colorSchemes) {
     }
 
     test('passes automated accessibility and contrast checks', async ({ page }) => {
-      await page.goto('/')
+      await gotoHome(page)
 
       const results = await new AxeBuilder({ page }).analyze()
       expect(results.violations).toEqual([])
@@ -66,7 +75,7 @@ for (const colorScheme of colorSchemes) {
     test('makes no third-party requests', async ({ page, baseURL }) => {
       const origin = new URL(baseURL ?? page.url()).origin
       const requests = await collectRequests(page, async () => {
-        await page.goto('/')
+        await gotoHome(page)
       })
 
       const foreignRequests = requests
@@ -92,7 +101,7 @@ for (const colorScheme of colorSchemes) {
         }).observe({ type: 'layout-shift', buffered: true })
       })
 
-      await page.goto('/')
+      await gotoHome(page)
       await page.getByRole('heading', { name: /publishing home/i }).waitFor()
 
       const cls = await page.evaluate(
@@ -102,10 +111,11 @@ for (const colorScheme of colorSchemes) {
     })
 
     test('uses only configured typefaces', async ({ page }) => {
-      await page.goto('/')
+      await gotoHome(page)
+      await page.evaluate(() => document.fonts.ready)
 
       const families = await page
-        .locator('[data-design-scope] *')
+        .locator(designSampleSelector)
         .evaluateAll((nodes) =>
           nodes
             .map((node) =>
@@ -114,42 +124,53 @@ for (const colorScheme of colorSchemes) {
             .filter((family): family is string => Boolean(family)),
         )
 
+      expect(families, 'typeface floor sampled no rendered design-scope nodes').not.toHaveLength(0)
       expect(new Set(families)).toEqual(allowedFontFamilies)
     })
 
     test('uses only configured type-scale sizes', async ({ page }) => {
-      await page.goto('/')
+      await gotoHome(page)
 
       const sizes = await page
-        .locator('[data-design-scope] *')
+        .locator(designSampleSelector)
         .evaluateAll((nodes) =>
           nodes.map((node) => Number.parseFloat(getComputedStyle(node).fontSize)),
         )
+      const roundedSizes = sizes.map(Math.round)
 
-      expect(new Set(sizes.map(Math.round))).toEqual(
-        new Set(sizes.map(Math.round).filter((size) => allowedFontSizes.has(size))),
+      expect(
+        roundedSizes,
+        'type-scale floor sampled no rendered design-scope nodes',
+      ).not.toHaveLength(0)
+      expect(new Set(roundedSizes)).toEqual(
+        new Set(roundedSizes.filter((size) => allowedFontSizes.has(size))),
       )
     })
 
     test('uses spacing scale for feed entries', async ({ page }) => {
-      await page.goto('/')
+      await gotoHome(page)
 
-      const spacing = await page.locator('[data-feed-entry]').evaluateAll((nodes) =>
-        nodes.flatMap((node) => {
-          const style = getComputedStyle(node)
-          return [
-            style.paddingTop,
-            style.paddingRight,
-            style.paddingBottom,
-            style.paddingLeft,
-            style.marginTop,
-            style.marginRight,
-            style.marginBottom,
-            style.marginLeft,
-          ]
-        }),
-      )
+      const { entryCount, spacing } = await page
+        .locator(feedEntrySelector)
+        .evaluateAll((nodes) => ({
+          entryCount: nodes.length,
+          spacing: nodes.flatMap((node) => {
+            const style = getComputedStyle(node)
+            return [
+              style.paddingTop,
+              style.paddingRight,
+              style.paddingBottom,
+              style.paddingLeft,
+              style.marginTop,
+              style.marginRight,
+              style.marginBottom,
+              style.marginLeft,
+            ]
+          }),
+        }))
 
+      expect(entryCount, 'spacing floor sampled no rendered feed-entry nodes').toBeGreaterThan(0)
+      expect(spacing, 'spacing floor sampled no spacing values').not.toHaveLength(0)
       expect(spacing.map(pixelValue).every((value) => allowedSpacing.has(value))).toBe(true)
     })
   })
