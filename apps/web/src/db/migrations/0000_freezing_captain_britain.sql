@@ -50,7 +50,7 @@ CREATE TABLE "page" (
 	"collectionSlug" text NOT NULL,
 	"fileSlug" text NOT NULL,
 	"title" text NOT NULL,
-	"visibility" "page_visibility" DEFAULT 'default' NOT NULL,
+	"visibility" "page_visibility",
 	"passwordHash" text,
 	"allowlist" text[] DEFAULT ARRAY[]::text[] NOT NULL,
 	"contentHash" text NOT NULL,

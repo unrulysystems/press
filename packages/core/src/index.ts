@@ -32,13 +32,13 @@ export type AclOperation =
 export type CollectionAcl = {
   readonly slug: string
   readonly ownerId: string
-  readonly defaultVisibility?: PageVisibility
+  readonly defaultVisibility?: PageVisibility | null
 }
 
 export type PageAcl = {
   readonly collectionSlug: string
   readonly fileSlug: string
-  readonly visibility?: PageVisibility
+  readonly visibility?: PageVisibility | null
   readonly allowlist: readonly string[]
 }
 

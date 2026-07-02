@@ -431,8 +431,7 @@
           "type": "page_visibility",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true,
-          "default": "'default'"
+          "notNull": false
         },
         "passwordHash": {
           "name": "passwordHash",

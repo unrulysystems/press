@@ -131,7 +131,7 @@ export const page = pgTable(
       .references(() => collection.slug, { onDelete: 'cascade' }),
     fileSlug: text('fileSlug').notNull(),
     title: text('title').notNull(),
-    visibility: pageVisibility('visibility').notNull().default('default'),
+    visibility: pageVisibility('visibility'),
     passwordHash: text('passwordHash'),
     allowlist: text('allowlist')
       .array()
