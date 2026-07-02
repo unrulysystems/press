@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "build": "one build --platform=web",
+    "db:generate": "node node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.ts",
+    "db:migrate": "nub src/db/migrate.ts",
+    "db:seed": "nub src/auth/seedLocalnet.ts",
     "dev": "one dev --host 127.0.0.1 --port ${PRESS_PORT:-4174}"
   },
   "dependencies": {
@@ -13,7 +16,10 @@
     "@press/core": "workspace:*",
     "@tamagui/config": "2.3.1",
     "@tamagui/vite-plugin": "2.3.1",
+    "better-auth": "^1.6.23",
+    "drizzle-orm": "^0.45.2",
     "one": "1.19.4",
+    "pg": "^8.22.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-native": "0.83.2",

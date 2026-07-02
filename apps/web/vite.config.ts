@@ -14,6 +14,7 @@ export default {
     ],
   },
   ssr: {
+    external: ['@opentelemetry/semantic-conventions'],
     noExternal: true,
   },
   plugins: [

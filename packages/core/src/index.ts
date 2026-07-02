@@ -2,6 +2,188 @@ export const VERSION = '0.0.0'
 
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 
+export const PAGE_VISIBILITIES = ['default', 'public', 'password', 'private'] as const
+
+export type PageVisibility = (typeof PAGE_VISIBILITIES)[number]
+
+export type UserRole = 'user' | 'admin'
+
+export type AuthenticatedViewer = {
+  readonly kind: 'authenticated'
+  readonly userId: string
+  readonly email: string
+  readonly role: UserRole
+}
+
+export type AclViewer =
+  | { readonly kind: 'anonymous' }
+  | { readonly kind: 'basic-password'; readonly verified: boolean }
+  | AuthenticatedViewer
+
+export type AclOperation =
+  | { readonly kind: 'read' }
+  | { readonly kind: 'publish' }
+  | { readonly kind: 'overwrite' }
+  | { readonly kind: 'unpublish' }
+  | { readonly kind: 'change-visibility' }
+  | { readonly kind: 'change-allowlist' }
+  | { readonly kind: 'change-password' }
+
+export type CollectionAcl = {
+  readonly slug: string
+  readonly ownerId: string
+  readonly defaultVisibility?: PageVisibility
+}
+
+export type PageAcl = {
+  readonly collectionSlug: string
+  readonly fileSlug: string
+  readonly visibility?: PageVisibility
+  readonly allowlist: readonly string[]
+}
+
+export type AclConfig = {
+  readonly allowedDomains: readonly string[]
+  readonly operation?: AclOperation
+}
+
+export type AclDenyReason =
+  | 'authentication-required'
+  | 'domain-not-allowed'
+  | 'email-not-allowlisted'
+  | 'password-required'
+  | 'password-invalid'
+  | 'owner-required'
+
+export type AclDecision =
+  | { readonly allowed: true; readonly resolvedVisibility: PageVisibility }
+  | {
+      readonly allowed: false
+      readonly reason: AclDenyReason
+      readonly resolvedVisibility: PageVisibility
+    }
+
+function allow(resolvedVisibility: PageVisibility): AclDecision {
+  return { allowed: true, resolvedVisibility }
+}
+
+function deny(reason: AclDenyReason, resolvedVisibility: PageVisibility): AclDecision {
+  return { allowed: false, reason, resolvedVisibility }
+}
+
+function normalizeEmail(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function emailDomain(email: string): string {
+  const domain = normalizeEmail(email).split('@').at(1)
+  return domain ?? ''
+}
+
+function isAuthenticated(viewer: AclViewer): viewer is AuthenticatedViewer {
+  return viewer.kind === 'authenticated'
+}
+
+function ownsCollection(viewer: AclViewer, collection: CollectionAcl): boolean {
+  return isAuthenticated(viewer) && viewer.userId === collection.ownerId
+}
+
+function isAdmin(viewer: AclViewer): boolean {
+  return isAuthenticated(viewer) && viewer.role === 'admin'
+}
+
+function isOwnerOrAdmin(viewer: AclViewer, collection: CollectionAcl): boolean {
+  return ownsCollection(viewer, collection) || isAdmin(viewer)
+}
+
+function resolveVisibility(page: PageAcl, collection: CollectionAcl): PageVisibility {
+  return page.visibility ?? collection.defaultVisibility ?? 'default'
+}
+
+function decideReadAcl(
+  viewer: AclViewer,
+  page: PageAcl,
+  collection: CollectionAcl,
+  config: AclConfig,
+  resolvedVisibility: PageVisibility,
+): AclDecision {
+  switch (resolvedVisibility) {
+    case 'public':
+      return allow(resolvedVisibility)
+    case 'default': {
+      if (!isAuthenticated(viewer)) {
+        return deny('authentication-required', resolvedVisibility)
+      }
+      if (isOwnerOrAdmin(viewer, collection)) {
+        return allow(resolvedVisibility)
+      }
+      const allowedDomains = new Set(config.allowedDomains.map((domain) => domain.toLowerCase()))
+      return allowedDomains.has(emailDomain(viewer.email))
+        ? allow(resolvedVisibility)
+        : deny('domain-not-allowed', resolvedVisibility)
+    }
+    case 'private': {
+      if (!isAuthenticated(viewer)) {
+        return deny('authentication-required', resolvedVisibility)
+      }
+      if (isOwnerOrAdmin(viewer, collection)) {
+        return allow(resolvedVisibility)
+      }
+      const allowlist = new Set(page.allowlist.map(normalizeEmail))
+      return allowlist.has(normalizeEmail(viewer.email))
+        ? allow(resolvedVisibility)
+        : deny('email-not-allowlisted', resolvedVisibility)
+    }
+    case 'password':
+      if (isOwnerOrAdmin(viewer, collection)) {
+        return allow(resolvedVisibility)
+      }
+      if (viewer.kind !== 'basic-password') {
+        return deny('password-required', resolvedVisibility)
+      }
+      return viewer.verified
+        ? allow(resolvedVisibility)
+        : deny('password-invalid', resolvedVisibility)
+    default: {
+      const exhaustive: never = resolvedVisibility
+      throw new Error(`unhandled visibility: ${exhaustive}`)
+    }
+  }
+}
+
+function decideMutationAcl(
+  viewer: AclViewer,
+  collection: CollectionAcl,
+  operation: Exclude<AclOperation, { readonly kind: 'read' }>,
+  resolvedVisibility: PageVisibility,
+): AclDecision {
+  if (!isAuthenticated(viewer)) {
+    return deny('authentication-required', resolvedVisibility)
+  }
+  if (ownsCollection(viewer, collection)) {
+    return allow(resolvedVisibility)
+  }
+  if (operation.kind === 'unpublish' && isAdmin(viewer)) {
+    return allow(resolvedVisibility)
+  }
+  return deny('owner-required', resolvedVisibility)
+}
+
+export function decideAcl(
+  viewer: AclViewer,
+  page: PageAcl,
+  collection: CollectionAcl,
+  config: AclConfig,
+): AclDecision {
+  const resolvedVisibility = resolveVisibility(page, collection)
+  const operation = config.operation ?? { kind: 'read' }
+
+  if (operation.kind === 'read') {
+    return decideReadAcl(viewer, page, collection, config, resolvedVisibility)
+  }
+  return decideMutationAcl(viewer, collection, operation, resolvedVisibility)
+}
+
 export type PressConfig = {
   readonly nodeEnv: string
   readonly baseUrl: string

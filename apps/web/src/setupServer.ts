@@ -1,3 +1,3 @@
-import { parseConfig } from '@press/core'
+import { loadServerConfig } from './server/config'
 
-parseConfig(process.env)
+loadServerConfig(process.env)

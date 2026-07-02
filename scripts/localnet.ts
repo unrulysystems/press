@@ -103,6 +103,8 @@ async function main(): Promise<void> {
       ['compose', '-f', composeFile, '-p', projectName, 'up', '-d', '--wait', 'postgres'],
       env,
     )
+    await run('nub', ['run', '--filter', '@press/web', 'db:migrate'], env)
+    await run('nub', ['run', '--filter', '@press/web', 'db:seed'], env)
 
     // One's dev server keeps localnet fast enough for the design loop. The
     // e2e floors still exercise the real apps/web app over HTTP from scratch.
