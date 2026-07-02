@@ -104,7 +104,9 @@ async function main(): Promise<void> {
       env,
     )
 
-    server = spawn('bun', ['scripts/dev-server.ts'], {
+    // One's dev server keeps localnet fast enough for the design loop. The
+    // e2e floors still exercise the real apps/web app over HTTP from scratch.
+    server = spawn('nub', ['run', '--filter', '@press/web', 'dev'], {
       cwd: root,
       env: { ...env, PRESS_PARENT_PID: `${process.pid}` },
       stdio: 'inherit',

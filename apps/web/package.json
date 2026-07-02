@@ -1,0 +1,23 @@
+{
+  "name": "@press/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "one build --platform=web",
+    "dev": "one dev --host 127.0.0.1 --port ${PRESS_PORT:-4174}"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/newsreader": "^5.2.8",
+    "@press/core": "workspace:*",
+    "@tamagui/config": "2.3.1",
+    "@tamagui/vite-plugin": "2.3.1",
+    "one": "1.19.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "react-native": "0.83.2",
+    "tamagui": "2.3.1",
+    "vite": "8.0.3"
+  }
+}

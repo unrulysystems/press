@@ -26,7 +26,8 @@
 
     "paths": {
       "@press/core": ["./packages/core/src"],
-      "@press/utils": ["./packages/utils/src"]
+      "@press/utils": ["./packages/utils/src"],
+      "@press/web/*": ["./apps/web/src/*"]
     },
 
     "noEmit": true

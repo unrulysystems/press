@@ -9,7 +9,7 @@
       "path": "./packages/utils"
     },
     {
-      "path": "./apps/example"
+      "path": "./apps/web"
     }
   ]
 }
