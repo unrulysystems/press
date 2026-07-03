@@ -28,8 +28,13 @@ export const spacingScale = {
   9: 96,
 } as const
 
+export const measureScale = {
+  page: 1120,
+} as const
+
 export const designTokens = {
   fontFamilies,
+  measureScale,
   typeScale,
   spacingScale,
 } as const

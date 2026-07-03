@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright'
-import { expect, test, type Page, type Request } from '@playwright/test'
+import { expect, test, type Locator, type Page, type Request } from '@playwright/test'
 
+import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { designTokens } from '../apps/web/src/design/tokens'
 
 const widths = [360, 768, 1280, 1920] as const
@@ -11,6 +12,8 @@ const allowedSpacing = new Set(Object.values(designTokens.spacingScale))
 const designScopeSelector = '[data-design-scope]'
 const designSampleSelector = `${designScopeSelector} *`
 const spacingSampleSelector = '[data-spacing-sample]'
+const shellSelector = `${designScopeSelector} > .press-shell`
+const passwordTitle = 'Checkout Cohort Notes'
 const floorRoutes = [
   { path: '/', label: 'feed' },
   { path: '/c/market-notes', label: 'collection' },
@@ -32,12 +35,41 @@ async function gotoDesignRoute(page: Page, path: string): Promise<void> {
   await page.locator(designSampleSelector).first().waitFor()
 }
 
+async function signIn(page: Page): Promise<void> {
+  await page.goto('/login?next=/')
+  await page.getByLabel('Email').fill(localnetUsers.secondUser.email)
+  await page.getByLabel('Password').fill(localnetUsers.secondUser.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
+}
+
 function pixelValue(raw: string): number {
   const value = Number.parseFloat(raw)
   if (!Number.isFinite(value)) {
     throw new Error(`expected CSS pixel value, received "${raw}"`)
   }
   return Math.round(value)
+}
+
+async function titleLink(page: Page, title: string): Promise<Locator> {
+  const article = page.getByRole('article').filter({ hasText: title })
+  await expect(article, `article missing for title "${title}"`).toHaveCount(1)
+  return article.getByRole('link').filter({ has: page.getByRole('heading', { name: title }) })
+}
+
+async function titleStyle(page: Page, title: string) {
+  const article = page.getByRole('article').filter({ hasText: title })
+  await expect(article, `article missing for title "${title}"`).toHaveCount(1)
+  return await article.getByRole('heading', { name: title }).evaluate((node) => {
+    const style = getComputedStyle(node)
+    return {
+      color: style.color,
+      fontFamily: style.fontFamily.split(',')[0]?.replaceAll('"', '').trim(),
+      fontWeight: style.fontWeight,
+      textDecorationColor: style.textDecorationColor,
+      textDecorationLine: style.textDecorationLine,
+    }
+  })
 }
 
 test('localnet serves the press feed shell', async ({ page }) => {
@@ -52,6 +84,49 @@ test('localnet serves the press feed shell', async ({ page }) => {
 for (const colorScheme of colorSchemes) {
   test.describe(`design floors in ${colorScheme} mode`, () => {
     test.use({ colorScheme })
+
+    test('feed, collection, and login share the same page measure at 1280px', async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 })
+
+      const measures = []
+      for (const route of floorRoutes) {
+        // oxlint-disable-next-line no-await-in-loop -- One page navigates route-by-route so margin evidence is comparable.
+        await gotoDesignRoute(page, route.path)
+        // oxlint-disable-next-line no-await-in-loop -- Assertion belongs to the current route's document.
+        await expect(page.locator(shellSelector)).toHaveCount(1)
+
+        measures.push(
+          // oxlint-disable-next-line no-await-in-loop -- Layout sampling must observe the route currently loaded above.
+          await page.locator(shellSelector).evaluate((node, label) => {
+            const rect = node.getBoundingClientRect()
+            const style = getComputedStyle(node)
+            return {
+              label,
+              left: Math.round(rect.left),
+              marginLeft: Math.round(Number.parseFloat(style.marginLeft)),
+              marginRight: Math.round(Number.parseFloat(style.marginRight)),
+              maxWidth: Math.round(Number.parseFloat(style.maxWidth)),
+              right: Math.round(window.innerWidth - rect.right),
+              width: Math.round(rect.width),
+            }
+          }, route.label),
+        )
+      }
+
+      expect(measures, 'page-measure floor sampled no design shells').toHaveLength(
+        floorRoutes.length,
+      )
+      expect(new Set(measures.map((measure) => measure.maxWidth))).toEqual(
+        new Set([designTokens.measureScale.page]),
+      )
+      expect(new Set(measures.map((measure) => measure.width))).toEqual(
+        new Set([designTokens.measureScale.page]),
+      )
+      expect(new Set(measures.map((measure) => measure.marginLeft))).toHaveSize(1)
+      expect(new Set(measures.map((measure) => measure.marginRight))).toHaveSize(1)
+      expect(new Set(measures.map((measure) => measure.left))).toHaveSize(1)
+      expect(new Set(measures.map((measure) => measure.right))).toHaveSize(1)
+    })
 
     for (const width of widths) {
       for (const route of floorRoutes) {
@@ -158,6 +233,120 @@ for (const colorScheme of colorSchemes) {
         () => (window as unknown as { pressLayoutShiftScore: number }).pressLayoutShiftScore,
       )
       expect(cls).toBeLessThan(0.1)
+    })
+
+    test('locked entry title treatment is identical across feed and collection states', async ({
+      page,
+    }) => {
+      await signIn(page)
+
+      await gotoDesignRoute(page, '/')
+      const feedDefault = await titleStyle(page, passwordTitle)
+      const feedLink = await titleLink(page, passwordTitle)
+      await feedLink.hover()
+      const feedHover = await titleStyle(page, passwordTitle)
+      await page.mouse.move(0, 0)
+      await feedLink.focus()
+      const feedFocus = await titleStyle(page, passwordTitle)
+
+      await gotoDesignRoute(page, '/c/market-notes')
+      const collectionDefault = await titleStyle(page, passwordTitle)
+      const collectionLink = await titleLink(page, passwordTitle)
+      await collectionLink.hover()
+      const collectionHover = await titleStyle(page, passwordTitle)
+      await page.mouse.move(0, 0)
+      await collectionLink.focus()
+      const collectionFocus = await titleStyle(page, passwordTitle)
+
+      expect(collectionDefault).toEqual(feedDefault)
+      expect(collectionHover).toEqual(feedHover)
+      expect(collectionFocus).toEqual(feedFocus)
+      expect(feedDefault.color).toBe(feedHover.color)
+      expect(feedDefault.color).toBe(feedFocus.color)
+      expect(collectionDefault.color).toBe(collectionHover.color)
+      expect(collectionDefault.color).toBe(collectionFocus.color)
+      expect(feedHover.textDecorationLine).toContain('underline')
+      expect(collectionHover.textDecorationLine).toContain('underline')
+    })
+
+    test('locked entry affordance and muted metadata keep AA contrast', async ({ page }) => {
+      await signIn(page)
+
+      const samples = []
+      for (const route of ['/', '/c/market-notes'] as const) {
+        // oxlint-disable-next-line no-await-in-loop -- The contrast sample is bound to each navigated route.
+        await gotoDesignRoute(page, route)
+        // oxlint-disable-next-line no-await-in-loop -- This verifies the route rendered a locked listing before sampling.
+        await expect(page.locator('.press-lock')).not.toHaveCount(0)
+        samples.push(
+          // oxlint-disable-next-line no-await-in-loop -- Browser-context contrast evidence is route-local.
+          ...(await page.evaluate(() => {
+            // oxlint-disable-next-line unicorn/consistent-function-scoping -- Browser-context helper for page.evaluate.
+            function parseRgb(raw: string): readonly [number, number, number, number] {
+              const channels = raw.match(/[\d.]+/g)?.map(Number) ?? []
+              if (channels.length < 3) {
+                throw new Error(`expected rgb color, received "${raw}"`)
+              }
+              return [channels[0] ?? 0, channels[1] ?? 0, channels[2] ?? 0, channels[3] ?? 1]
+            }
+
+            // oxlint-disable-next-line unicorn/consistent-function-scoping -- Browser-context helper for page.evaluate.
+            function relativeLuminance([red, green, blue]: readonly number[]): number {
+              const [r, g, b] = [red, green, blue].map((channel) => {
+                const normalized = channel / 255
+                return normalized <= 0.03928
+                  ? normalized / 12.92
+                  : ((normalized + 0.055) / 1.055) ** 2.4
+              })
+              return 0.2126 * (r ?? 0) + 0.7152 * (g ?? 0) + 0.0722 * (b ?? 0)
+            }
+
+            function contrastRatio(foreground: string, background: string): number {
+              const foregroundLuminance = relativeLuminance(parseRgb(foreground))
+              const backgroundLuminance = relativeLuminance(parseRgb(background))
+              const lighter = Math.max(foregroundLuminance, backgroundLuminance)
+              const darker = Math.min(foregroundLuminance, backgroundLuminance)
+              return (lighter + 0.05) / (darker + 0.05)
+            }
+
+            function opaqueBackground(node: Element): string {
+              let current: Element | null = node
+              while (current) {
+                const background = getComputedStyle(current).backgroundColor
+                if (parseRgb(background)[3] !== 0) {
+                  return background
+                }
+                current = current.parentElement
+              }
+              return getComputedStyle(document.body).backgroundColor
+            }
+
+            return ['.press-lock', '.press-entry-meta', '.press-meta', '.press-kicker']
+              .flatMap((selector) =>
+                [...document.querySelectorAll(selector)].map((node) => {
+                  const style = getComputedStyle(node)
+                  const background = opaqueBackground(node)
+                  return {
+                    ratio: contrastRatio(style.color, background),
+                    route: window.location.pathname,
+                    selector,
+                    text: node.textContent?.trim() ?? '',
+                  }
+                }),
+              )
+              .filter((sample) => sample.text.length > 0)
+          })),
+        )
+      }
+
+      expect(samples, 'contrast floor sampled no locked or metadata text').not.toHaveLength(0)
+      expect(samples.some((sample) => sample.selector === '.press-lock')).toBe(true)
+      for (const sample of samples) {
+        expect(
+          sample.ratio,
+          `${sample.selector} on ${sample.route} failed AA contrast for "${sample.text}"`,
+        ).toBeGreaterThanOrEqual(4.5)
+      }
     })
 
     for (const route of floorRoutes) {
