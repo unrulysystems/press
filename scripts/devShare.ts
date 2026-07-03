@@ -31,6 +31,9 @@ type SiloEnv = {
   readonly COMPOSE_PROJECT_NAME: string
   readonly DATABASE_URL: string
   readonly PRESS_BASE_URL: string
+  readonly PRESS_PORT: string
+  readonly PRESS_POSTGRES_PORT: string
+  readonly WORKSPACE_NAME: string
 }
 
 const localnetUserCards = [
@@ -83,6 +86,9 @@ async function readSiloEnv(): Promise<SiloEnv> {
     COMPOSE_PROJECT_NAME: required(parsed, 'COMPOSE_PROJECT_NAME'),
     DATABASE_URL: required(parsed, 'DATABASE_URL'),
     PRESS_BASE_URL: required(parsed, 'PRESS_BASE_URL'),
+    PRESS_PORT: required(parsed, 'PRESS_PORT'),
+    PRESS_POSTGRES_PORT: required(parsed, 'PRESS_POSTGRES_PORT'),
+    WORKSPACE_NAME: parsed.WORKSPACE_NAME ?? instanceName,
   }
 }
 
@@ -252,6 +258,8 @@ function makeDevShareEnv(siloEnv: SiloEnv): DevShareEnv {
     TILT_EDITOR: 'true',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
     PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
+    PRESS_STORAGE_DIR:
+      process.env.PRESS_STORAGE_DIR ?? `.press/silo/${siloEnv.WORKSPACE_NAME}/storage`,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? 'localnet-secret-at-least-32-bytes',
     PRESS_ENABLE_CREDENTIAL_AUTH: process.env.PRESS_ENABLE_CREDENTIAL_AUTH ?? '1',
     PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? `${25 * 1024 * 1024}`,
