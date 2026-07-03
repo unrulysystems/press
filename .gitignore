@@ -21,6 +21,9 @@ apps/*/src/*.d.ts
 .env.local
 .env.*.local
 .envrc.private
+.silo.env
+.silo.lock
+.silo/
 .dev/
 
 # IDE

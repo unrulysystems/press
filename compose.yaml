@@ -1,10 +1,10 @@
-name: press-localnet
+name: ${COMPOSE_PROJECT_NAME}
 
 services:
   postgres:
     image: postgres:17
     ports:
-      - '${PRESS_POSTGRES_PORT:-54329}:5432'
+      - '${PRESS_POSTGRES_PORT}:5432'
     environment:
       POSTGRES_DB: press
       POSTGRES_USER: press

@@ -1,0 +1,21 @@
+version = 1
+prefix = "press"
+output = ".silo.env"
+
+[k3d]
+enabled = false
+
+[hooks]
+post-down = ["sh tilt/compose-down-volumes.sh"]
+
+[ports]
+PRESS_PORT = 4174
+PRESS_POSTGRES_PORT = 54329
+TILT_PORT = "random"
+
+[hosts]
+APP_HOST = "${name}.localhost"
+
+[urls]
+DATABASE_URL = "postgres://press:press@127.0.0.1:${PRESS_POSTGRES_PORT}/press"
+PRESS_BASE_URL = "http://127.0.0.1:${PRESS_PORT}"
