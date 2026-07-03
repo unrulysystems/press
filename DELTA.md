@@ -1,5 +1,44 @@
 # press — DELTA
 
+## 2026-07-03 — silo/Tilt localnet clean break
+
+The localnet migration is complete. `silo.toml`, `Tiltfile`, `tilt/**`, and
+the parametrized `compose.yaml` now define the localnet, and every lifecycle
+consumer boots through named silo instances: `main` for shared local dev,
+`e2e` for Playwright, `drill` for backup/restore, and `oracle` for blind
+screenshot capture. The old bespoke orchestrator is deleted; `nub run localnet`
+now runs `TILT_EDITOR=true silo up main`, and `localnet:e2e` is gone because
+`scripts/e2e.ts` owns isolated e2e bring-up.
+
+The isolation guarantee is structural: each silo instance receives its own
+generated `.silo.env`, ports, storage path, and compose project
+(`press-main`, `press-e2e`, `press-drill`, `press-oracle`). That removes the
+fixed-project collision class that previously let an e2e teardown destroy the
+shared dev session's `press-localnet` Postgres container and volume.
+
+Driver-side verification evidence for the migration:
+
+- Phase 3: `nub run drill:backup-restore` printed `PASS backup/restore drill`
+  with `contentHash == blobHash`, ACL `public=200` /
+  `default-non-html=401`, DB-dump-first snapshot order, and 0 residual
+  containers. `nub run dev:share` smoke passed with seeded human sign-in plus
+  minted-token CLI publish; SIGINT cleanup ran `silo down --clean` to
+  completion with 0 residual containers/volumes and `.dev/agent.env` removed.
+- Phase 4 worker gate: `nub run check` passed after deleting the old
+  orchestrator, rewiring scripts, and migrating oracle screenshot capture to
+  the isolated `oracle` instance. Full Docker/Chromium executable proofs remain
+  driver-run because the Codex sandbox cannot execute them; that limitation is
+  recorded in `DEVIATIONS.md`.
+
+Boundary handoff for Allen:
+
+1. CI currently runs `nub run e2e`; that command now requires `silo` plus
+   Docker on the runner. Installing silo in `.github/workflows/ci.yml` is
+   infra and remains Allen's call.
+2. The review sandbox cannot run Docker/Chromium proofs; use the unsandboxed
+   driver as the execution gate for oracle screenshots, full e2e, and the
+   final isolation proof.
+
 ## 2026-07-03 — v1.3 loop wrap (upstream, dev-share, hardening, v0.1.0)
 
 The v1.3 loop is complete — all six phases done and independently reviewed.

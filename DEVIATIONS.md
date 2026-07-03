@@ -1,3 +1,34 @@
+## 2026-07-03 — silo/Tilt migration: sandbox cannot run executable proofs (driver is the execution gate)
+
+The silo + Tilt localnet migration (`silo.toml`, `Tiltfile`, `tilt/**`,
+`scripts/e2e.ts`, `scripts/devShare.ts`, `scripts/backupRestoreDrill.ts`,
+`scripts/capture-oracle-shots.ts`) depends on Docker and Chromium at verification
+time. The Codex worker/reviewer sandbox cannot execute either, so their in-sandbox
+failure is a documented environment limitation, **not** a code defect:
+
+- **Chromium** does not launch in the sandbox (macOS
+  `bootstrap_check_in ... Permission denied`), so the Playwright e2e suite cannot run
+  there.
+- **`docker compose`** (the Docker Desktop CLI plugin) is discovered under the real
+  user's `~/.docker/cli-plugins`; when the sandbox overrides `HOME`
+  (e.g. `HOME=/private/tmp`, needed so silo/Tilt can write) the plugin is not found
+  and `docker compose ...` fails with `docker: unknown command: docker compose` /
+  exit 125, while a normal-`HOME` `docker compose version` works. This blocks
+  `nub run e2e`, `nub run dev:share`, and `nub run drill:backup-restore` in the
+  sandbox only. On Linux CI the compose plugin is installed system-wide, so `HOME`
+  is irrelevant and these run normally.
+
+**Decision:** these executable proofs are run by the **driver in an unsandboxed,
+real-`HOME` environment** and are the authoritative execution gate for the migration.
+Codex structured review still gates the code; it must not reject solely on the
+sandbox's inability to execute docker/Chromium. Driver evidence for phase-3:
+`nub run drill:backup-restore` → `PASS backup/restore drill`, contentHash ==
+blobHash, ACL public=200 / default-non-html=401, DB-dump-first snapshot order, 0
+residual containers; `nub run dev:share` → smoke passes (seeded human sign-in +
+minted-token CLI publish), and SIGINT to `scripts/devShare.ts` runs
+`silo down --clean` to completion with 0 residual containers/volumes and
+`.dev/agent.env` removed.
+
 ## 2026-07-03 — security audit deferrals (Allen decisions)
 
 The whole-repo security ultra-audit (`uaudit-2026-07-03-ff6d8b`, `AUDIT.md`)

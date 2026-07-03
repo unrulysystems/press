@@ -12,10 +12,10 @@ Run:
 nub run dev:share
 ```
 
-This boots the normal localnet dev server, then prints the base URL, seeded
-users with their committed fixture passwords, seeded collections, and example
-page URLs. It also mints a fresh owner API token for agents and writes only the
-local file path to stdout.
+This boots the normal silo/Tilt localnet dev server, then prints the base URL,
+seeded users with their committed fixture passwords, seeded collections, and
+example page URLs. It also mints a fresh owner API token for agents and writes
+only the local file path to stdout.
 
 The agent environment lands at `.dev/agent.env` with `PRESS_TOKEN` and
 `PRESS_URL`. The token is not printed.

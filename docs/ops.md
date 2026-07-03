@@ -10,10 +10,11 @@
   `$PRESS_STORAGE_DIR/<collection>/<file>`.
 
 The executable proof for this procedure is `nub run drill:backup-restore`,
-implemented in `scripts/backupRestoreDrill.ts`. The drill boots a seeded
-localnet, records a page row, hashes the matching blob, probes ACL behavior,
-takes a backup, destroys Postgres volumes and storage, restores without
-re-seeding, and repeats the same checks.
+implemented in `scripts/backupRestoreDrill.ts`. The drill allocates an isolated
+silo instance, migrates and seeds it, records a page row, hashes the matching
+blob, probes ACL behavior, takes a backup, destroys Postgres volumes and
+storage, restores into an empty target without re-seeding, boots the server,
+and repeats the same checks.
 
 ### Required restore-target configuration
 
