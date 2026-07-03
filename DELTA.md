@@ -1,5 +1,16 @@
 # press — DELTA
 
+## 2026-07-03 — v1.2 loop wrap (CI completeness, keep-alive evidence)
+
+Status: the v1.2 loop is complete — both phases done and independently
+reviewed. CI now defines the full harness (check, test, e2e, build:web,
+smoke:image; verify-only, executes after Allen's push), and the last e2e
+harness divergence from real clients — the `Connection: close` API-context
+mitigation — is deleted on recorded keep-alive evidence. No deviations
+remain active in `DEVIATIONS.md`. The v1.2 plan (`loop.md`, commit
+`ca8d601`) was absorbed and deleted per its wrap prescription. The Boundary
+handoff list below is unchanged and remains Allen's.
+
 ## 2026-07-03 — v1.2 phase 0 CI gate completeness
 
 CI now runs the full local harness in order: `nub run check`, `nub run test`,
