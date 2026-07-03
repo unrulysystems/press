@@ -263,6 +263,9 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-CFG-002  | `packages/core/src/config.test.ts`, `apps/web/src/server/config.test.ts`, `e2e/publish.spec.ts`                                   |
 | REQ-AUTH-002 | `apps/web/src/server/config.test.ts`, `e2e/auth.spec.ts`, `e2e/publish.spec.ts`                                                   |
 | REQ-AUTH-003 | `e2e/auth.spec.ts`                                                                                                                |
+| REQ-AUTH-004 | `apps/web/src/auth/cliFlow.ts`, `e2e/cli.spec.ts`                                                                                 |
+| REQ-AUTH-005 | `apps/web/src/auth/apiTokens.ts`, `apps/web/src/auth/cliFlow.ts`, `e2e/cli.spec.ts`, `e2e/publish.spec.ts`                        |
+| REQ-AUTH-006 | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |
 | REQ-AUTH-007 | `apps/web/src/server/config.test.ts`, `e2e/auth.spec.ts`                                                                          |
 | REQ-ACL-001  | `packages/core/src/acl.test.ts`, `e2e/publish.spec.ts`                                                                            |
 | REQ-ACL-002  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
@@ -282,3 +285,7 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-SRV-001  | `e2e/publish.spec.ts`                                                                                                             |
 | REQ-SRV-002  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
 | REQ-SRV-003  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
+| REQ-CLI-001  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |
+| REQ-CLI-002  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |
+| REQ-CLI-003  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |
+| REQ-CLI-004  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |

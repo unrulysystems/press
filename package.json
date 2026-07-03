@@ -25,6 +25,7 @@
     "release": "nub run build && changeset publish"
   },
   "dependencies": {
+    "@press/cli": "workspace:*",
     "@press/core": "workspace:*"
   },
   "devDependencies": {

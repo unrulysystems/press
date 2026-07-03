@@ -91,6 +91,10 @@ export async function verifyApiToken(
   }
 }
 
+export async function revokeApiToken(db: PressDb, tokenId: string): Promise<void> {
+  await db.update(apiToken).set({ revokedAt: new Date() }).where(eq(apiToken.id, tokenId))
+}
+
 export async function findUserIdByEmail(db: PressDb, email: string): Promise<string> {
   const row = await db.query.user.findFirst({
     where: eq(user.email, email),

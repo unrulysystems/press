@@ -1,0 +1,29 @@
+{
+  "name": "@press/cli",
+  "version": "0.0.0",
+  "bin": {
+    "press": "./src/index.ts"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.cts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "scripts": {
+    "build": "zshy"
+  },
+  "dependencies": {
+    "@press/core": "workspace:*"
+  },
+  "zshy": "./src/index.ts"
+}
