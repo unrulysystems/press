@@ -84,7 +84,8 @@ async function captureViewport(input: {
       await page.getByLabel('Email').fill(localnetUsers.secondUser.email)
       await page.getByLabel('Password').fill(localnetUsers.secondUser.password)
       await page.getByRole('button', { name: 'Sign in' }).click()
-      await page.waitForURL('/')
+      await page.getByRole('heading', { name: 'Reports for close reading.' }).waitFor()
+      await page.getByRole('article').first().waitFor()
 
       for (const target of targets) {
         // oxlint-disable-next-line no-await-in-loop -- Screenshots need one stable document at a time.

@@ -122,10 +122,10 @@ for (const colorScheme of colorSchemes) {
       expect(new Set(measures.map((measure) => measure.width))).toEqual(
         new Set([designTokens.measureScale.page]),
       )
-      expect(new Set(measures.map((measure) => measure.marginLeft))).toHaveSize(1)
-      expect(new Set(measures.map((measure) => measure.marginRight))).toHaveSize(1)
-      expect(new Set(measures.map((measure) => measure.left))).toHaveSize(1)
-      expect(new Set(measures.map((measure) => measure.right))).toHaveSize(1)
+      expect(new Set(measures.map((measure) => measure.marginLeft)).size).toBe(1)
+      expect(new Set(measures.map((measure) => measure.marginRight)).size).toBe(1)
+      expect(new Set(measures.map((measure) => measure.left)).size).toBe(1)
+      expect(new Set(measures.map((measure) => measure.right)).size).toBe(1)
     })
 
     for (const width of widths) {
