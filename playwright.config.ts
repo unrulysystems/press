@@ -1,7 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const port = process.env.PRESS_PORT ?? '4174'
-const baseURL = `http://127.0.0.1:${port}`
+const baseURL =
+  process.env.PRESS_BASE_URL ??
+  (process.env.PRESS_PORT ? `http://127.0.0.1:${process.env.PRESS_PORT}` : 'http://127.0.0.1:4174')
 
 export default defineConfig({
   testDir: './e2e',
@@ -19,13 +20,4 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'nub run localnet:e2e',
-    url: `${baseURL}/healthz`,
-    reuseExistingServer: false,
-    timeout: 60_000,
-    gracefulShutdown: { signal: 'SIGTERM', timeout: 10_000 },
-    stdout: 'pipe',
-    stderr: 'pipe',
-  },
 })
