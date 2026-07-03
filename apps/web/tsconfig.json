@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "composite": true,
+    "types": ["bun", "react", "react-dom"],
+    "paths": {
+      "@press/core": ["../../packages/core/src"],
+      "@press/utils": ["../../packages/utils/src"],
+      "@press/web/*": ["./src/*"],
+      "~/*": ["./src/*"]
+    }
+  },
+  "include": ["app", "src", "vite.config.ts", "tamagui.config.ts"],
+  "references": [
+    {
+      "path": "../../packages/core"
+    }
+  ]
+}
