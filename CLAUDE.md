@@ -12,14 +12,20 @@ unrulysystems (Allen / 0xbigboss). Built from typescript-template.
   Decisions (do not re-ask them), Boundary.
 - `apps/web/BRIEF.md` — design/taste law for the web surface (magazine bar,
   blind screenshot oracle).
-- `loop.md` — the build plan (ephemeral; delete when absorbed).
+- `DELTA.md` — dated wrap notes, known gaps, proposed next steps, and Boundary
+  handoff.
+- `DEVIATIONS.md` — accepted implementation deviations and blocked floors.
 
 ## Commands
 
 - `nub install` — install workspace deps.
 - `nub run check` — tsgo typecheck + oxlint + oxfmt (must stay green).
-- `nub run test` / `nub run e2e` / `nub run localnet` — defined in loop.md
-  phase 0; e2e runs against localnet only.
+- `nub run test` — Bun unit/integration tests.
+- `nub run localnet` — boot Postgres plus the One dev server with seeded
+  localnet users.
+- `nub run e2e` — Playwright acceptance suite against localnet only.
+- `bun scripts/capture-oracle-shots.ts` — capture blind-oracle screenshots into
+  `artifacts/oracle/`.
 
 ## Hard rules
 

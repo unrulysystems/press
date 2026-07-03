@@ -80,18 +80,32 @@ async function captureViewport(input: {
     })
     try {
       const page = await context.newPage()
-      await page.goto('/login?next=/')
+      await page.goto('/login?next=/', { waitUntil: 'networkidle' })
+      await page.getByRole('heading', { name: 'Sign in to keep reading.' }).waitFor()
       await page.getByLabel('Email').fill(localnetUsers.secondUser.email)
       await page.getByLabel('Password').fill(localnetUsers.secondUser.password)
       await page.getByRole('button', { name: 'Sign in' }).click()
-      await page.getByRole('heading', { name: 'Reports for close reading.' }).waitFor()
+      const feedHeading = page.getByRole('heading', { name: 'Reports for close reading.' })
+      try {
+        await feedHeading.waitFor({ timeout: 5_000 })
+      } catch (error) {
+        if (!page.url().includes('/login')) {
+          throw error
+        }
+        await page.getByRole('button', { name: 'Sign in' }).click()
+        await feedHeading.waitFor()
+      }
       await page.getByRole('article').first().waitFor()
 
       for (const target of targets) {
         // oxlint-disable-next-line no-await-in-loop -- Screenshots need one stable document at a time.
-        await page.goto(target.path)
+        await page.goto(target.path, { waitUntil: 'networkidle' })
         // oxlint-disable-next-line no-await-in-loop -- Font readiness belongs to the current document.
         await page.evaluate(() => document.fonts.ready)
+        // oxlint-disable-next-line no-await-in-loop -- Oracle stills must not capture hover state.
+        await page.mouse.move(0, 0)
+        // oxlint-disable-next-line no-await-in-loop -- Let hover/focus paints settle before capture.
+        await Bun.sleep(100)
         // oxlint-disable-next-line no-await-in-loop -- Full-page capture is the oracle artifact.
         await page.screenshot({
           path: resolve(outputDir, `${target.name}-${input.scheme}-${input.width}.png`),
