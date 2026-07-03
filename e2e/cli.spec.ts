@@ -1,5 +1,5 @@
-import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { spawn, spawnSync } from 'node:child_process'
+import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
 import { chmodSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
@@ -7,8 +7,9 @@ import { tmpdir } from 'node:os'
 import { expect, test } from '@playwright/test'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
+import { findUserIdByEmail } from '../apps/web/src/auth/apiTokens'
 import { db } from '../apps/web/src/db/client'
-import { findPage } from '../apps/web/src/publish/e2eSupport'
+import { findMatchingAuditEvent, findPage } from '../apps/web/src/publish/e2eSupport'
 import { newE2EAPIContext } from './api'
 
 const root = resolve(import.meta.dirname, '..')
@@ -26,6 +27,24 @@ type KeychainState = Record<string, string>
 type PressEnv = NodeJS.ProcessEnv & {
   readonly PRESS_HOST: string
   readonly PRESS_E2E_KEYCHAIN_FILE: string
+}
+
+function baseProcessEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  delete env.PRESS_TOKEN
+  return env
+}
+
+function bunExecutable(): string {
+  const result = spawnSync('which', ['bun'], {
+    encoding: 'utf8',
+    env: process.env,
+  })
+  const path = result.stdout.trim()
+  if (result.status !== 0 || !path) {
+    throw new Error('bun executable not found')
+  }
+  return path
 }
 
 function jsonLine(stdout: string): unknown {
@@ -99,10 +118,22 @@ async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
   await writeSecurityStub(dir)
   const keychainFile = join(dir, 'keychain.json')
   return {
-    ...process.env,
+    ...baseProcessEnv(),
     PATH: `${dir}:${process.env.PATH ?? ''}`,
     PRESS_HOST: baseURL,
     PRESS_E2E_KEYCHAIN_FILE: keychainFile,
+  }
+}
+
+async function makePressTokenEnv(baseURL: string, label: string, token: string): Promise<PressEnv> {
+  const dir = await mkdtemp(join(tmpdir(), `press-cli-${label}-`))
+  await symlink(bunExecutable(), join(dir, 'bun'))
+  return {
+    ...baseProcessEnv(),
+    PATH: dir,
+    PRESS_HOST: baseURL,
+    PRESS_E2E_KEYCHAIN_FILE: join(dir, 'keychain.json'),
+    PRESS_TOKEN: token,
   }
 }
 
@@ -209,10 +240,20 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
 
   await loginViaLoopback(baseURL, ownerEnv, 'owner')
   const ownerToken = await readStoredToken(ownerEnv)
+  const ownerId = await findUserIdByEmail(db, localnetUsers.owner.email)
 
   const whoami = runPress(['whoami', '--json'], ownerEnv)
   await expect(whoami).resolves.toMatchObject({ code: 0 })
   expect(jsonLine((await whoami).stdout)).toMatchObject({
+    ok: true,
+    data: { user: { email: localnetUsers.owner.email } },
+  })
+
+  const tokenEnv = await makePressTokenEnv(baseURL, 'owner-token-env', ownerToken)
+  const envWhoami = await runPress(['whoami', '--json'], tokenEnv)
+  expect(envWhoami.code).toBe(0)
+  expect(envWhoami.stderr).toBe('')
+  expect(jsonLine(envWhoami.stdout)).toMatchObject({
     ok: true,
     data: { user: { email: localnetUsers.owner.email } },
   })
@@ -343,6 +384,14 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
 
   const logout = await runPress(['logout', '--json'], ownerEnv)
   expect(logout.code).toBe(0)
+  expect(
+    await findMatchingAuditEvent(db, {
+      collectionSlug: null,
+      action: 'token-revoke',
+      userId: ownerId,
+    }),
+    'token-revoke audit event should exist',
+  ).toBeDefined()
   expect(
     (
       await api.get('/api/cli/whoami', { headers: { authorization: `Bearer ${ownerToken}` } })

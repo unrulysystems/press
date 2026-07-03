@@ -11,9 +11,15 @@ export type FailingAuditTrigger = {
 }
 
 export type AuditLookup = {
-  readonly collectionSlug: string
+  readonly collectionSlug?: string | null
   readonly fileSlug?: string
-  readonly action: 'publish' | 'overwrite' | 'unpublish' | 'visibility-change' | 'password-reroll'
+  readonly action:
+    | 'publish'
+    | 'overwrite'
+    | 'unpublish'
+    | 'visibility-change'
+    | 'password-reroll'
+    | 'token-revoke'
   readonly userId: string
   readonly contentHash?: string
 }
@@ -38,13 +44,12 @@ export async function findTokenByUserAndName(db: PressDb, userId: string, name: 
 
 export async function findMatchingAuditEvent(db: PressDb, input: AuditLookup) {
   const rows = await db.query.auditEvent.findMany({
-    where: and(
-      eq(auditEvent.collectionSlug, input.collectionSlug),
-      eq(auditEvent.action, input.action),
-      eq(auditEvent.userId, input.userId),
-    ),
+    where: and(eq(auditEvent.action, input.action), eq(auditEvent.userId, input.userId)),
   })
   return rows.find((row) => {
+    if ('collectionSlug' in input && row.collectionSlug !== input.collectionSlug) {
+      return false
+    }
     if (input.fileSlug !== undefined && row.fileSlug !== input.fileSlug) {
       return false
     }

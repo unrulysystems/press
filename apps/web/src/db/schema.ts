@@ -161,9 +161,9 @@ export const auditEvent = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: 'restrict' }),
     action: auditAction('action').notNull(),
-    collectionSlug: text('collectionSlug')
-      .notNull()
-      .references(() => collection.slug, { onDelete: 'restrict' }),
+    collectionSlug: text('collectionSlug').references(() => collection.slug, {
+      onDelete: 'restrict',
+    }),
     fileSlug: text('fileSlug'),
     contentHash: text('contentHash'),
     createdAt: timestamp('createdAt', { mode: 'date' }).notNull().defaultNow(),

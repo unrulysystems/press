@@ -3,9 +3,9 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 
 import { db, dbConfig } from '../db/client'
-import { user, verification } from '../db/schema'
+import { apiToken, auditEvent, user, verification } from '../db/schema'
 import { auth } from './server'
-import { mintApiTokenForUser, revokeApiToken, verifyApiToken } from './apiTokens'
+import { mintApiTokenForUser, verifyApiToken } from './apiTokens'
 
 class HttpError extends Error {
   constructor(
@@ -207,7 +207,18 @@ export async function cliLogoutEndpoint(request: Request): Promise<Response> {
     if (!verified) {
       throw new HttpError(401, 'valid bearer token required')
     }
-    await revokeApiToken(db, verified.tokenId)
+    await db.transaction(async (tx) => {
+      await tx
+        .update(apiToken)
+        .set({ revokedAt: new Date() })
+        .where(eq(apiToken.id, verified.tokenId))
+      await tx.insert(auditEvent).values({
+        id: randomUUID(),
+        userId: verified.user.id,
+        action: 'token-revoke',
+        collectionSlug: null,
+      })
+    })
     return json({ ok: true })
   } catch (error) {
     return errorResponse(error)

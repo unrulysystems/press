@@ -23,6 +23,13 @@ class CliError extends Error {
   }
 }
 
+class KeychainUnavailableError extends Error {
+  constructor() {
+    super('macOS keychain is unavailable')
+    this.name = 'KeychainUnavailableError'
+  }
+}
+
 const account = 'token'
 
 function normalizeHost(raw: string | undefined): string {
@@ -72,21 +79,29 @@ async function runSecurity(
   args: readonly string[],
   input?: string,
 ): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> {
-  const child = Bun.spawn(['security', ...args], {
-    stdin: input === undefined ? 'ignore' : 'pipe',
-    stdout: 'pipe',
-    stderr: 'pipe',
-  })
-  if (input !== undefined) {
-    child.stdin.write(input)
-    child.stdin.end()
+  try {
+    const child = Bun.spawn(['security', ...args], {
+      stdin: input === undefined ? 'ignore' : 'pipe',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    })
+    if (input !== undefined) {
+      const stdin = child.stdin
+      if (!stdin) {
+        throw new KeychainUnavailableError()
+      }
+      stdin.write(input)
+      stdin.end()
+    }
+    const [stdout, stderr, code] = await Promise.all([
+      readStream(child.stdout),
+      readStream(child.stderr),
+      child.exited,
+    ])
+    return { code, stdout, stderr }
+  } catch {
+    throw new KeychainUnavailableError()
   }
-  const [stdout, stderr, code] = await Promise.all([
-    readStream(child.stdout),
-    readStream(child.stderr),
-    child.exited,
-  ])
-  return { code, stdout, stderr }
 }
 
 async function findKeychainToken(host: string): Promise<string | null> {
@@ -97,7 +112,15 @@ async function findKeychainToken(host: string): Promise<string | null> {
     '-a',
     account,
     '-w',
-  ])
+  ]).catch((error: unknown) => {
+    if (error instanceof KeychainUnavailableError) {
+      return null
+    }
+    throw error
+  })
+  if (!result) {
+    return null
+  }
   if (result.code !== 0) {
     return null
   }
@@ -109,7 +132,12 @@ async function storeKeychainToken(host: string, token: string): Promise<void> {
   const result = await runSecurity(
     ['add-generic-password', '-U', '-s', serviceName(host), '-a', account, '-w'],
     token,
-  )
+  ).catch((error: unknown) => {
+    if (error instanceof KeychainUnavailableError) {
+      throw new CliError('macOS keychain unavailable: set PRESS_TOKEN for this host instead')
+    }
+    throw error
+  })
   if (result.code !== 0) {
     throw new CliError('failed to store token in keychain')
   }

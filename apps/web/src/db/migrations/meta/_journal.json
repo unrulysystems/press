@@ -8,6 +8,13 @@
       "when": 1783031017621,
       "tag": "0000_freezing_captain_britain",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1783031108256,
+      "tag": "0001_token_revoke_audit_scope",
+      "breakpoints": true
     }
   ]
 }
