@@ -3,37 +3,18 @@ import { expect, test } from '@playwright/test'
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 
 test('credential provider signs in a seeded localnet user', async ({ page, context, baseURL }) => {
-  await page.goto('/')
+  await page.goto('/login?next=/')
+  await expect(page.getByRole('heading', { name: 'Sign in to keep reading.' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveCount(0)
 
-  const signInResult = await page.evaluate(
-    async ({ email, password }) => {
-      const response = await fetch('/api/auth/sign-in/email', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({
-          email,
-          password,
-          rememberMe: true,
-        }),
-      })
+  await page.getByLabel('Email').fill(localnetUsers.owner.email)
+  await page.getByLabel('Password').fill('wrong-password')
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page.getByRole('alert')).toContainText('did not match')
 
-      return {
-        ok: response.ok,
-        status: response.status,
-        body: await response.json(),
-      }
-    },
-    {
-      email: localnetUsers.owner.email,
-      password: localnetUsers.owner.password,
-    },
-  )
-
-  expect(signInResult.status).toBe(200)
-  expect(signInResult.ok).toBe(true)
-  expect(signInResult.body.user.email).toBe(localnetUsers.owner.email)
+  await page.getByLabel('Password').fill(localnetUsers.owner.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
 
   const cookies = await context.cookies(baseURL)
   const sessionCookie = cookies.find((cookie) => cookie.name.toLowerCase().includes('session'))

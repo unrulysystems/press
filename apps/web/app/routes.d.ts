@@ -9,10 +9,21 @@ declare module 'one' {
       StaticRoutes:
         | `/`
         | `/_sitemap`
-      DynamicRoutes: never
-      DynamicRouteTemplate: never
+        | `/login`
+      DynamicRoutes: `/c/${OneRouter.SingleRoutePart<T>}`
+      DynamicRouteTemplate: `/c/[collection]`
       IsTyped: true
-      
+      RouteTypes: {
+        '/c/[collection]': RouteInfo<{ collection: string }>
+      }
     }
   }
+}
+
+/**
+ * Helper type for route information
+ */
+type RouteInfo<Params = Record<string, never>> = {
+  Params: Params
+  LoaderProps: { path: string; search?: string; subdomain?: string; params: Params; request?: Request }
 }

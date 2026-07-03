@@ -285,6 +285,9 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-SRV-001  | `e2e/publish.spec.ts`                                                                                                             |
 | REQ-SRV-002  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
 | REQ-SRV-003  | `apps/web/src/publish/serveAcl.test.ts`, `e2e/publish.spec.ts`                                                                    |
+| REQ-IDX-001  | `apps/web/src/publish/indexes.ts`, `e2e/magazine.spec.ts`, `e2e/smoke.spec.ts`                                                    |
+| REQ-IDX-002  | `apps/web/src/publish/indexes.ts`, `e2e/magazine.spec.ts`, `e2e/smoke.spec.ts`                                                    |
+| REQ-IDX-003  | `apps/web/src/publish/indexes.ts`, `e2e/magazine.spec.ts`                                                                         |
 | REQ-CLI-001  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |
 | REQ-CLI-002  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |
 | REQ-CLI-003  | `packages/cli/src/index.ts`, `e2e/cli.spec.ts`                                                                                    |

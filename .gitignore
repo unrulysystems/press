@@ -37,6 +37,7 @@ coverage/
 playwright-report/
 test-results/
 .press/
+artifacts/
 
 # Nix
 result
