@@ -20,7 +20,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'nub run localnet',
+    command: 'nub run localnet:e2e',
     url: `${baseURL}/healthz`,
     reuseExistingServer: false,
     timeout: 60_000,

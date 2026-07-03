@@ -107,15 +107,67 @@ Known gaps and follow-ups:
   imports/prerenders `/`, `/login`, and `/c/:collection`, emits
   `version.json`, passes One's client bundle security scan, and the wrapper's
   fail-closed scan finds no `*.development.js` artifacts in `apps/web/dist/`.
-- The e2e suite runs the Vite dev server with `Connection: close` API contexts
-  as the determinism mitigation.
-- The first full `nub run e2e` after a cold state can intermittently fail
-  browser assertions during Vite on-demand compilation. The current evidence is
-  ~2 failing first-runs across ~9 full runs, always after substantial state
-  changes such as new code landing or `docker compose -p press-localnet down -v`;
-  the immediate rerun from the same clean slate passes 80/80. Watch this in CI.
-  The root fix is production-representative serving, currently blocked on the
-  One production build bug.
+- Phase-2 production-representative serving is wired for e2e. `nub run localnet`
+  still starts the One dev server for interactive development.
+  `nub run localnet:e2e` builds `@press/core`, builds `@press/web` with the
+  phase-1 production-mode `build:web` wrapper, then boots localnet Postgres,
+  migrates, seeds, and starts
+  `one serve --host 127.0.0.1 --port ${PRESS_PORT:-4174}` under the same
+  non-production localnet runtime env (`NODE_ENV=development`,
+  `PRESS_ENABLE_CREDENTIAL_AUTH=1`). Playwright's `webServer` now uses
+  `nub run localnet:e2e`.
+- One 1.19.4 serve contract checked locally: the CLI exposes `one serve`
+  (`apps/web/node_modules/one/dist/esm/cli.mjs`), accepts `--host`, `--port`,
+  and `--outDir`, and serves `dist/buildInfo.json` through
+  `apps/web/node_modules/one/dist/esm/serve.mjs`. It only calls
+  `loadEnv("production")` when `--loadEnv` is passed, so e2e can serve the
+  built output without switching runtime config to production or weakening
+  INV-5 / REQ-CFG-001.
+- Phase-2 in-sandbox serving proof (Chromium not launched in this sandbox):
+  `nub run localnet:e2e` completed the production web build, migrated and
+  seeded Postgres, and reported
+  `press localnet prod server ready at http://127.0.0.1:4174`. HTTP probes
+  against that server returned:
+  `curl -i /healthz` -> `HTTP/1.1 200 OK` with body `ok`;
+  `curl -i /` -> `HTTP/1.1 200 OK` and the SSR feed shell contained
+  `press-shell`, `Reports for close reading.`, and `Agent Margin Review`;
+  `curl -i /login` -> `HTTP/1.1 200 OK` and the SSR login shell contained
+  `Sign in to keep reading.`, `Email`, and `Password`;
+  `curl -i /p/market-notes/agent-margin-review.html` ->
+  `HTTP/1.1 200 OK`,
+  `content-security-policy: sandbox allow-scripts allow-popups`,
+  `x-content-type-options: nosniff`, `referrer-policy: no-referrer`,
+  `cache-control: no-store`, and body title `Agent Margin Review`.
+- Attempt-2 prod-server repro proof against the same booted `one serve`
+  localnet: `curl -i /api/collections` without a bearer token returned
+  `HTTP/1.1 401 Unauthorized` with `{"error":"valid bearer token required"}`,
+  not the catch-all slug-parse 400. An authenticated curl using a freshly
+  minted localnet API token passed via curl stdin config returned
+  `HTTP/1.1 200 OK` from `GET /api/collections` with the seeded collections
+  `market-notes`, `systems-review`, `field-library`, and `private-docket`.
+  A curl `PUT /api/pages/<proof-collection>/too-large.html` with
+  `Content-Type: text/html` and a `PRESS_MAX_UPLOAD_BYTES + 1` byte temp file
+  returned a readable `HTTP/1.1 413 Payload Too Large` response body:
+  `{"error":"request body exceeds PRESS_MAX_UPLOAD_BYTES"}`. No client-side
+  `ECONNRESET` occurred.
+- The e2e `Connection: close` API-context mitigation is retained. The sandbox
+  proof used HTTP curl only, not Playwright API contexts, so there is no
+  evidence that the mitigation is unnecessary under `one serve`; assertions
+  remain unchanged.
+- Attempt-3 trace evidence: the failing `magazine.spec.ts` trace shows the
+  authenticated `/c/market-notes` document returned `200 OK` and rendered the
+  expected three-title collection before `allTextContents()` raced a same-path
+  client document navigation, with no content-changing ACL result observed.
+- Cold-start flake deviation: driver evidence recorded 2026-07-03. State was
+  forced maximally cold before run 1 (`docker compose -p press-localnet down
+-v` plus storage dir removal, immediately after new code landed); each run
+  boots localnet from scratch and tears it down, so all three runs are cold.
+  - Run 1: `nub run e2e` exit 0, 80 passed (22.0s).
+  - Run 2: `nub run e2e` exit 0, 80 passed (21.6s).
+  - Run 3: `nub run e2e` exit 0, 80 passed (20.8s).
+    An earlier attempt-2 series (80/80, 80/80, 79/80) exposed the
+    `magazine.spec.ts` snapshot-read race that attempt 3 fixed; the deviation
+    is retired in `DEVIATIONS.md` on this evidence.
 - Real macOS keychain interaction is stub-verified only and remains an attended
   final gate.
 - GitHub Actions has not executed because the repo has not been pushed.
@@ -126,9 +178,8 @@ Boundary handoff for Allen:
 2. Confirm GitHub Actions is green.
 3. Create the Google OAuth client.
 4. Configure DNS for instance #1 at `reports.send.it`.
-5. Finish production-representative serving and the local container image
-   phases, then build and mirror the image to `0xsend/press` with its
-   manifests.
+5. Finish the local container image phase, then build and mirror the image to
+   `0xsend/press` with its manifests.
 6. Provision ESO secrets.
 7. Deploy.
 8. Run the attended real-Google final-gate walkthrough required by `BRIEF.md`.

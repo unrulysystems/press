@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 
@@ -9,7 +9,7 @@ const passwordTitle = 'Checkout Cohort Notes'
 const privateTitle = 'Board Prep Index'
 const publicSecondCollection = 'Partner Update Brief'
 
-async function signIn(page: import('@playwright/test').Page, key: keyof typeof localnetUsers) {
+async function signIn(page: Page, key: keyof typeof localnetUsers) {
   await page.goto('/login?next=/')
   await page.getByLabel('Email').fill(localnetUsers[key].email)
   await page.getByLabel('Password').fill(localnetUsers[key].password)
@@ -17,14 +17,32 @@ async function signIn(page: import('@playwright/test').Page, key: keyof typeof l
   await expect(page).toHaveURL('/')
 }
 
-async function titles(page: import('@playwright/test').Page): Promise<string[]> {
-  return await page.getByRole('article').locator('h2').allTextContents()
+function articleTitles(page: Page): Locator {
+  return page.getByRole('article').locator('h2')
 }
 
-function expectRelativeOrder(feedTitles: readonly string[], expected: readonly string[]) {
-  const positions = expected.map((title) => feedTitles.indexOf(title))
-  expect(positions, `expected titles present: ${expected.join(', ')}`).not.toContain(-1)
-  expect(positions).toEqual([...positions].toSorted((left, right) => left - right))
+async function expectArticleTitles(page: Page, expected: readonly string[]) {
+  await expect(articleTitles(page)).toHaveText([...expected])
+}
+
+async function expectRelativeOrder(page: Page, expected: readonly string[]) {
+  await expect
+    .poll(
+      async () => {
+        const feedTitles = await articleTitles(page)
+          .allTextContents()
+          .catch(() => [])
+        const positions = expected.map((title) => feedTitles.indexOf(title))
+        const present = positions.every((position) => position !== -1)
+        const ordered = positions.every(
+          (position, index) => index === 0 || positions[index - 1] <= position,
+        )
+
+        return present && ordered
+      },
+      { message: `expected titles present in order: ${expected.join(', ')}` },
+    )
+    .toBe(true)
 }
 
 test('anonymous feed lists only public pages newest-first without leaking gated titles', async ({
@@ -34,11 +52,7 @@ test('anonymous feed lists only public pages newest-first without leaking gated 
   expect(response?.status()).toBe(200)
 
   await expect(page.getByRole('heading', { name: 'Reports for close reading.' })).toBeVisible()
-  const feedTitles = await titles(page)
-  expect(feedTitles).toEqual(
-    expect.arrayContaining([publicNewest, publicSecondCollection, publicOlder]),
-  )
-  expectRelativeOrder(feedTitles, [publicNewest, publicSecondCollection, publicOlder])
+  await expectRelativeOrder(page, [publicNewest, publicSecondCollection, publicOlder])
   await expect(page.getByText(defaultTitle)).toHaveCount(0)
   await expect(page.getByText(passwordTitle)).toHaveCount(0)
   await expect(page.getByText(privateTitle)).toHaveCount(0)
@@ -47,8 +61,7 @@ test('anonymous feed lists only public pages newest-first without leaking gated 
 test('domain user feed lists default and password pages with lock affordance', async ({ page }) => {
   await signIn(page, 'secondUser')
 
-  const feedTitles = await titles(page)
-  expectRelativeOrder(feedTitles, [
+  await expectRelativeOrder(page, [
     publicNewest,
     defaultTitle,
     passwordTitle,
@@ -64,7 +77,7 @@ test('owner feed includes their private pages after public, default, and passwor
 }) => {
   await signIn(page, 'owner')
 
-  expectRelativeOrder(await titles(page), [
+  await expectRelativeOrder(page, [
     publicNewest,
     defaultTitle,
     passwordTitle,
@@ -77,13 +90,13 @@ test('owner feed includes their private pages after public, default, and passwor
 test('collection page applies the same ACL filtering and 404 rules', async ({ page }) => {
   let response = await page.goto('/c/market-notes')
   expect(response?.status()).toBe(200)
-  expect(await titles(page)).toEqual([publicNewest, publicOlder])
+  await expectArticleTitles(page, [publicNewest, publicOlder])
   await expect(page.getByText(passwordTitle)).toHaveCount(0)
 
   await signIn(page, 'secondUser')
   response = await page.goto('/c/market-notes')
   expect(response?.status()).toBe(200)
-  expect(await titles(page)).toEqual([publicNewest, passwordTitle, publicOlder])
+  await expectArticleTitles(page, [publicNewest, passwordTitle, publicOlder])
   await expect(page.getByRole('article').filter({ hasText: passwordTitle })).toContainText('Locked')
 
   response = await page.goto('/c/not-a-real-collection')

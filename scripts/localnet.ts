@@ -9,6 +9,31 @@ const composeFile = resolve(root, 'compose.yaml')
 const projectName = 'press-localnet'
 
 type LocalnetEnv = NodeJS.ProcessEnv & Record<string, string>
+type ServerMode = 'dev' | 'prod'
+
+function parseServerMode(args: readonly string[]): ServerMode {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (arg === '--prod-serve') {
+      return 'prod'
+    }
+    if (arg === '--server' && args[index + 1]) {
+      const value = args[index + 1]
+      if (value === 'dev' || value === 'prod') {
+        return value
+      }
+      throw new Error(`unsupported localnet server mode: ${value}`)
+    }
+    if (arg.startsWith('--server=')) {
+      const value = arg.slice('--server='.length)
+      if (value === 'dev' || value === 'prod') {
+        return value
+      }
+      throw new Error(`unsupported localnet server mode: ${value}`)
+    }
+  }
+  return 'dev'
+}
 
 function withLocalnetDefaults(): LocalnetEnv {
   const env = { ...process.env } as LocalnetEnv
@@ -45,6 +70,18 @@ function run(command: string, args: string[], env: LocalnetEnv): Promise<void> {
   })
 }
 
+function productionBuildEnv(env: LocalnetEnv): LocalnetEnv {
+  return {
+    ...env,
+    NODE_ENV: 'production',
+    ONE_SERVER_URL: env.PRESS_BASE_URL,
+    PRESS_BASE_URL: env.PRESS_BASE_URL,
+    PRESS_ENABLE_CREDENTIAL_AUTH: '0',
+    GOOGLE_CLIENT_ID: env.GOOGLE_CLIENT_ID ?? 'build-placeholder',
+    GOOGLE_CLIENT_SECRET: env.GOOGLE_CLIENT_SECRET ?? 'build-placeholder',
+  }
+}
+
 async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
   const deadline = Date.now() + timeoutMs
   let lastError: unknown
@@ -68,6 +105,7 @@ async function waitForHealth(url: string, timeoutMs: number): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const serverMode = parseServerMode(process.argv.slice(2))
   const env = withLocalnetDefaults()
   const config = parseConfig(env)
   await mkdir(dirname(config.storageDir), { recursive: true })
@@ -98,6 +136,10 @@ async function main(): Promise<void> {
   })
 
   try {
+    if (serverMode === 'prod') {
+      await run('nub', ['run', 'build:web'], productionBuildEnv(env))
+    }
+
     await run(
       'docker',
       ['compose', '-f', composeFile, '-p', projectName, 'up', '-d', '--wait', 'postgres'],
@@ -106,9 +148,8 @@ async function main(): Promise<void> {
     await run('nub', ['run', '--filter', '@press/web', 'db:migrate'], env)
     await run('nub', ['run', '--filter', '@press/web', 'db:seed'], env)
 
-    // One's dev server keeps localnet fast enough for the design loop. The
-    // e2e floors still exercise the real apps/web app over HTTP from scratch.
-    server = spawn('nub', ['run', '--filter', '@press/web', 'dev'], {
+    const serverScript = serverMode === 'prod' ? 'serve:prod' : 'dev'
+    server = spawn('nub', ['run', '--filter', '@press/web', serverScript], {
       cwd: root,
       env: { ...env, PRESS_PARENT_PID: `${process.pid}` },
       stdio: 'inherit',
@@ -119,13 +160,17 @@ async function main(): Promise<void> {
     })
     server.on('exit', (code, signal) => {
       if (!shuttingDown) {
-        console.error(`dev server exited with ${signal ?? code}`)
+        if (code === 0 || signal === 'SIGTERM' || signal === 'SIGINT') {
+          void down(0)
+          return
+        }
+        console.error(`${serverScript} server exited with ${signal ?? code}`)
         void down(1)
       }
     })
 
     await waitForHealth(`${config.baseUrl}/healthz`, 30_000)
-    console.log(`press localnet ready at ${config.baseUrl}`)
+    console.log(`press localnet ${serverMode} server ready at ${config.baseUrl}`)
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
     await down(1)

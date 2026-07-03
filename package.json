@@ -19,6 +19,7 @@
     "test": "bun test packages apps/web/src",
     "e2e": "bun scripts/e2e.ts",
     "localnet": "nub run --filter @press/core build && bun scripts/localnet.ts",
+    "localnet:e2e": "nub run --filter @press/core build && bun scripts/localnet.ts --server=prod",
     "knip": "knip",
     "jscpd": "jscpd .",
     "changeset": "changeset",

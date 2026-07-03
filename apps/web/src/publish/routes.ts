@@ -103,6 +103,11 @@ function parseCollectionPath(request: Request): {
   }
 }
 
+function isCollectionsIndexPath(request: Request): boolean {
+  const path = new URL(request.url).pathname
+  return path === '/api/collections' || path === '/api/collections/'
+}
+
 function parseVisibility(value: string | null, field: string): PageVisibility | undefined {
   if (value === null) {
     return undefined
@@ -222,7 +227,7 @@ async function readHtmlBody(request: Request): Promise<Uint8Array> {
 
   const declaredLength = request.headers.get('content-length')
   if (declaredLength && Number(declaredLength) > dbConfig.maxUploadBytes) {
-    throw new HttpError(413, 'request body exceeds PRESS_MAX_UPLOAD_BYTES')
+    await rejectOversizedBody(request)
   }
 
   const chunks: Uint8Array[] = []
@@ -253,6 +258,36 @@ async function readHtmlBody(request: Request): Promise<Uint8Array> {
     offset += chunk.byteLength
   }
   return body
+}
+
+async function rejectOversizedBody(request: Request): Promise<never> {
+  // One's Node production server can reset the socket if a handler returns while
+  // the client is still uploading. Drain the smallest contract-relevant body
+  // prefix, then cancel anything larger without buffering it.
+  await disposeOversizedRequestBody(request, dbConfig.maxUploadBytes + 1).catch(() => undefined)
+  throw new HttpError(413, 'request body exceeds PRESS_MAX_UPLOAD_BYTES')
+}
+
+async function disposeOversizedRequestBody(request: Request, byteLimit: number): Promise<void> {
+  const reader = request.body?.getReader()
+  if (!reader) {
+    return
+  }
+
+  let drained = 0
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- The stream must be consumed sequentially.
+    const { done, value } = await reader.read()
+    if (done) {
+      return
+    }
+    drained += value.byteLength
+    if (drained > byteLimit) {
+      // oxlint-disable-next-line no-await-in-loop -- Cancel happens only after the bounded drain cap trips.
+      await reader.cancel('request body exceeds PRESS_MAX_UPLOAD_BYTES')
+      return
+    }
+  }
 }
 
 function pageAcl(
@@ -781,6 +816,9 @@ export async function collectionsIndexEndpoint(request: Request): Promise<Respon
 
 export async function collectionsEndpoint(request: Request): Promise<Response> {
   try {
+    if (request.method === 'GET' && isCollectionsIndexPath(request)) {
+      return await collectionsIndexEndpoint(request)
+    }
     const route = parseCollectionPath(request)
     if (request.method === 'GET' && route.suffix === 'pages') {
       return await listCollectionPages(request, route.collectionSlug)
