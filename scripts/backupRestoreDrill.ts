@@ -201,8 +201,8 @@ async function runCapturedRequired(
   await run(command, args, { env, timeoutMs })
 }
 
-function composeArgs(env: DrillEnv, args: readonly string[]): string[] {
-  return ['compose', '-f', 'compose.yaml', '-p', env.COMPOSE_PROJECT_NAME, ...args]
+function composeArgs(args: readonly string[]): string[] {
+  return ['compose', ...args]
 }
 
 async function dockerCompose(
@@ -210,7 +210,7 @@ async function dockerCompose(
   args: readonly string[],
   timeoutMs = 60_000,
 ): Promise<void> {
-  await runCapturedRequired('docker', composeArgs(env, args), env, timeoutMs)
+  await runCapturedRequired('docker', composeArgs(args), env, timeoutMs)
 }
 
 function startPressServer(env: DrillEnv): ChildProcess {
@@ -356,6 +356,7 @@ function makeDrillEnv(siloEnv: SiloEnv, storageDir: string): DrillEnv {
     ...siloEnv,
     NODE_ENV: process.env.NODE_ENV ?? 'development',
     TILT_EDITOR: 'true',
+    COMPOSE_FILE: resolve(root, 'compose.yaml'),
     PRESS_SERVE_MODE: 'dev',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
     PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
