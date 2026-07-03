@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "one build --platform=web",
+    "build": "nub src/buildWeb.ts",
     "db:generate": "node node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.ts",
     "db:migrate": "nub src/db/migrate.ts",
     "db:seed": "nub src/auth/seedLocalnet.ts",

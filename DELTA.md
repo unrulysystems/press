@@ -9,9 +9,39 @@ titles remains a taste follow-up for Allen.
 
 Known gaps and follow-ups:
 
-- One production build fails with `ReferenceError: React$14 is not defined`.
-  This blocks production-representative serving and the container image until
-  the upstream issue is resolved; `DEVIATIONS.md` carries the active deviation.
+- One production build is green as of phase-1. The chosen intervention is
+  app-level config: `apps/web/vite.config.ts` adds a focused pre-transform for
+  `@tamagui/use-event/dist/esm/useGet.mjs` that rewrites the React namespace
+  import to named hook imports before One's production SSR bundle reaches the
+  Vite 8 / Rolldown deconfliction bug. `apps/web/src/buildWeb.ts` wraps
+  `one build --platform=web` with deterministic local build-time env in
+  production mode so One's prerender import can evaluate server config without
+  live OAuth or secrets; runtime boot validation remains unchanged.
+- Attempt-1 review reject: the first green `nub run build:web` was not valid
+  production evidence because `apps/web/src/buildWeb.ts` defaulted
+  `NODE_ENV=development` and enabled credential auth, producing React
+  development artifacts. Production-mode repros then proved INV-5 was still
+  intact: `NODE_ENV=production nub run build:web` refused credential auth, and
+  `NODE_ENV=production PRESS_ENABLE_CREDENTIAL_AUTH=0 nub run build:web`
+  refused missing Google OAuth client values during One's prerender-time
+  config import. The wrapper now defaults `NODE_ENV=production`,
+  `PRESS_ENABLE_CREDENTIAL_AUTH=0`, and uses clearly labeled
+  `build-placeholder` OAuth values plus a build-only Better Auth placeholder.
+  These placeholders are not secrets and exist only so the build machine can
+  pass production config parsing; runtime production boot validation is
+  unchanged and still refuses bad env at serve time.
+- Rejected config probes before the final app-level transform: adding
+  `@tamagui/use-event` to `ssr.external` bypassed the missing `React$15`
+  binding but failed prerender with
+  `SyntaxError: Export '_disableMediaTouch' is not defined in module`;
+  `resolve.dedupe: ['react', 'react-dom']` had no effect and returned the same
+  `ReferenceError: React$15 is not defined`; removing app-level
+  `ssr.noExternal` also returned the same `React$15` failure. A direct
+  installed-package rewrite of `@tamagui/use-event` proved the named-import
+  change moved the build past the Rolldown failure, but a committed package
+  patch was rejected because `nub patch` could not locate the app-local package
+  in the current hoisted install layout and manual `patchedDependencies`
+  metadata did not apply on `nub install`.
 - Root cause, production build failure: the 2026-07-03 `nub run build:web`
   repro emits the missing read in `apps/web/dist/server/_virtual_one-entry.js`
   at `7660:2`, inside the `@tamagui/use-event/dist/esm/useGet.mjs` region
@@ -72,9 +102,11 @@ Known gaps and follow-ups:
   version change as third because the installed versions are pinned in
   `apps/web/package.json:21-27`, and the loop plan allows version changes only
   after config and patch paths (`loop.md:41-46`).
-- The `build:web` gate is expected-red until phase-1 lands: phase-0 requires a
-  failing `nub run build:web` root-cause gate (`loop.md:58-73`), and phase-1
-  is the phase that turns that gate green (`loop.md:75-87`).
+- The `build:web` gate is green after phase-1 in production mode:
+  `nub run build:web` completes `one build --platform=web`,
+  imports/prerenders `/`, `/login`, and `/c/:collection`, emits
+  `version.json`, passes One's client bundle security scan, and the wrapper's
+  fail-closed scan finds no `*.development.js` artifacts in `apps/web/dist/`.
 - The e2e suite runs the Vite dev server with `Connection: close` API contexts
   as the determinism mitigation.
 - The first full `nub run e2e` after a cold state can intermittently fail
@@ -94,8 +126,9 @@ Boundary handoff for Allen:
 2. Confirm GitHub Actions is green.
 3. Create the Google OAuth client.
 4. Configure DNS for instance #1 at `reports.send.it`.
-5. Resolve the One production build bug, then build and mirror the image to
-   `0xsend/press` with its manifests.
+5. Finish production-representative serving and the local container image
+   phases, then build and mirror the image to `0xsend/press` with its
+   manifests.
 6. Provision ESO secrets.
 7. Deploy.
 8. Run the attended real-Google final-gate walkthrough required by `BRIEF.md`.
