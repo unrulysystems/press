@@ -216,13 +216,17 @@ async function teardown(composeProjectName: string | undefined, env: E2EEnv): Pr
 
   const result = await run('silo', ['down', '--clean'], env)
   if (result.code !== 0) {
-    console.error(`silo down --clean exited with ${result.signal ?? result.code}`)
+    throw new Error(`silo down --clean exited with ${result.signal ?? result.code}`)
   }
 }
 
 function logCleanupError(action: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error)
   console.error(`${action} failed during e2e cleanup: ${message}`)
+}
+
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
 }
 
 function makeE2EEnv(siloEnv: SiloEnv): E2EEnv {
@@ -258,28 +262,35 @@ async function main(): Promise<number> {
   let e2eEnv = bootstrapEnv
   let composeProjectName: string | undefined
   let siloUp: ChildProcess | undefined
-  let teardownStarted = false
+  let cleanupPromise: Promise<Error[]> | undefined
 
-  async function cleanup(): Promise<void> {
-    if (teardownStarted) {
-      return
+  function cleanup(): Promise<Error[]> {
+    if (cleanupPromise) {
+      return cleanupPromise
     }
-    teardownStarted = true
-    try {
-      await stopSiloUp(siloUp)
-    } catch (error) {
-      logCleanupError('stopping silo up', error)
-    }
-    try {
-      await teardown(composeProjectName, e2eEnv)
-    } catch (error) {
-      logCleanupError('silo down --clean', error)
-    }
+
+    cleanupPromise = (async () => {
+      const errors: Error[] = []
+      try {
+        await stopSiloUp(siloUp)
+      } catch (error) {
+        logCleanupError('stopping silo up', error)
+        errors.push(asError(error))
+      }
+      try {
+        await teardown(composeProjectName, e2eEnv)
+      } catch (error) {
+        logCleanupError('silo down --clean', error)
+        errors.push(asError(error))
+      }
+      return errors
+    })()
+    return cleanupPromise
   }
 
   async function handleSignal(signal: NodeJS.Signals): Promise<void> {
-    await cleanup()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    const errors = await cleanup()
+    process.exit(errors.length > 0 ? 1 : signal === 'SIGINT' ? 130 : 143)
   }
 
   process.once('SIGINT', () => {
@@ -289,6 +300,7 @@ async function main(): Promise<number> {
     void handleSignal('SIGTERM')
   })
 
+  let exitCode = 1
   try {
     await runRequired('nub', ['run', '--filter', '@press/core', 'build'], bootstrapEnv)
     await runRequired('silo', ['env', e2eInstanceName, '--force'], bootstrapEnv)
@@ -306,10 +318,14 @@ async function main(): Promise<number> {
       ['test', ...playwrightArgs(process.argv.slice(2))],
       e2eEnv,
     )
-    return result.code
+    exitCode = result.code
   } finally {
-    await cleanup()
+    const cleanupErrors = await cleanup()
+    if (exitCode === 0 && cleanupErrors.length > 0) {
+      exitCode = 1
+    }
   }
+  return exitCode
 }
 
 void main()

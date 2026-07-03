@@ -251,6 +251,10 @@ function logCleanupError(action: string, error: unknown): void {
   console.error(`${action} failed during dev:share cleanup: ${message}`)
 }
 
+function asError(error: unknown): Error {
+  return error instanceof Error ? error : new Error(String(error))
+}
+
 function makeDevShareEnv(siloEnv: SiloEnv): DevShareEnv {
   return {
     ...process.env,
@@ -323,24 +327,36 @@ async function mintAgentToken(baseUrl: string, env: Record<string, string>): Pro
   console.log(`agent env: ${agentEnvPath}`)
 }
 
-async function cleanupAgentToken(): Promise<void> {
+async function cleanupAgentToken(): Promise<Error[]> {
   if (cleanupStarted) {
-    return
+    return []
   }
   cleanupStarted = true
+  const errors: Error[] = []
   try {
     if (agentTokenId && tokenDb) {
       const { revokeApiToken } = await import('../apps/web/src/auth/apiTokens')
       await revokeApiToken(tokenDb, agentTokenId)
     }
   } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error))
-  } finally {
-    await rm(agentEnvPath, { force: true }).catch(() => {})
-    if (closeTokenDb) {
-      await closeTokenDb().catch(() => {})
+    logCleanupError('agent token revocation', error)
+    errors.push(asError(error))
+  }
+  try {
+    await rm(agentEnvPath, { force: true })
+  } catch (error) {
+    logCleanupError('agent env removal', error)
+    errors.push(asError(error))
+  }
+  if (closeTokenDb) {
+    try {
+      await closeTokenDb()
+    } catch (error) {
+      logCleanupError('token database close', error)
+      errors.push(asError(error))
     }
   }
+  return errors
 }
 
 async function main(): Promise<number> {
@@ -352,38 +368,43 @@ async function main(): Promise<number> {
   let devShareEnv = bootstrapEnv
   let siloUp: ChildProcess | undefined
   let siloReadyForDown = false
-  let cleanupPromise: Promise<void> | undefined
+  let cleanupPromise: Promise<Error[]> | undefined
 
-  function cleanup(): Promise<void> {
+  function cleanup(): Promise<Error[]> {
     if (cleanupPromise) {
       return cleanupPromise
     }
 
     cleanupPromise = (async () => {
+      const errors: Error[] = []
       try {
-        await cleanupAgentToken()
+        errors.push(...(await cleanupAgentToken()))
       } catch (error) {
         logCleanupError('agent token cleanup', error)
+        errors.push(asError(error))
       }
       try {
         await stopSiloUp(siloUp)
       } catch (error) {
         logCleanupError('stopping silo up', error)
+        errors.push(asError(error))
       }
       if (siloReadyForDown) {
         try {
           await teardown(devShareEnv)
         } catch (error) {
           logCleanupError('silo down --clean', error)
+          errors.push(asError(error))
         }
       }
+      return errors
     })()
     return cleanupPromise
   }
 
   async function handleSignal(signal: NodeJS.Signals): Promise<void> {
-    await cleanup()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    const errors = await cleanup()
+    process.exit(errors.length > 0 ? 1 : signal === 'SIGINT' ? 130 : 143)
   }
 
   process.once('SIGINT', () => {
@@ -393,6 +414,7 @@ async function main(): Promise<number> {
     void handleSignal('SIGTERM')
   })
 
+  let exitCode = 1
   try {
     await runRequired('silo', ['env', instanceName, '--force'], bootstrapEnv)
     const siloEnv = await readSiloEnv()
@@ -407,10 +429,14 @@ async function main(): Promise<number> {
     await mintAgentToken(siloEnv.PRESS_BASE_URL, devShareEnv)
 
     const result = await siloExit
-    return result.code
+    exitCode = result.code
   } finally {
-    await cleanup()
+    const cleanupErrors = await cleanup()
+    if (exitCode === 0 && cleanupErrors.length > 0) {
+      exitCode = 1
+    }
   }
+  return exitCode
 }
 
 void main()
