@@ -14,10 +14,13 @@ Known gaps and follow-ups:
   the upstream issue is resolved; `DEVIATIONS.md` carries the active deviation.
 - The e2e suite runs the Vite dev server with `Connection: close` API contexts
   as the determinism mitigation.
-- One cold-start e2e run produced three immediate `toContainText` failures right
-  after new code landed. The failure has not reproduced across 10+ subsequent
-  fresh-boot runs; the suspected cause is Vite on-demand compilation during a
-  cold start. Watch this in CI.
+- The first full `nub run e2e` after a cold state can intermittently fail
+  browser assertions during Vite on-demand compilation. The current evidence is
+  ~2 failing first-runs across ~9 full runs, always after substantial state
+  changes such as new code landing or `docker compose -p press-localnet down -v`;
+  the immediate rerun from the same clean slate passes 80/80. Watch this in CI.
+  The root fix is production-representative serving, currently blocked on the
+  One production build bug.
 - Real macOS keychain interaction is stub-verified only and remains an attended
   final gate.
 - GitHub Actions has not executed because the repo has not been pushed.
