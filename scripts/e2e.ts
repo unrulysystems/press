@@ -3,7 +3,6 @@ import { resolve } from 'node:path'
 import { spawn, type ChildProcess } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
-const composeFile = resolve(root, 'compose.yaml')
 const siloEnvFile = resolve(root, '.silo.env')
 const e2eInstanceName = 'e2e'
 const healthTimeoutMs = Number(process.env.PRESS_E2E_HEALTH_TIMEOUT_MS ?? `${4 * 60_000}`)
@@ -79,21 +78,6 @@ function run(command: string, args: readonly string[], env: E2EEnv): Promise<Com
       cwd: root,
       env,
       stdio: 'inherit',
-    })
-
-    child.on('error', reject)
-    child.on('exit', (code, signal) => {
-      resolveRun({ code: code ?? (signal ? 1 : 0), signal })
-    })
-  })
-}
-
-function runQuiet(command: string, args: readonly string[], env: E2EEnv): Promise<CommandResult> {
-  return new Promise((resolveRun, reject) => {
-    const child = spawn(command, [...args], {
-      cwd: root,
-      env,
-      stdio: 'ignore',
     })
 
     child.on('error', reject)
@@ -225,35 +209,20 @@ async function stopSiloUp(child: ChildProcess | undefined): Promise<void> {
   }
 }
 
-async function removePostgresVolume(composeProjectName: string, env: E2EEnv): Promise<void> {
-  const volumeName = `${composeProjectName}_postgres-data`
-  const inspect = await runQuiet('docker', ['volume', 'inspect', volumeName], env)
-  if (inspect.code !== 0) {
-    return
-  }
-  await runRequired('docker', ['volume', 'rm', volumeName], env)
-}
-
 async function teardown(composeProjectName: string | undefined, env: E2EEnv): Promise<void> {
   if (!composeProjectName) {
     return
   }
 
-  await runRequired(
-    'docker',
-    [
-      'compose',
-      '-f',
-      composeFile,
-      '-p',
-      composeProjectName,
-      'down',
-      '--volumes',
-      '--remove-orphans',
-    ],
-    env,
-  )
-  await removePostgresVolume(composeProjectName, env)
+  const result = await run('silo', ['down', '--clean'], env)
+  if (result.code !== 0) {
+    console.error(`silo down --clean exited with ${result.signal ?? result.code}`)
+  }
+}
+
+function logCleanupError(action: string, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error)
+  console.error(`${action} failed during e2e cleanup: ${message}`)
 }
 
 function makeE2EEnv(siloEnv: SiloEnv): E2EEnv {
@@ -262,6 +231,7 @@ function makeE2EEnv(siloEnv: SiloEnv): E2EEnv {
     ...siloEnv,
     NODE_ENV: process.env.NODE_ENV ?? 'development',
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/tmp/press-ms-playwright',
+    PRESS_SERVE_MODE: 'prod',
     TILT_EDITOR: 'true',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
     PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
@@ -283,6 +253,7 @@ async function main(): Promise<number> {
     ...process.env,
     TILT_EDITOR: 'true',
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/tmp/press-ms-playwright',
+    PRESS_SERVE_MODE: 'prod',
   } as E2EEnv
   let e2eEnv = bootstrapEnv
   let composeProjectName: string | undefined
@@ -294,17 +265,20 @@ async function main(): Promise<number> {
       return
     }
     teardownStarted = true
-    await stopSiloUp(siloUp)
-    await teardown(composeProjectName, e2eEnv)
+    try {
+      await stopSiloUp(siloUp)
+    } catch (error) {
+      logCleanupError('stopping silo up', error)
+    }
+    try {
+      await teardown(composeProjectName, e2eEnv)
+    } catch (error) {
+      logCleanupError('silo down --clean', error)
+    }
   }
 
   async function handleSignal(signal: NodeJS.Signals): Promise<void> {
-    try {
-      await cleanup()
-    } catch (error) {
-      console.error(error instanceof Error ? error.message : String(error))
-      process.exit(1)
-    }
+    await cleanup()
     process.exit(signal === 'SIGINT' ? 130 : 143)
   }
 

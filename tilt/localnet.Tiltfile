@@ -38,11 +38,19 @@ def _localnet_env():
     }
 
 
+def _serve_mode():
+    mode = str(os.getenv("PRESS_SERVE_MODE", "dev")).strip().lower()
+    if mode not in ["dev", "prod"]:
+        fail("PRESS_SERVE_MODE must be dev or prod, got " + mode)
+    return mode
+
+
 def press_localnet():
     _require_silo()
     press_port = _required_port("PRESS_PORT")
     compose_project_name = _required_env("COMPOSE_PROJECT_NAME")
     env = _localnet_env()
+    serve_mode = _serve_mode()
 
     docker_compose("compose.yaml", project_name=compose_project_name)
     dc_resource("postgres", labels=["press"])
@@ -71,11 +79,24 @@ def press_localnet():
         labels=["press"],
     )
 
+    if serve_mode == "prod":
+        local_resource(
+            "build-web",
+            cmd="nub run build:web",
+            env={
+                "NODE_ENV": "production",
+                "PRESS_ENABLE_CREDENTIAL_AUTH": "0",
+            },
+            labels=["press"],
+        )
+
     local_resource(
         "web",
-        serve_cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web dev',
+        serve_cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web ' + (
+            "serve:prod" if serve_mode == "prod" else "dev"
+        ),
         serve_env=env,
-        resource_deps=["seed"],
+        resource_deps=["seed", "build-web"] if serve_mode == "prod" else ["seed"],
         readiness_probe=probe(http_get=http_get_action(port=press_port, path="/healthz")),
         labels=["press"],
     )
