@@ -1,0 +1,14 @@
+.git
+.rl
+.direnv
+.nub-cache
+.nub-data
+.press
+artifacts
+test-results
+node_modules
+**/node_modules
+**/dist
+**/tsconfig.tsbuildinfo
+.DS_Store
+*.log

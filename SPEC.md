@@ -258,39 +258,39 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 
 ## Test traceability
 
-| Requirement  | Test file(s) / test name                                                                                                                                     |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| REQ-CFG-001  | `packages/core/src/config.test.ts:22` returns typed config; `packages/core/src/config.test.ts:64` requires production-only config                            |
-| REQ-CFG-002  | `packages/core/src/config.test.ts:38` requires core boot variables; `apps/web/src/server/config.test.ts:18` wraps config failures; `e2e/publish.spec.ts:780` |
-| REQ-AUTH-001 | `packages/core/src/config.test.ts:64` requires production-only config; `apps/web/src/server/config.test.ts:59` registers Google provider                     |
-| REQ-AUTH-002 | `apps/web/src/server/config.test.ts:41` credential provider gating; `e2e/auth.spec.ts:5`; `e2e/publish.spec.ts:780`                                          |
-| REQ-AUTH-003 | `e2e/auth.spec.ts:5` credential provider signs in a seeded localnet user                                                                                     |
-| REQ-AUTH-004 | `e2e/cli.spec.ts:227` press CLI loopback login, publish, list, page set, unpublish, and logout                                                               |
-| REQ-AUTH-005 | `e2e/cli.spec.ts:227` token logout/revoke; `e2e/publish.spec.ts:161` token lastUsedAt                                                                        |
-| REQ-AUTH-006 | `e2e/cli.spec.ts:227` keychain-backed token flow and `PRESS_TOKEN` fallback                                                                                  |
-| REQ-AUTH-007 | `packages/core/src/config.test.ts:22` admin email config; `e2e/publish.spec.ts:270` admin unpublish path                                                     |
-| REQ-ACL-001  | `packages/core/src/acl.test.ts:142` decideAcl read matrix; `e2e/publish.spec.ts:512`, `:589`, `:612`, `:635`, `:666`                                         |
-| REQ-ACL-002  | `apps/web/src/publish/serveAcl.test.ts:23` deniedAclResponse; `e2e/publish.spec.ts:556`, `:589`, `:666`                                                      |
-| REQ-ACL-003  | `packages/core/src/acl.test.ts:164` visibility fallback; `apps/web/src/db/schema.test.ts:36`; `e2e/publish.spec.ts:270`                                      |
-| REQ-ACL-004  | `packages/core/src/acl.test.ts:192` private allowlists; `e2e/publish.spec.ts:635`                                                                            |
-| REQ-ACL-005  | `packages/core/src/acl.test.ts:236` mutations; `e2e/publish.spec.ts:161`, `:270`, `:724`                                                                     |
-| REQ-ACL-006  | `packages/core/src/acl.test.ts:142`; `apps/web/src/db/schema.test.ts:36`; `apps/web/src/publish/serveAcl.test.ts:67`; `e2e/publish.spec.ts:512`              |
-| REQ-PUB-001  | `e2e/publish.spec.ts:161` publish endpoint enforces bearer auth, validation, storage, overwrite, and audit                                                   |
-| REQ-PUB-002  | `packages/core/src/slug.test.ts:10`, `:27` slug grammar; `e2e/publish.spec.ts:161` validation                                                                |
-| REQ-PUB-003  | `packages/core/src/acl.test.ts:236` mutations; `e2e/publish.spec.ts:161`; `e2e/cli.spec.ts:227`                                                              |
-| REQ-PUB-004  | `e2e/publish.spec.ts:161` publish response/storage/audit; `e2e/publish.spec.ts:817` rollback restores previous blob                                          |
-| REQ-PUB-005  | `apps/web/src/publish/passwords.test.ts:5`; `e2e/publish.spec.ts:270`; `e2e/cli.spec.ts:227`                                                                 |
-| REQ-PUB-006  | `packages/core/src/acl.test.ts:236`; `e2e/publish.spec.ts:270`; `e2e/cli.spec.ts:227`                                                                        |
-| REQ-PUB-007  | `packages/core/src/acl.test.ts:236`; `e2e/publish.spec.ts:724`; `e2e/cli.spec.ts:227`                                                                        |
-| REQ-PUB-008  | `e2e/publish.spec.ts:270`; `e2e/publish.spec.ts:724`; `e2e/cli.spec.ts:227`                                                                                  |
-| REQ-PUB-009  | `e2e/publish.spec.ts:119` expectAudit helper coverage; `e2e/publish.spec.ts:161`, `:270`, `:724`, `:817`; `e2e/cli.spec.ts:227`                              |
-| REQ-SRV-001  | `e2e/publish.spec.ts:512`, `:589`, `:612`, `:635`, `:666`, `:724`                                                                                            |
-| REQ-SRV-002  | `apps/web/src/publish/serveAcl.test.ts:17` served headers; `e2e/publish.spec.ts:512`                                                                         |
-| REQ-SRV-003  | `apps/web/src/publish/serveAcl.test.ts:23` denied responses; `e2e/publish.spec.ts:724`                                                                       |
-| REQ-IDX-001  | `e2e/magazine.spec.ts:30`, `:47`, `:62`; `e2e/smoke.spec.ts:75`                                                                                              |
-| REQ-IDX-002  | `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:75`                                                                                                            |
-| REQ-IDX-003  | `e2e/magazine.spec.ts:47`; `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:238`                                                                                |
-| REQ-CLI-001  | `e2e/cli.spec.ts:227` press CLI loopback login, publish, list, page set, unpublish, and logout                                                               |
-| REQ-CLI-002  | `e2e/cli.spec.ts:227` `--json` success/error output and exit codes                                                                                           |
-| REQ-CLI-003  | `e2e/cli.spec.ts:227` host-scoped token storage and `PRESS_TOKEN` fallback                                                                                   |
-| REQ-CLI-004  | `e2e/cli.spec.ts:227` publish URL and one-time password output                                                                                               |
+| Requirement  | Test file(s) / test name                                                                                                                                                                                 |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| REQ-CFG-001  | `packages/core/src/config.test.ts:22` returns typed config; `packages/core/src/config.test.ts:64` requires production-only config; `scripts/smokeImage.ts` image env refusal                             |
+| REQ-CFG-002  | `packages/core/src/config.test.ts:38` requires core boot variables; `apps/web/src/server/config.test.ts:18` wraps config failures; `e2e/publish.spec.ts:780`; `scripts/smokeImage.ts` image boot refusal |
+| REQ-AUTH-001 | `packages/core/src/config.test.ts:64` requires production-only config; `apps/web/src/server/config.test.ts:59` registers Google provider                                                                 |
+| REQ-AUTH-002 | `apps/web/src/server/config.test.ts:41` credential provider gating; `e2e/auth.spec.ts:5`; `e2e/publish.spec.ts:780`; `scripts/smokeImage.ts` production image refusal                                    |
+| REQ-AUTH-003 | `e2e/auth.spec.ts:5` credential provider signs in a seeded localnet user                                                                                                                                 |
+| REQ-AUTH-004 | `e2e/cli.spec.ts:227` press CLI loopback login, publish, list, page set, unpublish, and logout                                                                                                           |
+| REQ-AUTH-005 | `e2e/cli.spec.ts:227` token logout/revoke; `e2e/publish.spec.ts:161` token lastUsedAt                                                                                                                    |
+| REQ-AUTH-006 | `e2e/cli.spec.ts:227` keychain-backed token flow and `PRESS_TOKEN` fallback                                                                                                                              |
+| REQ-AUTH-007 | `packages/core/src/config.test.ts:22` admin email config; `e2e/publish.spec.ts:270` admin unpublish path                                                                                                 |
+| REQ-ACL-001  | `packages/core/src/acl.test.ts:142` decideAcl read matrix; `e2e/publish.spec.ts:512`, `:589`, `:612`, `:635`, `:666`                                                                                     |
+| REQ-ACL-002  | `apps/web/src/publish/serveAcl.test.ts:23` deniedAclResponse; `e2e/publish.spec.ts:556`, `:589`, `:666`                                                                                                  |
+| REQ-ACL-003  | `packages/core/src/acl.test.ts:164` visibility fallback; `apps/web/src/db/schema.test.ts:36`; `e2e/publish.spec.ts:270`                                                                                  |
+| REQ-ACL-004  | `packages/core/src/acl.test.ts:192` private allowlists; `e2e/publish.spec.ts:635`                                                                                                                        |
+| REQ-ACL-005  | `packages/core/src/acl.test.ts:236` mutations; `e2e/publish.spec.ts:161`, `:270`, `:724`                                                                                                                 |
+| REQ-ACL-006  | `packages/core/src/acl.test.ts:142`; `apps/web/src/db/schema.test.ts:36`; `apps/web/src/publish/serveAcl.test.ts:67`; `e2e/publish.spec.ts:512`                                                          |
+| REQ-PUB-001  | `e2e/publish.spec.ts:161` publish endpoint enforces bearer auth, validation, storage, overwrite, and audit                                                                                               |
+| REQ-PUB-002  | `packages/core/src/slug.test.ts:10`, `:27` slug grammar; `e2e/publish.spec.ts:161` validation                                                                                                            |
+| REQ-PUB-003  | `packages/core/src/acl.test.ts:236` mutations; `e2e/publish.spec.ts:161`; `e2e/cli.spec.ts:227`                                                                                                          |
+| REQ-PUB-004  | `e2e/publish.spec.ts:161` publish response/storage/audit; `e2e/publish.spec.ts:817` rollback restores previous blob                                                                                      |
+| REQ-PUB-005  | `apps/web/src/publish/passwords.test.ts:5`; `e2e/publish.spec.ts:270`; `e2e/cli.spec.ts:227`                                                                                                             |
+| REQ-PUB-006  | `packages/core/src/acl.test.ts:236`; `e2e/publish.spec.ts:270`; `e2e/cli.spec.ts:227`                                                                                                                    |
+| REQ-PUB-007  | `packages/core/src/acl.test.ts:236`; `e2e/publish.spec.ts:724`; `e2e/cli.spec.ts:227`                                                                                                                    |
+| REQ-PUB-008  | `e2e/publish.spec.ts:270`; `e2e/publish.spec.ts:724`; `e2e/cli.spec.ts:227`                                                                                                                              |
+| REQ-PUB-009  | `e2e/publish.spec.ts:119` expectAudit helper coverage; `e2e/publish.spec.ts:161`, `:270`, `:724`, `:817`; `e2e/cli.spec.ts:227`                                                                          |
+| REQ-SRV-001  | `e2e/publish.spec.ts:512`, `:589`, `:612`, `:635`, `:666`, `:724`; `scripts/smokeImage.ts` image-served public page                                                                                      |
+| REQ-SRV-002  | `apps/web/src/publish/serveAcl.test.ts:17` served headers; `e2e/publish.spec.ts:512`; `scripts/smokeImage.ts` image CSP byte-compare                                                                     |
+| REQ-SRV-003  | `apps/web/src/publish/serveAcl.test.ts:23` denied responses; `e2e/publish.spec.ts:724`                                                                                                                   |
+| REQ-IDX-001  | `e2e/magazine.spec.ts:30`, `:47`, `:62`; `e2e/smoke.spec.ts:75`; `scripts/smokeImage.ts` image feed shell                                                                                                |
+| REQ-IDX-002  | `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:75`                                                                                                                                                        |
+| REQ-IDX-003  | `e2e/magazine.spec.ts:47`; `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:238`                                                                                                                            |
+| REQ-CLI-001  | `e2e/cli.spec.ts:227` press CLI loopback login, publish, list, page set, unpublish, and logout                                                                                                           |
+| REQ-CLI-002  | `e2e/cli.spec.ts:227` `--json` success/error output and exit codes                                                                                                                                       |
+| REQ-CLI-003  | `e2e/cli.spec.ts:227` host-scoped token storage and `PRESS_TOKEN` fallback                                                                                                                               |
+| REQ-CLI-004  | `e2e/cli.spec.ts:227` publish URL and one-time password output                                                                                                                                           |

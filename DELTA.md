@@ -168,6 +168,31 @@ Known gaps and follow-ups:
     An earlier attempt-2 series (80/80, 80/80, 79/80) exposed the
     `magazine.spec.ts` snapshot-read race that attempt 3 fixed; the deviation
     is retired in `DEVIATIONS.md` on this evidence.
+- Phase-3 local image is wired and smoke-gated. `Dockerfile` builds
+  `press-web:local` with Node 24 plus Bun 1.3.13 and Nub 0.2.5, installs from
+  the committed `lock.yaml` with `--frozen-lockfile`, builds `@press/core`,
+  runs the production `apps/web/src/buildWeb.ts` wrapper, and serves the built
+  artifact with `one serve --host 0.0.0.0 --port ${PRESS_PORT:-4174}` after a
+  fail-loud config preflight (`apps/web/src/setupServer.ts`). The image embeds
+  no real secrets; build-time placeholders remain the same non-secret phase-1
+  values, and runtime config is supplied by `docker run` env/env-file.
+- `nub run smoke:image` is the local image gate. It uses a deterministic local
+  tag (`press-web:local`, overrideable via `PRESS_IMAGE_NAME`), builds with
+  `docker buildx build --load`, proves missing-env boot refusal and the
+  `NODE_ENV=production` + `PRESS_ENABLE_CREDENTIAL_AUTH=1` INV-5 refusal,
+  boots localnet Postgres through `compose.yaml`, runs the same migrate/seed
+  commands as `scripts/localnet.ts`, starts the container on the compose
+  network with seeded localnet env, then HTTP-checks `/healthz`, `/`, and the
+  seeded public page
+  `/p/market-notes/agent-margin-review.html`. The page check byte-compares the
+  observed `content-security-policy` header against the canonical
+  `servedPageHeaders['Content-Security-Policy']` constant. The script removes
+  the app container, compose network, and volumes in `finally`.
+- Handoff for the `0xsend/press` mirror: Allen should choose the remote image
+  repository/tag convention, rebuild from this Dockerfile, run
+  `nub run smoke:image` locally against that tree, then push/mirror the image
+  and author manifests outside this loop. No registry login, remote tag, push,
+  deploy manifest, DNS, or live secret was created here.
 - Real macOS keychain interaction is stub-verified only and remains an attended
   final gate.
 - GitHub Actions has not executed because the repo has not been pushed.
@@ -178,8 +203,8 @@ Boundary handoff for Allen:
 2. Confirm GitHub Actions is green.
 3. Create the Google OAuth client.
 4. Configure DNS for instance #1 at `reports.send.it`.
-5. Finish the local container image phase, then build and mirror the image to
-   `0xsend/press` with its manifests.
+5. Build and mirror the image to `0xsend/press` with Allen's remote tag
+   convention, then author the manifests.
 6. Provision ESO secrets.
 7. Deploy.
 8. Run the attended real-Google final-gate walkthrough required by `BRIEF.md`.
