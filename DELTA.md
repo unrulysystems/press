@@ -108,7 +108,7 @@ Known gaps and follow-ups:
   declaration is in Rollup/Rolldown namespace-import deconfliction/interop for
   the SSR chunk produced under One's build pipeline.
 - Phase-1 fix directions, ranked by the allowed intervention order in the
-  loop plan (`loop.md:41-46`, `loop.md:75-87`): first try app-level Vite/One
+  loop plan (`loop.md@fe84121:41-46`, `loop.md@fe84121:75-87` (absorbed plan, in git history)): first try app-level Vite/One
   config because the app already controls `ssr.external`, `ssr.noExternal`,
   aliases, and plugin order (`apps/web/vite.config.ts:7-35`), and the
   supporting evidence is that prebundled SSR output preserves the binding
@@ -121,7 +121,7 @@ Known gaps and follow-ups:
   `apps/web/node_modules/one/dist/esm/cli/build.mjs:729-737`). Treat a One
   version change as third because the installed versions are pinned in
   `apps/web/package.json:21-27`, and the loop plan allows version changes only
-  after config and patch paths (`loop.md:41-46`).
+  after config and patch paths (`loop.md@fe84121:41-46`, absorbed plan).
 - The `build:web` gate is green after phase-1 in production mode:
   `nub run build:web` completes `one build --platform=web`,
   imports/prerenders `/`, `/login`, and `/c/:collection`, emits
