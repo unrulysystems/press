@@ -8,6 +8,7 @@ import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 
 const root = resolve(import.meta.dirname, '..')
 const siloEnvFile = resolve(root, '.silo.env')
+const composeFile = resolve(root, 'compose.yaml')
 const oracleInstanceName = 'oracle'
 const outputDir = resolve(root, 'artifacts/oracle')
 const healthTimeoutMs = Number(process.env.PRESS_ORACLE_HEALTH_TIMEOUT_MS ?? `${4 * 60_000}`)
@@ -229,9 +230,11 @@ async function stopSiloUp(child: ChildProcess | undefined): Promise<void> {
 }
 
 async function teardown(env: OracleEnv): Promise<void> {
-  const result = await run('silo', ['down', '--clean'], env)
+  const result = await run('docker', ['compose', 'down', '-v', '--remove-orphans'], env)
   if (result.code !== 0) {
-    throw new Error(`silo down --clean exited with ${result.signal ?? result.code}`)
+    throw new Error(
+      `docker compose down -v --remove-orphans exited with ${result.signal ?? result.code}`,
+    )
   }
 }
 
@@ -245,6 +248,7 @@ function makeOracleEnv(siloEnv: SiloEnv): OracleEnv {
     ...process.env,
     ...siloEnv,
     NODE_ENV: process.env.NODE_ENV ?? 'development',
+    COMPOSE_FILE: composeFile,
     PRESS_SERVE_MODE: 'dev',
     TILT_EDITOR: 'true',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
@@ -338,7 +342,7 @@ async function main(): Promise<number> {
         try {
           await teardown(oracleEnv)
         } catch (error) {
-          logCleanupError('silo down --clean', error)
+          logCleanupError('docker compose down -v --remove-orphans', error)
           errors.push(error instanceof Error ? error : new Error(String(error)))
         }
       }

@@ -4,6 +4,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
 const siloEnvFile = resolve(root, '.silo.env')
+const composeFile = resolve(root, 'compose.yaml')
 const e2eInstanceName = 'e2e'
 const healthTimeoutMs = Number(process.env.PRESS_E2E_HEALTH_TIMEOUT_MS ?? `${4 * 60_000}`)
 const shutdownTimeoutMs = 20_000
@@ -214,9 +215,15 @@ async function teardown(composeProjectName: string | undefined, env: E2EEnv): Pr
     return
   }
 
-  const result = await run('silo', ['down', '--clean'], env)
+  const result = await run('docker', ['compose', 'down', '-v', '--remove-orphans'], {
+    ...env,
+    COMPOSE_FILE: composeFile,
+    COMPOSE_PROJECT_NAME: composeProjectName,
+  })
   if (result.code !== 0) {
-    throw new Error(`silo down --clean exited with ${result.signal ?? result.code}`)
+    throw new Error(
+      `docker compose down -v --remove-orphans exited with ${result.signal ?? result.code}`,
+    )
   }
 }
 
@@ -234,6 +241,7 @@ function makeE2EEnv(siloEnv: SiloEnv): E2EEnv {
     ...process.env,
     ...siloEnv,
     NODE_ENV: process.env.NODE_ENV ?? 'development',
+    COMPOSE_FILE: composeFile,
     PLAYWRIGHT_BROWSERS_PATH: process.env.PLAYWRIGHT_BROWSERS_PATH ?? '/tmp/press-ms-playwright',
     PRESS_SERVE_MODE: 'prod',
     TILT_EDITOR: 'true',
@@ -280,7 +288,7 @@ async function main(): Promise<number> {
       try {
         await teardown(composeProjectName, e2eEnv)
       } catch (error) {
-        logCleanupError('silo down --clean', error)
+        logCleanupError('docker compose down -v --remove-orphans', error)
         errors.push(asError(error))
       }
       return errors

@@ -330,13 +330,6 @@ async function stopChildProcess(child: ChildProcess | undefined): Promise<void> 
   }
 }
 
-async function siloDown(env: DrillEnv): Promise<void> {
-  const result = await runForeground('silo', ['down', '--clean'], env)
-  if (result.code !== 0) {
-    throw new Error(`silo down --clean exited with ${result.signal ?? result.code}`)
-  }
-}
-
 function logCleanupError(action: string, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error)
   console.error(`${action} failed during backup/restore drill cleanup: ${message}`)
@@ -590,12 +583,6 @@ async function main(): Promise<number> {
         await destroyState(env, env.PRESS_STORAGE_DIR)
       } catch (error) {
         logCleanupError('docker compose down -v', error)
-        errors.push(error instanceof Error ? error : new Error(String(error)))
-      }
-      try {
-        await siloDown(env)
-      } catch (error) {
-        logCleanupError('silo down --clean', error)
         errors.push(error instanceof Error ? error : new Error(String(error)))
       }
     }
