@@ -63,12 +63,16 @@ Driver-side verification evidence for the migration:
 
 Boundary handoff for Allen:
 
-1. CI currently runs `nub run e2e`; that command now requires `silo` plus
-   Docker on the runner. Installing silo in `.github/workflows/ci.yml` is
-   infra and remains Allen's call.
-2. The review sandbox cannot run Docker/Chromium proofs; use the unsandboxed
-   driver as the execution gate for oracle screenshots, full e2e, and the
-   final isolation proof.
+1. `nub run e2e` now requires `silo` + Tilt + Docker on the runner.
+   `.github/workflows/ci.yml` installs them before the E2E step
+   (`bun add -g @0xbigboss/silo@0.5.9`, pinned Tilt `v0.36.1`; ubuntu-latest
+   ships Docker + the compose plugin system-wide). This could not be exercised
+   from the local environment — confirm the first CI run converges (silo/Tilt
+   PATH, Tilt convergence in Actions) at push time; the install step is the
+   only unverified piece of the migration.
+2. The review sandbox cannot run Docker/Chromium proofs; the unsandboxed driver
+   is the execution gate for oracle screenshots, full e2e, and the isolation
+   proof (all passed — see above).
 
 ## 2026-07-03 — v1.3 loop wrap (upstream, dev-share, hardening, v0.1.0)
 

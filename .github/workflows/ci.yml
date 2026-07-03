@@ -20,6 +20,8 @@ jobs:
     timeout-minutes: 60
     env:
       PLAYWRIGHT_BROWSERS_PATH: /tmp/press-ms-playwright
+      # Non-interactive Tilt so `silo up` (which runs `tilt`) never opens an editor.
+      TILT_EDITOR: "true"
     steps:
       - uses: actions/checkout@v4
         timeout-minutes: 5
@@ -28,6 +30,17 @@ jobs:
         timeout-minutes: 5
 
       - uses: oven-sh/setup-bun@v2
+        timeout-minutes: 5
+
+      # `nub run e2e` boots an isolated localnet via silo + Tilt (k3d disabled), so the
+      # runner needs both on PATH. Docker + the compose plugin are preinstalled
+      # system-wide on ubuntu-latest, so the compose CLI is discoverable here (unlike a
+      # HOME-overridden sandbox). Pinned to the versions used locally.
+      - name: Install silo + Tilt (localnet orchestration for e2e)
+        run: |
+          bun add -g @0xbigboss/silo@0.5.9
+          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/v0.36.1/scripts/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         timeout-minutes: 5
 
       - name: Install dependencies
