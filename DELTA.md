@@ -1,5 +1,12 @@
 # press — DELTA
 
+## 2026-07-03 — v1.2 phase 0 CI gate completeness
+
+CI now runs the full local harness in order: `nub run check`, `nub run test`,
+`nub run e2e`, `nub run build:web`, and `nub run smoke:image`, with bounded
+job and step timeouts. It remains verify-only and still executes only after
+Allen pushes the repo.
+
 ## 2026-07-03 — v1.1 loop wrap (production build, prod serving, image)
 
 Status: the v1.1 loop is complete — all 4 phases done and independently
