@@ -834,16 +834,27 @@ test('transaction rollback restores the previous blob when audit insert fails', 
     contentHash: hashBody(originalBody),
   })
 
-  await installFailingAuditTrigger(db, collectionSlug)
+  const failingAuditTrigger = await installFailingAuditTrigger(db, collectionSlug)
 
   try {
+    const rollbackBody = '<!doctype html><title>Rollback</title>'
     const response = await api.put(`/api/pages/${collectionSlug}/${fileSlug}`, {
       headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-      data: '<!doctype html><title>Rollback</title>',
+      data: rollbackBody,
     })
     expect(response.status()).toBe(500)
+    expect(await response.json()).toEqual({ error: 'internal server error' })
+    expect(
+      await findMatchingAuditEvent(db, {
+        collectionSlug,
+        fileSlug,
+        action: 'overwrite',
+        userId: actors.owner.id,
+        contentHash: hashBody(rollbackBody),
+      }),
+    ).toBeUndefined()
   } finally {
-    await removeFailingAuditTrigger(db)
+    await removeFailingAuditTrigger(db, failingAuditTrigger)
   }
 
   expect(await blobDirectoryEntries(collectionSlug)).toEqual([fileSlug])
