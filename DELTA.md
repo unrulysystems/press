@@ -1,5 +1,56 @@
 # press — DELTA
 
+## 2026-07-03 — v1.3 loop wrap (upstream, dev-share, hardening, v0.1.0)
+
+The v1.3 loop is complete — all six phases done and independently reviewed.
+Landed: upstream bump to `one@1.20.2` / `vite@8.1.3` with the three
+workarounds evidence-kept and filed-ready drafts under `docs/upstream/`
+(phase 0); `nub run dev:share` shared human+agent localnet with a minted
+agent token and lifecycle-safe teardown (phase 1); a proven Better Auth
+sign-in 429 floor (phase 2); a `nub run drill:backup-restore` durability
+drill + `docs/ops.md` runbook (phase 3); a whole-repo security scrub —
+8 findings fixed, 3 deferred to Allen (phase 4, `AUDIT.md` + `DEVIATIONS.md`);
+and this feat-only history rebuild at `v0.1.0` (phase 5). Full harness was
+green at wrap. Nothing was pushed. The v1.3 plan (`loop.md`, commit
+`14a0268`) is absorbed into this file and deleted per its wrap prescription.
+
+History rewrite (phase 5): local `main` was rebuilt from the 48-commit mixed
+history into feat-only commits — `feat(core)`, `feat(cli)`, `feat(web)`,
+`feat(harness)`, `feat(ci/image)`, one `docs` commit — plus
+`chore(release): v0.1.0` and this wrap. The tree-identity gate held:
+`git diff archive/pre-0.1.0 <feat-history>` was empty before the version
+bumps. All four workspace packages are `0.1.0`. **Tag placement chosen:**
+`v0.1.0` sits at the true launch tip (this wrap commit) so it carries no
+`loop.md` and the final DELTA. `archive/pre-0.1.0` preserves the full
+pre-rewrite history, so every historical SHA cited in this file
+(`fe84121`, `ca8d601`, `14a0268`, etc.) remains reachable via that tag.
+
+Boundary handoff for Allen (supersedes the v1.1-era list below):
+
+1. Force-push the rewritten history and tags (private repo, Allen is the only
+   consumer; `main` was pushed this morning as the old 48-commit history):
+   - `git push --force-with-lease origin main`
+   - `git push origin v0.1.0 archive/pre-0.1.0`
+2. Confirm GitHub Actions is green on the rewritten `main`.
+3. Repo hardening (GitHub settings): branch protection on `main`, secret
+   scanning + push protection, Dependabot. The `update-deps` workflow now
+   opens PRs (F-07), so branch protection composes cleanly.
+4. Re-run the confirmatory security audit in a clean env/CI to flip the eight
+   fixed findings to `resolved` (F-03/F-04/F-05 stay `open`, deferred) — the
+   in-loop re-audit could not complete (see the re-audit entry below).
+5. Decide the two deferred security findings (`DEVIATIONS.md`): F-03/F-05
+   (CLI authorize approval screen, amends REQ-AUTH-004) and F-04 (token
+   at-rest hashing/encryption, Better Auth framework-level).
+6. Create the Google OAuth client.
+7. Configure DNS for instance #1 at `reports.send.it`.
+8. Build + mirror the image to `0xsend/press` with Allen's tag convention and
+   author the manifests. Optional: trivy/scout scan the image first.
+9. Provision ESO secrets.
+10. Deploy.
+11. Attended macOS keychain test (`press login` loopback on a real machine —
+    stub-verified only in the loop).
+12. Attended real-Google final-gate walkthrough required by `BRIEF.md`.
+
 ## 2026-07-03 — phase 4 security re-audit (bounded: could not complete)
 
 The confirmatory re-audit meant to flip the eight fixed findings to
