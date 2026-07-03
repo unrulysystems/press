@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Full Harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /tmp/press-ms-playwright
+    steps:
+      - uses: actions/checkout@v4
+        timeout-minutes: 5
+
+      - uses: nubjs/setup-nub@v0
+        timeout-minutes: 5
+
+      - uses: oven-sh/setup-bun@v2
+        timeout-minutes: 5
+
+      - name: Install dependencies
+        run: nub ci
+        timeout-minutes: 10
+
+      - name: Install Playwright browser
+        run: bunx playwright install --with-deps chromium
+        timeout-minutes: 10
+
+      - name: Check
+        run: nub run check
+        timeout-minutes: 10
+
+      - name: Unit tests
+        run: nub run test
+        timeout-minutes: 10
+
+      - name: E2E
+        run: nub run e2e
+        timeout-minutes: 15
+
+      - name: Build web
+        run: nub run build:web
+        timeout-minutes: 15
+
+      - name: Image smoke
+        run: nub run smoke:image
+        timeout-minutes: 30

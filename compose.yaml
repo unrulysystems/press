@@ -1,0 +1,21 @@
+name: press-localnet
+
+services:
+  postgres:
+    image: postgres:17
+    ports:
+      - '${PRESS_POSTGRES_PORT:-54329}:5432'
+    environment:
+      POSTGRES_DB: press
+      POSTGRES_USER: press
+      POSTGRES_PASSWORD: press
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U press -d press']
+      interval: 1s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
