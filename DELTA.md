@@ -7,6 +7,24 @@ CI now runs the full local harness in order: `nub run check`, `nub run test`,
 job and step timeouts. It remains verify-only and still executes only after
 Allen pushes the repo.
 
+## 2026-07-03 — v1.2 phase 1 Connection close evidence
+
+The e2e API-context `Connection: close` mitigation was removed from
+`e2e/api.ts`, so Playwright API contexts now use default keep-alive behavior
+against `one serve`. Assertions and other harness behavior are unchanged. This
+is pending the driver's evidence series: at least 3 consecutive cold-state full
+`nub run e2e` runs after the mitigation removal.
+
+Driver evidence, recorded 2026-07-03 (state forced maximally cold before run
+1: `docker compose -p press-localnet down -v` plus storage removal):
+
+- Run 1: `nub run e2e` exit 0, 80 passed (22.3s).
+- Run 2: `nub run e2e` exit 0, 80 passed (20.7s).
+- Run 3: `nub run e2e` exit 0, 80 passed (20.8s).
+
+No `EPIPE`/`ECONNRESET` or any API-write failure appeared; the mitigation is
+deleted for good and `DEVIATIONS.md` reflects the outcome.
+
 ## 2026-07-03 — v1.1 loop wrap (production build, prod serving, image)
 
 Status: the v1.1 loop is complete — all 4 phases done and independently

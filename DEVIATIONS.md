@@ -19,6 +19,9 @@
   one remaining snapshot-read race in `e2e/magazine.spec.ts` with retrying
   web-first assertions (identical expected values). Driver evidence in
   `DELTA.md`: 3 consecutive maximally-cold `nub run e2e` runs, 80/80 each.
-  Assertions were not weakened. The dev-server `Connection: close`
-  API-context mitigation remains in the e2e fixtures (no evidence yet that
-  it is unnecessary under `one serve`).
+  Assertions were not weakened. The e2e API-context `Connection: close`
+  mitigation was removed 2026-07-03 after a prod-server keep-alive
+  experiment: 3 consecutive maximally-cold `nub run e2e` runs passed 80/80
+  with default keep-alive and no `EPIPE`/`ECONNRESET` (evidence in
+  `DELTA.md`). The mitigation is deleted for good; nothing about it remains
+  active.
