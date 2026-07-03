@@ -21,7 +21,7 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: /tmp/press-ms-playwright
       # Non-interactive Tilt so `silo up` (which runs `tilt`) never opens an editor.
-      TILT_EDITOR: "true"
+      TILT_EDITOR: 'true'
     steps:
       - uses: actions/checkout@v4
         timeout-minutes: 5
