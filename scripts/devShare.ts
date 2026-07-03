@@ -33,6 +33,7 @@ type SiloEnv = {
   readonly PRESS_BASE_URL: string
   readonly PRESS_PORT: string
   readonly PRESS_POSTGRES_PORT: string
+  readonly SILO_WORKSPACE?: string
   readonly WORKSPACE_NAME: string
 }
 
@@ -88,7 +89,8 @@ async function readSiloEnv(): Promise<SiloEnv> {
     PRESS_BASE_URL: required(parsed, 'PRESS_BASE_URL'),
     PRESS_PORT: required(parsed, 'PRESS_PORT'),
     PRESS_POSTGRES_PORT: required(parsed, 'PRESS_POSTGRES_PORT'),
-    WORKSPACE_NAME: parsed.WORKSPACE_NAME ?? instanceName,
+    SILO_WORKSPACE: parsed.SILO_WORKSPACE,
+    WORKSPACE_NAME: parsed.WORKSPACE_NAME ?? parsed.SILO_WORKSPACE ?? instanceName,
   }
 }
 
@@ -258,11 +260,10 @@ function makeDevShareEnv(siloEnv: SiloEnv): DevShareEnv {
     TILT_EDITOR: 'true',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
     PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
-    PRESS_STORAGE_DIR:
-      process.env.PRESS_STORAGE_DIR ?? `.press/silo/${siloEnv.WORKSPACE_NAME}/storage`,
+    PRESS_STORAGE_DIR: `.press/silo/${siloEnv.WORKSPACE_NAME}/storage`,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? 'localnet-secret-at-least-32-bytes',
     PRESS_ENABLE_CREDENTIAL_AUTH: process.env.PRESS_ENABLE_CREDENTIAL_AUTH ?? '1',
-    PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? `${25 * 1024 * 1024}`,
+    PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? '26214400',
   }
 }
 

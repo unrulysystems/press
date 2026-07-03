@@ -19,8 +19,10 @@ type SiloEnv = {
   readonly COMPOSE_PROJECT_NAME: string
   readonly DATABASE_URL: string
   readonly PRESS_BASE_URL: string
+  readonly PRESS_PORT: string
+  readonly PRESS_POSTGRES_PORT: string
+  readonly SILO_WORKSPACE?: string
   readonly WORKSPACE_NAME: string
-  readonly PRESS_STORAGE_DIR?: string
 }
 type AclFacts = {
   readonly publicStatus: number
@@ -84,8 +86,10 @@ async function readSiloEnv(): Promise<SiloEnv> {
     COMPOSE_PROJECT_NAME: required(parsed, 'COMPOSE_PROJECT_NAME'),
     DATABASE_URL: required(parsed, 'DATABASE_URL'),
     PRESS_BASE_URL: required(parsed, 'PRESS_BASE_URL'),
-    WORKSPACE_NAME: parsed.WORKSPACE_NAME ?? instanceName,
-    PRESS_STORAGE_DIR: parsed.PRESS_STORAGE_DIR,
+    PRESS_PORT: required(parsed, 'PRESS_PORT'),
+    PRESS_POSTGRES_PORT: required(parsed, 'PRESS_POSTGRES_PORT'),
+    SILO_WORKSPACE: parsed.SILO_WORKSPACE,
+    WORKSPACE_NAME: parsed.WORKSPACE_NAME ?? parsed.SILO_WORKSPACE ?? instanceName,
   }
 }
 
@@ -188,15 +192,36 @@ async function runRequired(command: string, args: readonly string[], env: DrillE
   }
 }
 
-function startSiloUp(env: DrillEnv): ChildProcess {
-  const child = spawn('silo', ['up', instanceName], {
+async function runCapturedRequired(
+  command: string,
+  args: readonly string[],
+  env: DrillEnv,
+  timeoutMs: number,
+): Promise<void> {
+  await run(command, args, { env, timeoutMs })
+}
+
+function composeArgs(env: DrillEnv, args: readonly string[]): string[] {
+  return ['compose', '-f', 'compose.yaml', '-p', env.COMPOSE_PROJECT_NAME, ...args]
+}
+
+async function dockerCompose(
+  env: DrillEnv,
+  args: readonly string[],
+  timeoutMs = 60_000,
+): Promise<void> {
+  await runCapturedRequired('docker', composeArgs(env, args), env, timeoutMs)
+}
+
+function startPressServer(env: DrillEnv): ChildProcess {
+  const child = spawn('nub', ['run', '--filter', '@press/web', 'dev'], {
     cwd: root,
     detached: process.platform !== 'win32',
     env,
     stdio: 'inherit',
   })
   child.on('error', (error) => {
-    console.error(`silo up failed to start: ${error.message}`)
+    console.error(`press server failed to start: ${error.message}`)
   })
   return child
 }
@@ -229,7 +254,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
 
 async function waitForHealth(
   baseUrl: string,
-  siloExit: Promise<ProcessResult>,
+  serverExit: Promise<ProcessResult>,
   timeoutMs: number,
 ): Promise<void> {
   const url = `${baseUrl}/healthz`
@@ -252,13 +277,13 @@ async function waitForHealth(
       return 'retry' as const
     })()
     // oxlint-disable-next-line no-await-in-loop -- Polling observes one health state at a time.
-    const result = await Promise.race([probe, siloExit])
+    const result = await Promise.race([probe, serverExit])
     if (result === 'ready') {
       return
     }
     if (result !== 'retry') {
       throw new Error(
-        `silo up exited before ${url} became healthy: ${result.signal ?? result.code}`,
+        `press server exited before ${url} became healthy: ${result.signal ?? result.code}`,
       )
     }
   }
@@ -268,7 +293,7 @@ async function waitForHealth(
   )
 }
 
-async function stopSiloUp(child: ChildProcess | undefined): Promise<void> {
+async function stopChildProcess(child: ChildProcess | undefined): Promise<void> {
   if (!child || child.exitCode !== null || child.signalCode !== null) {
     return
   }
@@ -305,7 +330,7 @@ async function stopSiloUp(child: ChildProcess | undefined): Promise<void> {
   }
 }
 
-async function teardown(env: DrillEnv): Promise<void> {
+async function siloDown(env: DrillEnv): Promise<void> {
   const result = await runForeground('silo', ['down', '--clean'], env)
   if (result.code !== 0) {
     throw new Error(`silo down --clean exited with ${result.signal ?? result.code}`)
@@ -318,11 +343,11 @@ function logCleanupError(action: string, error: unknown): void {
 }
 
 function storageDirFromSiloEnv(siloEnv: SiloEnv): string {
-  return (
-    process.env.PRESS_STORAGE_DIR ??
-    siloEnv.PRESS_STORAGE_DIR ??
-    resolve(root, '.press/silo', siloEnv.WORKSPACE_NAME, 'storage')
-  )
+  return `.press/silo/${siloEnv.WORKSPACE_NAME}/storage`
+}
+
+function storagePath(storageDir: string): string {
+  return resolve(root, storageDir)
 }
 
 function makeDrillEnv(siloEnv: SiloEnv, storageDir: string): DrillEnv {
@@ -337,12 +362,12 @@ function makeDrillEnv(siloEnv: SiloEnv, storageDir: string): DrillEnv {
     PRESS_STORAGE_DIR: storageDir,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? 'localnet-secret-at-least-32-bytes',
     PRESS_ENABLE_CREDENTIAL_AUTH: process.env.PRESS_ENABLE_CREDENTIAL_AUTH ?? '1',
-    PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? `${25 * 1024 * 1024}`,
+    PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? '26214400',
   }
 }
 
 function blobPath(storageDir: string): string {
-  return resolve(storageDir, publicCollection, publicFile)
+  return resolve(storagePath(storageDir), publicCollection, publicFile)
 }
 
 async function sha256File(path: string): Promise<string> {
@@ -362,6 +387,41 @@ async function postgresContainer(env: DrillEnv): Promise<string> {
     },
   )
   return container
+}
+
+async function waitForPostgres(env: DrillEnv, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  let lastError: unknown
+
+  while (Date.now() < deadline) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Postgres readiness is an ordered poll.
+      await postgresContainer(env)
+      return
+    } catch (error) {
+      lastError = error
+      // oxlint-disable-next-line no-await-in-loop -- Backoff between readiness probes.
+      await sleep(500)
+    }
+  }
+
+  throw new Error(`postgres did not become ready: ${String(lastError)}`)
+}
+
+async function startEmptyPostgres(env: DrillEnv): Promise<void> {
+  await dockerCompose(env, ['up', '-d', 'postgres'])
+  await waitForPostgres(env, 60_000)
+}
+
+async function migrateAndSeed(env: DrillEnv, storageDir: string): Promise<void> {
+  await mkdir(storagePath(storageDir), { recursive: true })
+  await runCapturedRequired('nub', ['run', '--filter', '@press/web', 'db:migrate'], env, 60_000)
+  await runCapturedRequired('nub', ['run', '--filter', '@press/web', 'db:seed'], env, 60_000)
+}
+
+async function destroyState(env: DrillEnv, storageDir: string): Promise<void> {
+  await dockerCompose(env, ['down', '-v', '--remove-orphans'])
+  await rm(storagePath(storageDir), { recursive: true, force: true })
 }
 
 async function querySingle(env: DrillEnv, sql: string): Promise<string> {
@@ -443,42 +503,15 @@ async function takeBackup(env: DrillEnv, storageDir: string, backupDir: string):
     { env, timeoutMs: 60_000 },
   )
   await writeFile(resolve(backupDir, 'database.dump'), dump.stdout)
-  await cp(storageDir, resolve(backupDir, 'blobs'), { recursive: true })
+  await cp(storagePath(storageDir), resolve(backupDir, 'blobs'), { recursive: true })
 }
 
-async function wipeDrillState(env: DrillEnv, storageDir: string): Promise<void> {
-  const container = await postgresContainer(env)
-  await run(
-    'docker',
-    [
-      'exec',
-      container,
-      'psql',
-      '-U',
-      'press',
-      '-d',
-      'press',
-      '-v',
-      'ON_ERROR_STOP=1',
-      '-c',
-      `do $$
-declare
-  table_record record;
-begin
-  for table_record in
-    select tablename from pg_tables where schemaname = 'public'
-  loop
-    execute format('truncate table %I.%I restart identity cascade', 'public', table_record.tablename);
-  end loop;
-end $$;`,
-    ],
-    { env, timeoutMs: 30_000 },
-  )
-  await rm(storageDir, { recursive: true, force: true })
-  await mkdir(storageDir, { recursive: true })
-}
-
-async function restoreBackup(env: DrillEnv, storageDir: string, backupDir: string): Promise<void> {
+async function restoreBackupToEmptyTarget(
+  env: DrillEnv,
+  storageDir: string,
+  backupDir: string,
+): Promise<void> {
+  await startEmptyPostgres(env)
   const container = await postgresContainer(env)
   await run(
     'docker',
@@ -502,9 +535,10 @@ async function restoreBackup(env: DrillEnv, storageDir: string, backupDir: strin
       timeoutMs: 60_000,
     },
   )
-  await rm(storageDir, { recursive: true, force: true })
-  await mkdir(dirname(storageDir), { recursive: true })
-  await cp(resolve(backupDir, 'blobs'), storageDir, { recursive: true })
+  const targetStoragePath = storagePath(storageDir)
+  await rm(targetStoragePath, { recursive: true, force: true })
+  await mkdir(dirname(targetStoragePath), { recursive: true })
+  await cp(resolve(backupDir, 'blobs'), targetStoragePath, { recursive: true })
 }
 
 function assertRestoredFacts(baseline: BaselineFacts, restored: BaselineFacts): void {
@@ -534,25 +568,34 @@ async function main(): Promise<number> {
   } as DrillEnv
   let tmp: string | undefined
   let env = bootstrapEnv
-  let siloUp: ChildProcess | undefined
-  let siloReadyForDown = false
+  let server: ChildProcess | undefined
+  let envReadyForTeardown = false
   let cleanupStarted = false
 
-  async function cleanup(): Promise<void> {
+  async function cleanup(): Promise<Error[]> {
+    const errors: Error[] = []
     if (cleanupStarted) {
-      return
+      return errors
     }
     cleanupStarted = true
     try {
-      await stopSiloUp(siloUp)
+      await stopChildProcess(server)
     } catch (error) {
-      logCleanupError('stopping silo up', error)
+      logCleanupError('stopping press server', error)
+      errors.push(error instanceof Error ? error : new Error(String(error)))
     }
-    if (siloReadyForDown) {
+    if (envReadyForTeardown) {
       try {
-        await teardown(env)
+        await destroyState(env, env.PRESS_STORAGE_DIR)
+      } catch (error) {
+        logCleanupError('docker compose down -v', error)
+        errors.push(error instanceof Error ? error : new Error(String(error)))
+      }
+      try {
+        await siloDown(env)
       } catch (error) {
         logCleanupError('silo down --clean', error)
+        errors.push(error instanceof Error ? error : new Error(String(error)))
       }
     }
     if (tmp) {
@@ -560,13 +603,15 @@ async function main(): Promise<number> {
         await rm(tmp, { recursive: true, force: true })
       } catch (error) {
         logCleanupError('temporary directory cleanup', error)
+        errors.push(error instanceof Error ? error : new Error(String(error)))
       }
     }
+    return errors
   }
 
   async function handleSignal(signal: NodeJS.Signals): Promise<void> {
-    await cleanup()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    const cleanupErrors = await cleanup()
+    process.exit(cleanupErrors.length > 0 ? 1 : signal === 'SIGINT' ? 130 : 143)
   }
 
   process.once('SIGINT', () => {
@@ -576,6 +621,7 @@ async function main(): Promise<number> {
     void handleSignal('SIGTERM')
   })
 
+  let exitCode = 1
   try {
     tmp = await mkdtemp(resolve(tmpdir(), 'press-backup-restore-drill-'))
     const backupDir = resolve(tmp, 'backup')
@@ -584,18 +630,27 @@ async function main(): Promise<number> {
     const siloEnv = await readSiloEnv()
     const storageDir = storageDirFromSiloEnv(siloEnv)
     env = makeDrillEnv(siloEnv, storageDir)
-    siloReadyForDown = true
+    envReadyForTeardown = true
 
-    siloUp = startSiloUp(env)
-    const siloExit = waitForExit(siloUp)
-    await waitForHealth(siloEnv.PRESS_BASE_URL, siloExit, healthTimeoutMs)
+    await destroyState(env, storageDir)
+    await startEmptyPostgres(env)
+    await migrateAndSeed(env, storageDir)
 
+    server = startPressServer(env)
+    let serverExit = waitForExit(server)
+    await waitForHealth(siloEnv.PRESS_BASE_URL, serverExit, healthTimeoutMs)
     const baseline = await recordFacts(env, storageDir)
     await takeBackup(env, storageDir, backupDir)
 
-    await wipeDrillState(env, storageDir)
-    await restoreBackup(env, storageDir, backupDir)
+    await stopChildProcess(server)
+    server = undefined
 
+    await destroyState(env, storageDir)
+    await restoreBackupToEmptyTarget(env, storageDir, backupDir)
+
+    server = startPressServer(env)
+    serverExit = waitForExit(server)
+    await waitForHealth(siloEnv.PRESS_BASE_URL, serverExit, healthTimeoutMs)
     const restored = await recordFacts(env, storageDir)
     assertRestoredFacts(baseline, restored)
 
@@ -607,13 +662,14 @@ async function main(): Promise<number> {
       `acl: public=${restored.acl.publicStatus} default-non-html=${restored.acl.defaultNonHtmlStatus}`,
     )
     console.log('snapshotOrder: database dump first, blob snapshot second')
-    return 0
+    exitCode = 0
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error))
-    return 1
-  } finally {
-    await cleanup()
+    exitCode = 1
   }
+
+  const cleanupErrors = await cleanup()
+  return cleanupErrors.length > 0 ? 1 : exitCode
 }
 
 void main().then((code) => {
