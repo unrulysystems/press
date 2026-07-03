@@ -41,16 +41,25 @@ def _localnet_env():
 def press_localnet():
     _require_silo()
     press_port = _required_port("PRESS_PORT")
+    compose_project_name = _required_env("COMPOSE_PROJECT_NAME")
     env = _localnet_env()
 
-    docker_compose("compose.yaml", project_name=_required_env("COMPOSE_PROJECT_NAME"))
+    docker_compose("compose.yaml", project_name=compose_project_name)
     dc_resource("postgres", labels=["press"])
+
+    local_resource(
+        "db-ready",
+        cmd='until docker exec "${COMPOSE_PROJECT_NAME}-postgres-1" pg_isready -h 127.0.0.1 -U press -d press >/dev/null 2>&1; do sleep 0.5; done',
+        env={"COMPOSE_PROJECT_NAME": compose_project_name},
+        resource_deps=["postgres"],
+        labels=["press"],
+    )
 
     local_resource(
         "migrate",
         cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web db:migrate',
         env=env,
-        resource_deps=["postgres"],
+        resource_deps=["db-ready"],
         labels=["press"],
     )
 
