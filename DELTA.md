@@ -1,0 +1,541 @@
+# press — DELTA
+
+## 2026-07-03 — phase 4 security re-audit (bounded: could not complete)
+
+The confirmatory re-audit meant to flip the eight fixed findings to
+`resolved` in `AUDIT.md` could not complete cleanly in this environment; it
+is bounded and documented here rather than left dangling.
+
+- Attempt 1 (`uaudit-2026-07-03-0ae701`) failed at the amendment write:
+  a hand-edit had set F-03/F-04/F-05 ledger `status` to `deferred`, which the
+  amendment rejects (REQ-RL-UAUDIT-031 permits only `open|resolved`). Fixed by
+  reverting those to `open` (commit `c580e82`); deferral context lives in
+  `DEVIATIONS.md`, not the ledger enum.
+- Attempt 2 (`uaudit-2026-07-03-222408`) hung in discovery
+  (`partial_batch: true`, `failed_personas: [data-flow]`) and was killed. The
+  killed coordinator wrote an INVALID partial amendment marking all 11
+  findings `resolved` — including the deferred, unfixed F-03/F-04/F-05. That
+  false-`resolved` amendment was discarded (`git checkout AUDIT.md`); the
+  committed ledger stays all-`open` (the fail-safe direction — it never
+  overstates a fix).
+
+Verification the fixes stand on WITHOUT the re-audit: 16 new regression tests
+(`nub run test` 114 pass, was 98), `nub run e2e` 81/81, driver live dev:share
+lifecycle checks, and an independent `rl review` structured APPROVE on the
+full phase-4 range (validated each fix against its finding). The re-audit is
+confirmatory (personas don't re-find the vulns), not the sole verifier.
+
+Handoff: re-run `rl ultra-audit start --scope-paths "**" --profile security`
+in a cleaner environment (or CI) to authoritatively flip F-01/02/06/07/08/09/
+10/11 to `resolved`; F-03/F-04/F-05 will correctly remain `open` (deferred).
+
+## 2026-07-03 — phase 4 security scrub fixes
+
+Seven non-deferred findings from `uaudit-2026-07-03-ff6d8b` are fixed in this
+packet. F-01 rejects CLI authorization while a Better Auth admin impersonation
+session is active, with a regression asserting no verification row is created.
+F-02 makes bearer-token verification fail closed for actively banned users while
+still accepting expired bans, and records `lastUsedAt` only after success.
+F-06 adds a CLI loopback `state` nonce end to end; mismatched callbacks now get
+HTTP 400 and the listener stays alive for the real callback.
+
+F-07 rewrites the scheduled dependency updater to use pinned actions, least
+privilege permissions, and a pull request instead of pushing to `main`. F-08
+adds SHA-256 migration checksums with fail-closed drift detection and preserves
+legacy null-checksum rows as un-verifiable. F-09 pins the non-flake
+`shell.nix` flake-compat fallback to the `flake.lock` revision. F-10 revokes
+the dev-share minted agent token and deletes `.dev/agent.env` during signal
+teardown. F-11 documents that unpublish archives remain under
+`PRESS_STORAGE_DIR/.archive`, are included in storage backups, and require a
+separate irreversible purge for confidentiality removals.
+
+Tests added: `apps/web/src/auth/cliFlow.test.ts`,
+`apps/web/src/auth/apiTokens.test.ts`, `apps/web/src/db/migrate.test.ts`, and
+`packages/cli/src/index.test.ts`. F-03, F-04, and F-05 remain deferred to Allen
+per `DEVIATIONS.md`; `AUDIT.md` is left for the driver audit amendment.
+
+F-10 follow-up: `dev:share` now keeps `.dev/agent.env` present for the whole
+running session. The localnet shutdown hook awaits agent-token revocation and
+then deletes the env file before the server stop and process exit proceed.
+The server child error/exit path also runs that shutdown hook before teardown.
+
+Driver live-verification evidence, 2026-07-03 (the first F-10 attempt had a
+timing bug the driver caught — the `finally` cleanup fired at boot because
+`startLocalnet` resolves post-boot; the `onShutdown` hook fixes it):
+
+- While running: `.dev/agent.env` present; `GET /api/cli/whoami` with the
+  minted token returned `200`; `nub run dev:share:smoke` passed
+  (`press dev:share smoke passed`).
+- After SIGINT: `.dev/agent.env` DELETED; no `devShare` process and no
+  `press` containers remained (clean teardown).
+- Token revocation is ordered before exit by the awaited `onShutdown` hook;
+  it cannot be probed post-shutdown because the DB is torn down, so the
+  ordering is code-verified and confirmed in review.
+- `nub run e2e` after the `localnet.ts` `onShutdown` change: 81 passed.
+
+## 2026-07-03 — phase 3 backup/restore drill
+
+`nub run drill:backup-restore` now proves the durability procedure end to end:
+seeded localnet boot, baseline DB row/contentHash capture, blob byte hash,
+public/default ACL probe pair, Postgres custom-format dump, blob snapshot,
+full compose volume and storage destruction, restore into fresh Postgres
+without re-seeding, blob restore, server boot, and repeated verification.
+
+The prescribed snapshot order is database first, blob directory second. Rows
+are the source of truth for existence and ACL; a row without a blob is a
+serving failure, while a blob without a row is a harmless orphan. The runbook
+requires maintenance/read-only mode for publish/delete traffic during the
+snapshot, then uses DB-first order so any blob copied after the dump cannot
+create a served page without a row.
+
+In-sandbox evidence, exit status 0:
+
+```text
+PASS backup/restore drill
+page: market-notes/agent-margin-review.html
+contentHash: 65da66d643ca6d410a60fb75239633eafd5f75620b2fac91db5bb664db670c67
+blobSha256: 65da66d643ca6d410a60fb75239633eafd5f75620b2fac91db5bb664db670c67
+acl: public=200 default-non-html=401
+snapshotOrder: database dump first, blob snapshot second
+```
+
+Driver evidence, recorded 2026-07-03: independent rerun of
+`nub run drill:backup-restore` from the driver environment — exit 0,
+`PASS backup/restore drill`, isolated compose project torn down cleanly
+(containers, volume, network removed).
+
+## 2026-07-03 — phase 2 rate-limit evidence
+
+The Better Auth credential sign-in rate-limit floor is now verified without
+lowering the shared Playwright webServer cap. The sign-in custom rule reads
+`PRESS_RATE_LIMIT_SIGNIN_MAX` and `PRESS_RATE_LIMIT_SIGNIN_WINDOW`, with the
+ratified defaults preserved when unset: production remains max 5 / 60s, and
+non-production remains max 10,000 / 60s. The global limiter defaults remain
+unchanged at production max 100 / 60s and non-production max 10,000 / 60s.
+Malformed override values fail boot loudly with the offending variable name.
+
+`e2e/rateLimit.spec.ts` starts its own short-lived `one serve` process on a
+distinct port, points `PRESS_BASE_URL` at that instance, sets the strict
+sign-in cap only in that child process, shares the already-booted localnet
+Postgres and built web artifact, then tears the child down in `finally`. This
+keeps the low cap out of Playwright's shared server and avoids leaking rate
+limit state into unrelated specs that share one client IP.
+
+In-sandbox curl dry-run evidence (Chromium was not launched): with shared
+localnet Postgres booted by `nub run localnet:e2e`, a strict isolated server on
+`http://127.0.0.1:4180` was started with
+`PRESS_RATE_LIMIT_SIGNIN_MAX=3` and `PRESS_RATE_LIMIT_SIGNIN_WINDOW=2`. Six
+sequential `curl` POSTs to `/api/auth/sign-in/email` observed:
+`401, 401, 401, 429, 429, 200`. The fourth wrong-password request returned
+`429` with `x-retry-after: 2`; the immediate correct-password request also
+returned `429` with `x-retry-after: 2`; after the 2s window elapsed, the
+correct-password request returned `200`.
+
+## 2026-07-03 — phase 1 dev share
+
+`nub run dev:share` now wraps the existing localnet boot path, prints a shared
+human+agent who's-who card after the ready line, mints a fresh owner API token
+into `.dev/agent.env` without echoing it, and keeps the same SIGINT teardown.
+The verifier is `nub run dev:share:smoke` against the running shared session:
+it proves credential sign-in over HTTP, then publishes through the real CLI
+using the generated agent env and checks the served page.
+
+## 2026-07-03 — phase 0 upstream reconcile
+
+Status: complete for the local sandbox interior. Dependencies are bumped from
+`one@1.19.4` / `vite@8.0.3` to `one@1.20.2` / `vite@8.1.3`. `one@1.20.2`
+declares `vite` as dependency range `^8.0.13`, so `vite@8.1.3` is inside
+One's supported range and was kept. `nub install` initially failed because
+the sandbox could not write user-level nub/npm caches; rerunning with
+`XDG_CACHE_HOME`, `XDG_DATA_HOME`, and `npm_config_cache` under
+`/private/tmp` regenerated `lock.yaml`.
+
+Experiment matrix:
+
+- Bumped deps + transform removed:
+  - Edit: unregistered `tamaguiUseEventReactImportPlugin()` from
+    `apps/web/vite.config.ts`.
+  - Command: `nub run build:web`
+  - Exit status: 1.
+  - Failure output, verbatim:
+
+```text
+apps/web build: Error importing page (original error) ReferenceError: React$15 is not defined
+apps/web build:     at file:///Users/allen/0xbigboss/press/apps/web/dist/server/_virtual_one-entry.js:7660:2
+apps/web build:  ERROR  Error importing page: dist/server/assets/_collection__ssr-DogSemhY.js
+apps/web build:   [cause]: React$15 is not defined
+apps/web build:       at dist/server/_virtual_one-entry.js:7660:2
+apps/web build: exit 1
+```
+
+- Dist evidence: `apps/web/dist/server/_virtual_one-entry.js:7660`
+  contained `React$15.useInsertionEffect || React$15.useLayoutEffect;`.
+- Outcome: transform still required; workaround kept.
+
+- Bumped deps + transform kept:
+  - Command: `nub run build:web`
+  - Exit status: 0.
+  - Evidence: production build completed, secret scan passed, and One printed
+    `build complete` / `Done`.
+  - Outcome: dependency bump itself is green when the transform is retained.
+
+- Bumped deps + `/api/collections` delegation reverted:
+  - Edit: removed the bare-path check before `parseCollectionPath()`.
+  - Command: `nub run check`
+  - Exit status: 0.
+  - Evidence: `tsgo -b`, `oxlint .`, and `oxfmt --check .` completed; only
+    pre-existing lint warnings were reported.
+  - Command: `nub run test`
+  - Exit status: 0.
+  - Evidence: `98 pass`, `0 fail`, `169 expect() calls`.
+  - Server command: `nub run localnet:e2e`
+  - Server status: reached `press localnet prod server ready at
+http://127.0.0.1:4174`; stopped with Ctrl-C after probes, exit status 0.
+  - Probe command: `curl -i --max-time 10 http://127.0.0.1:4174/api/collections`
+  - Curl exit status: 0; semantic result failed the expected 401 floor.
+  - Failure output, verbatim:
+
+```text
+HTTP/1.1 400 Bad Request
+cache-control: no-cache
+content-type: application/json
+content-length: 65
+Date: Fri, 03 Jul 2026 14:35:23 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":"collection slug: must match ^[a-z0-9][a-z0-9-]{0,62}$"}
+```
+
+- Probe command: `curl -i --max-time 10 http://127.0.0.1:4174/api/collections/`
+- Curl exit status: 0; semantic result also failed the expected 401 floor.
+- Failure output, verbatim:
+
+```text
+HTTP/1.1 400 Bad Request
+cache-control: no-cache
+content-type: application/json
+content-length: 65
+Date: Fri, 03 Jul 2026 14:35:23 GMT
+Connection: keep-alive
+Keep-Alive: timeout=5
+
+{"error":"collection slug: must match ^[a-z0-9][a-z0-9-]{0,62}$"}
+```
+
+- Health probe: `curl -i --max-time 10 http://127.0.0.1:4174/healthz`
+  returned `HTTP/1.1 200 OK` with body `ok`, proving the server was live.
+- Outcome: bare-path delegation still required; workaround kept.
+
+Final adopted state: bumped dependencies are kept; the
+`press:tamagui-use-event-react-import` transform is kept; the bare
+`/api/collections` delegation is kept; the bounded 413 body drain remains
+kept by design. Filed-ready upstream drafts were added at
+`docs/upstream/rolldown-namespace-binding.md`,
+`docs/upstream/one-serve-api-collections.md`, and
+`docs/upstream/one-serve-413-reset.md`. Full Playwright e2e remains a driver
+handoff because Chromium does not launch in this sandbox.
+
+Driver evidence, recorded 2026-07-03, on the adopted state (one@1.20.2,
+vite@8.1.3, all three workarounds retained):
+
+- `nub run e2e`: exit 0, 80 passed (22.4s).
+- `nub run smoke:image`: exit 0, `press image smoke passed for
+press-web:local` (boot refusal, seeded feed, and exact sandbox CSP proven
+  from inside the container).
+
+With the worker's in-sandbox `check`, `test`, and `build:web` greens, the
+full harness is green in the final adopted state; phase-0 acceptance holds.
+
+## 2026-07-03 — Allen ratifications (visibility default, link affordance)
+
+Both open ratifications are resolved by Allen, attended:
+
+- `password` as a collection `defaultVisibility` is **rejected, ratified**.
+  SPEC.md now types `Collection.defaultVisibility` as
+  `'default' | 'public' | 'private'` and REQ-PUB-006 states the 400 contract;
+  the root `BRIEF.md` visibility Decision records it. Code and tests already
+  enforced this (`packages/core/src/index.ts:9`, `e2e/publish.spec.ts:339`).
+- Judge G's round-3 dissent on entry-title static link affordance is
+  **resolved: hover-only stands** (magazine convention). Recorded as a
+  ratified Decision in `apps/web/BRIEF.md`; no code change.
+
+With these, no pending ratifications remain. Everything left is the Boundary
+handoff list below (push onward).
+
+## 2026-07-03 — v1.2 loop wrap (CI completeness, keep-alive evidence)
+
+Status: the v1.2 loop is complete — both phases done and independently
+reviewed. CI now defines the full harness (check, test, e2e, build:web,
+smoke:image; verify-only, executes after Allen's push), and the last e2e
+harness divergence from real clients — the `Connection: close` API-context
+mitigation — is deleted on recorded keep-alive evidence. No deviations
+remain active in `DEVIATIONS.md`. The v1.2 plan (`loop.md`, commit
+`ca8d601`) was absorbed and deleted per its wrap prescription. The Boundary
+handoff list below is unchanged and remains Allen's.
+
+## 2026-07-03 — v1.2 phase 0 CI gate completeness
+
+CI now runs the full local harness in order: `nub run check`, `nub run test`,
+`nub run e2e`, `nub run build:web`, and `nub run smoke:image`, with bounded
+job and step timeouts. It remains verify-only and still executes only after
+Allen pushes the repo.
+
+## 2026-07-03 — v1.2 phase 1 Connection close evidence
+
+The e2e API-context `Connection: close` mitigation was removed from
+`e2e/api.ts`, so Playwright API contexts now use default keep-alive behavior
+against `one serve`. Assertions and other harness behavior are unchanged. This
+is pending the driver's evidence series: at least 3 consecutive cold-state full
+`nub run e2e` runs after the mitigation removal.
+
+Driver evidence, recorded 2026-07-03 (state forced maximally cold before run
+1: `docker compose -p press-localnet down -v` plus storage removal):
+
+- Run 1: `nub run e2e` exit 0, 80 passed (22.3s).
+- Run 2: `nub run e2e` exit 0, 80 passed (20.7s).
+- Run 3: `nub run e2e` exit 0, 80 passed (20.8s).
+
+No `EPIPE`/`ECONNRESET` or any API-write failure appeared; the mitigation is
+deleted for good and `DEVIATIONS.md` reflects the outcome.
+
+## 2026-07-03 — v1.1 loop wrap (production build, prod serving, image)
+
+Status: the v1.1 loop is complete — all 4 phases done and independently
+reviewed. `nub run build:web` produces a production-mode One build (the
+upstream `React$<N>` Rolldown deconfliction bug is neutralized by an
+app-level transform); e2e runs the built artifact via `one serve` and the
+cold-start reproducibility deviation is retired on 3x consecutive
+maximally-cold 80/80 runs; `press-web:local` builds locally and
+`nub run smoke:image` proves boot refusal, the seeded feed, and the exact
+sandbox CSP from inside the container. Full harness at wrap:
+`nub run check` + `test` (98) + `e2e` (80/80) + `build:web` + `smoke:image`
+all green. Nothing pushed; the working tree is committed on local `main`.
+The v1.1 loop plan (`loop.md`, commit `fe84121`) was absorbed into this file,
+`DEVIATIONS.md`, and `SPEC.md`, then deleted per its own wrap prescription.
+
+Surviving law from the absorbed plan: the build-fix intervention ladder
+(app config → committed patch → dependency version change, forking One out
+of scope) governs any future regression of the upstream bug; deviation
+retirement always requires recorded evidence, never assertion.
+
+## 2026-07-03 — v1 loop wrap
+
+Status: all 8 loop phases are complete. The full harness is green from a clean
+localnet boot, and the magazine screenshot oracle reached quorum in round 3
+(2-of-3 judges passed). Judge G's dissent on static link affordance for entry
+titles remains a taste follow-up for Allen.
+
+Known gaps and follow-ups:
+
+- One production build is green as of phase-1. The chosen intervention is
+  app-level config: `apps/web/vite.config.ts` adds a focused pre-transform for
+  `@tamagui/use-event/dist/esm/useGet.mjs` that rewrites the React namespace
+  import to named hook imports before One's production SSR bundle reaches the
+  Vite 8 / Rolldown deconfliction bug. `apps/web/src/buildWeb.ts` wraps
+  `one build --platform=web` with deterministic local build-time env in
+  production mode so One's prerender import can evaluate server config without
+  live OAuth or secrets; runtime boot validation remains unchanged.
+- Attempt-1 review reject: the first green `nub run build:web` was not valid
+  production evidence because `apps/web/src/buildWeb.ts` defaulted
+  `NODE_ENV=development` and enabled credential auth, producing React
+  development artifacts. Production-mode repros then proved INV-5 was still
+  intact: `NODE_ENV=production nub run build:web` refused credential auth, and
+  `NODE_ENV=production PRESS_ENABLE_CREDENTIAL_AUTH=0 nub run build:web`
+  refused missing Google OAuth client values during One's prerender-time
+  config import. The wrapper now defaults `NODE_ENV=production`,
+  `PRESS_ENABLE_CREDENTIAL_AUTH=0`, and uses clearly labeled
+  `build-placeholder` OAuth values plus a build-only Better Auth placeholder.
+  These placeholders are not secrets and exist only so the build machine can
+  pass production config parsing; runtime production boot validation is
+  unchanged and still refuses bad env at serve time.
+- Rejected config probes before the final app-level transform: adding
+  `@tamagui/use-event` to `ssr.external` bypassed the missing `React$15`
+  binding but failed prerender with
+  `SyntaxError: Export '_disableMediaTouch' is not defined in module`;
+  `resolve.dedupe: ['react', 'react-dom']` had no effect and returned the same
+  `ReferenceError: React$15 is not defined`; removing app-level
+  `ssr.noExternal` also returned the same `React$15` failure. A direct
+  installed-package rewrite of `@tamagui/use-event` proved the named-import
+  change moved the build past the Rolldown failure, but a committed package
+  patch was rejected because `nub patch` could not locate the app-local package
+  in the current hoisted install layout and manual `patchedDependencies`
+  metadata did not apply on `nub install`.
+- Root cause, production build failure: the 2026-07-03 `nub run build:web`
+  repro emits the missing read in `apps/web/dist/server/_virtual_one-entry.js`
+  at `7660:2`, inside the `@tamagui/use-event/dist/esm/useGet.mjs` region
+  (`apps/web/dist/server/_virtual_one-entry.js:7657-7661`). The route import
+  that triggers evaluation is `/app/c/[collection]+ssr.tsx` to
+  `./assets/_collection__ssr-DogSemhY.js`
+  (`apps/web/dist/server/_virtual_one-entry.js:31643`), and that page chunk
+  imports `useLoader` from `../_virtual_one-entry.js`
+  (`apps/web/dist/server/assets/_collection__ssr-DogSemhY.js:1`).
+  `apps/web/dist/server/assets/react-dom-B39j4I0W.js:9-15` is the shared
+  `__esmMin` wrapper that rethrows the failed initializer; its React export is
+  `require_react`, not a `React$15` binding
+  (`apps/web/dist/server/assets/react-dom-B39j4I0W.js:405-406`,
+  `apps/web/dist/server/assets/react-dom-B39j4I0W.js:564`).
+- The `React$15` binding was supposed to be the namespace import for
+  `import * as React from "react"` in `@tamagui/use-event`:
+  the package source reads `React.useInsertionEffect || React.useLayoutEffect`
+  (`apps/web/node_modules/@tamagui/use-event/dist/esm/useGet.mjs:1-2`), and
+  Vite's SSR dependency prebundle lowers that source to an explicit
+  `import_react` declaration plus `__toESM(require_react(), 1)`
+  (`apps/web/node_modules/.vite/deps_ssr/@tamagui_use-event.js:11-15`).
+  The final production SSR chunk keeps the deconflicted read as
+  `React$15.useInsertionEffect || React$15.useLayoutEffect` but does not emit
+  the matching declaration in the surrounding initializer
+  (`apps/web/dist/server/_virtual_one-entry.js:7657-7666`); the neighboring
+  React namespace imports are emitted as `import_react$117` before it and
+  `import_react$116` after it
+  (`apps/web/dist/server/_virtual_one-entry.js:7599-7603`,
+  `apps/web/dist/server/_virtual_one-entry.js:8333-8336`).
+- Ownership evidence points to the Vite 8 / Rolldown production SSR bundling
+  step as exercised by One, not to app route code. One creates the virtual
+  entry with `import.meta.glob(...)` routes and no React namespace binding
+  (`apps/web/node_modules/one/dist/esm/vite/plugins/virtualEntryPlugin.mjs:96-121`),
+  then imports each built server route during prerender
+  (`apps/web/node_modules/one/dist/esm/cli/build.mjs:729-737`). The app config
+  only wires Tamagui, One, aliases, and `ssr.noExternal: true`
+  (`apps/web/vite.config.ts:1-35`). Tamagui's Vite transform is scoped to
+  `.tsx` files (`apps/web/node_modules/@tamagui/vite-plugin/dist/esm/plugin.mjs:286-300`),
+  while the failed source is `.mjs`
+  (`apps/web/node_modules/@tamagui/use-event/dist/esm/useGet.mjs:1-2`).
+  One's server build runs through Vite with `build.ssr: true`,
+  `rolldownOptions`, and strict entry signatures
+  (`apps/web/node_modules/one/dist/esm/cli/build.mjs:403-428`), so the dropped
+  declaration is in Rollup/Rolldown namespace-import deconfliction/interop for
+  the SSR chunk produced under One's build pipeline.
+- Phase-1 fix directions, ranked by the allowed intervention order in the
+  loop plan (`loop.md@fe84121:41-46`, `loop.md@fe84121:75-87` (absorbed plan, in git history)): first try app-level Vite/One
+  config because the app already controls `ssr.external`, `ssr.noExternal`,
+  aliases, and plugin order (`apps/web/vite.config.ts:7-35`), and the
+  supporting evidence is that prebundled SSR output preserves the binding
+  (`apps/web/node_modules/.vite/deps_ssr/@tamagui_use-event.js:11-15`) while
+  the production final chunk does not
+  (`apps/web/dist/server/_virtual_one-entry.js:7657-7666`). If config cannot
+  force a correct SSR boundary, use a committed `bun patch` against One/Vite
+  integration because One owns the production prerender import and SSR build
+  configuration (`apps/web/node_modules/one/dist/esm/cli/build.mjs:403-428`,
+  `apps/web/node_modules/one/dist/esm/cli/build.mjs:729-737`). Treat a One
+  version change as third because the installed versions are pinned in
+  `apps/web/package.json:21-27`, and the loop plan allows version changes only
+  after config and patch paths (`loop.md@fe84121:41-46`, absorbed plan).
+- The `build:web` gate is green after phase-1 in production mode:
+  `nub run build:web` completes `one build --platform=web`,
+  imports/prerenders `/`, `/login`, and `/c/:collection`, emits
+  `version.json`, passes One's client bundle security scan, and the wrapper's
+  fail-closed scan finds no `*.development.js` artifacts in `apps/web/dist/`.
+- Phase-2 production-representative serving is wired for e2e. `nub run localnet`
+  still starts the One dev server for interactive development.
+  `nub run localnet:e2e` builds `@press/core`, builds `@press/web` with the
+  phase-1 production-mode `build:web` wrapper, then boots localnet Postgres,
+  migrates, seeds, and starts
+  `one serve --host 127.0.0.1 --port ${PRESS_PORT:-4174}` under the same
+  non-production localnet runtime env (`NODE_ENV=development`,
+  `PRESS_ENABLE_CREDENTIAL_AUTH=1`). Playwright's `webServer` now uses
+  `nub run localnet:e2e`.
+- One 1.19.4 serve contract checked locally: the CLI exposes `one serve`
+  (`apps/web/node_modules/one/dist/esm/cli.mjs`), accepts `--host`, `--port`,
+  and `--outDir`, and serves `dist/buildInfo.json` through
+  `apps/web/node_modules/one/dist/esm/serve.mjs`. It only calls
+  `loadEnv("production")` when `--loadEnv` is passed, so e2e can serve the
+  built output without switching runtime config to production or weakening
+  INV-5 / REQ-CFG-001.
+- Phase-2 in-sandbox serving proof (Chromium not launched in this sandbox):
+  `nub run localnet:e2e` completed the production web build, migrated and
+  seeded Postgres, and reported
+  `press localnet prod server ready at http://127.0.0.1:4174`. HTTP probes
+  against that server returned:
+  `curl -i /healthz` -> `HTTP/1.1 200 OK` with body `ok`;
+  `curl -i /` -> `HTTP/1.1 200 OK` and the SSR feed shell contained
+  `press-shell`, `Reports for close reading.`, and `Agent Margin Review`;
+  `curl -i /login` -> `HTTP/1.1 200 OK` and the SSR login shell contained
+  `Sign in to keep reading.`, `Email`, and `Password`;
+  `curl -i /p/market-notes/agent-margin-review.html` ->
+  `HTTP/1.1 200 OK`,
+  `content-security-policy: sandbox allow-scripts allow-popups`,
+  `x-content-type-options: nosniff`, `referrer-policy: no-referrer`,
+  `cache-control: no-store`, and body title `Agent Margin Review`.
+- Attempt-2 prod-server repro proof against the same booted `one serve`
+  localnet: `curl -i /api/collections` without a bearer token returned
+  `HTTP/1.1 401 Unauthorized` with `{"error":"valid bearer token required"}`,
+  not the catch-all slug-parse 400. An authenticated curl using a freshly
+  minted localnet API token passed via curl stdin config returned
+  `HTTP/1.1 200 OK` from `GET /api/collections` with the seeded collections
+  `market-notes`, `systems-review`, `field-library`, and `private-docket`.
+  A curl `PUT /api/pages/<proof-collection>/too-large.html` with
+  `Content-Type: text/html` and a `PRESS_MAX_UPLOAD_BYTES + 1` byte temp file
+  returned a readable `HTTP/1.1 413 Payload Too Large` response body:
+  `{"error":"request body exceeds PRESS_MAX_UPLOAD_BYTES"}`. No client-side
+  `ECONNRESET` occurred.
+- The e2e `Connection: close` API-context mitigation is retained. The sandbox
+  proof used HTTP curl only, not Playwright API contexts, so there is no
+  evidence that the mitigation is unnecessary under `one serve`; assertions
+  remain unchanged.
+- Attempt-3 trace evidence: the failing `magazine.spec.ts` trace shows the
+  authenticated `/c/market-notes` document returned `200 OK` and rendered the
+  expected three-title collection before `allTextContents()` raced a same-path
+  client document navigation, with no content-changing ACL result observed.
+- Cold-start flake deviation: driver evidence recorded 2026-07-03. State was
+  forced maximally cold before run 1 (`docker compose -p press-localnet down
+-v` plus storage dir removal, immediately after new code landed); each run
+  boots localnet from scratch and tears it down, so all three runs are cold.
+  - Run 1: `nub run e2e` exit 0, 80 passed (22.0s).
+  - Run 2: `nub run e2e` exit 0, 80 passed (21.6s).
+  - Run 3: `nub run e2e` exit 0, 80 passed (20.8s).
+    An earlier attempt-2 series (80/80, 80/80, 79/80) exposed the
+    `magazine.spec.ts` snapshot-read race that attempt 3 fixed; the deviation
+    is retired in `DEVIATIONS.md` on this evidence.
+- Phase-3 local image is wired and smoke-gated. `Dockerfile` builds
+  `press-web:local` with Node 24 plus Bun 1.3.13 and Nub 0.2.5, installs from
+  the committed `lock.yaml` with `--frozen-lockfile`, builds `@press/core`,
+  runs the production `apps/web/src/buildWeb.ts` wrapper, and serves the built
+  artifact with `one serve --host 0.0.0.0 --port ${PRESS_PORT:-4174}` after a
+  fail-loud config preflight (`apps/web/src/setupServer.ts`). The image embeds
+  no real secrets; build-time placeholders remain the same non-secret phase-1
+  values, and runtime config is supplied by `docker run` env/env-file.
+- `nub run smoke:image` is the local image gate. It uses a deterministic local
+  tag (`press-web:local`, overrideable via `PRESS_IMAGE_NAME`), builds with
+  `docker buildx build --load`, proves missing-env boot refusal and the
+  `NODE_ENV=production` + `PRESS_ENABLE_CREDENTIAL_AUTH=1` INV-5 refusal,
+  boots localnet Postgres through `compose.yaml`, runs the same migrate/seed
+  commands as `scripts/localnet.ts`, starts the container on the compose
+  network with seeded localnet env, then HTTP-checks `/healthz`, `/`, and the
+  seeded public page
+  `/p/market-notes/agent-margin-review.html`. The page check byte-compares the
+  observed `content-security-policy` header against the canonical
+  `servedPageHeaders['Content-Security-Policy']` constant. The script removes
+  the app container, compose network, and volumes in `finally`.
+- Handoff for the `0xsend/press` mirror: Allen should choose the remote image
+  repository/tag convention, rebuild from this Dockerfile, run
+  `nub run smoke:image` locally against that tree, then push/mirror the image
+  and author manifests outside this loop. No registry login, remote tag, push,
+  deploy manifest, DNS, or live secret was created here.
+- Real macOS keychain interaction is stub-verified only and remains an attended
+  final gate.
+- GitHub Actions has not executed because the repo has not been pushed.
+
+Boundary handoff for Allen:
+
+1. Push the repo to `unrulysystems/press`.
+2. Confirm GitHub Actions is green.
+3. Create the Google OAuth client.
+4. Configure DNS for instance #1 at `reports.send.it`.
+5. Build and mirror the image to `0xsend/press` with Allen's remote tag
+   convention, then author the manifests.
+6. Provision ESO secrets.
+7. Deploy.
+8. Run the attended real-Google final-gate walkthrough required by `BRIEF.md`.
+
+## 2026-07-02 — password as collection defaultVisibility rejected
+
+Ratified by Allen 2026-07-03 (see entry above): `password` is rejected as a collection
+`defaultVisibility`. The SPEC Domain model types the four-value visibility union
+on `Page.visibility`; `Collection.defaultVisibility` is not explicitly typed.
+Password visibility requires per-page server-generated material: the one-time
+password response and stored argon2 hash from REQ-PUB-005. Collection-level
+inheritance cannot supply that material, including retroactively when patching a
+collection default would flip existing unset pages into password-with-no-hash.
+The coherent fail-closed reading is that collection defaults range over
+`default | public | private`, while `password` is page-explicit only.
