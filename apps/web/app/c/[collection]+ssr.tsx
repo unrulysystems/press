@@ -1,6 +1,7 @@
 import { useLoader } from 'one'
 
 import { loadMagazineCollection } from '@press/web/publish/indexes'
+import { Masthead } from '@press/web/ui/Masthead'
 
 import type { MagazineCollection, MagazineEntry } from '@press/web/publish/indexes'
 import type { LoaderProps } from 'one'
@@ -48,23 +49,7 @@ export function CollectionPage() {
   return (
     <main className="press-page" data-design-scope>
       <div className="press-shell press-collection-shell">
-        <header className="press-masthead" aria-label="press masthead">
-          <a className="press-wordmark" href="/">
-            press
-          </a>
-          <nav className="press-nav" aria-label="Account">
-            {data.viewer.authenticated ? (
-              <span className="press-meta">{data.viewer.email}</span>
-            ) : (
-              <a
-                className="press-meta press-nav-link"
-                href={`/login?next=/c/${data.collection.slug}`}
-              >
-                Log in
-              </a>
-            )}
-          </nav>
-        </header>
+        <Masthead viewer={data.viewer} loginNext={`/c/${data.collection.slug}`} />
 
         <section
           className="press-collection-head"

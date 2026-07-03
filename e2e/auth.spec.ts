@@ -42,3 +42,29 @@ test('credential provider signs in a seeded localnet user', async ({ page, conte
     },
   })
 })
+
+test('signed-in reader can sign out from the masthead', async ({ page }) => {
+  await page.goto('/login?next=/')
+  await page.getByLabel('Email').fill(localnetUsers.owner.email)
+  await page.getByLabel('Password').fill(localnetUsers.owner.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
+
+  // Authenticated masthead exposes both identity and a working sign-out control.
+  await expect(page.getByText(localnetUsers.owner.email)).toBeVisible()
+  const signOut = page.getByRole('button', { name: 'Sign out' })
+  await expect(signOut).toBeVisible()
+
+  await signOut.click()
+
+  // Sign-out reloads to "/"; the masthead now offers "Log in" and the session
+  // API agrees the viewer is anonymous.
+  await expect(page.getByRole('link', { name: 'Log in' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Sign out' })).toHaveCount(0)
+
+  const whoami = await page.evaluate(async () => {
+    const response = await fetch('/api/whoami')
+    return await response.json()
+  })
+  expect(whoami.authenticated).toBe(false)
+})

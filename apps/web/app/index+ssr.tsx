@@ -1,6 +1,7 @@
 import { useLoader } from 'one'
 
 import { loadMagazineFeed } from '@press/web/publish/indexes'
+import { Masthead } from '@press/web/ui/Masthead'
 
 import type { MagazineEntry, MagazineFeed } from '@press/web/publish/indexes'
 import type { LoaderProps } from 'one'
@@ -60,20 +61,7 @@ export function IndexPage() {
   return (
     <main className="press-page" data-design-scope>
       <div className="press-shell" data-feed-shell>
-        <header className="press-masthead" aria-label="press masthead">
-          <a className="press-wordmark" href="/">
-            press
-          </a>
-          <nav className="press-nav" aria-label="Account">
-            {data.viewer.authenticated ? (
-              <span className="press-meta">{data.viewer.email}</span>
-            ) : (
-              <a className="press-meta press-nav-link" href="/login?next=/">
-                Log in
-              </a>
-            )}
-          </nav>
-        </header>
+        <Masthead viewer={data.viewer} loginNext="/" />
 
         <section className="press-standfirst" aria-labelledby="feed-title">
           <div>
