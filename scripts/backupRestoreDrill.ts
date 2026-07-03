@@ -359,7 +359,7 @@ function makeDrillEnv(siloEnv: SiloEnv, storageDir: string): DrillEnv {
     PRESS_SERVE_MODE: 'dev',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
     PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
-    PRESS_STORAGE_DIR: storageDir,
+    PRESS_STORAGE_DIR: storagePath(storageDir),
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? 'localnet-secret-at-least-32-bytes',
     PRESS_ENABLE_CREDENTIAL_AUTH: process.env.PRESS_ENABLE_CREDENTIAL_AUTH ?? '1',
     PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? '26214400',
