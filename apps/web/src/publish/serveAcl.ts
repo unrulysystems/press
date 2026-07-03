@@ -1,4 +1,9 @@
-import type { AclDecision } from '@press/core'
+import type {
+  AclDecision,
+  AclViewer,
+  AuthenticatedViewer,
+  BasicPasswordVerification,
+} from '@press/core'
 
 export const servedPageHeaders = {
   'Content-Security-Policy': 'sandbox allow-scripts allow-popups',
@@ -16,6 +21,17 @@ export function servedPageResponse(body: BodyInit | null, init: ResponseInit = {
     headers.set('content-type', 'text/html; charset=utf-8')
   }
   return new Response(body, { ...init, headers })
+}
+
+export function viewerFromChannels(input: {
+  readonly authenticated?: AuthenticatedViewer | null
+  readonly basicPassword?: BasicPasswordVerification | undefined
+}): AclViewer {
+  const basicPassword = input.basicPassword ? { basicPassword: input.basicPassword } : {}
+  if (input.authenticated) {
+    return { ...input.authenticated, ...basicPassword }
+  }
+  return { kind: 'anonymous', ...basicPassword }
 }
 
 function acceptsHtml(request: Request): boolean {

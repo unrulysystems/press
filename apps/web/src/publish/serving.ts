@@ -9,12 +9,13 @@ import { auth } from '../auth/server'
 import { db, dbConfig } from '../db/client'
 import { collection, page, user } from '../db/schema'
 import { pageBlobPath } from './storage'
-import { deniedAclResponse, servedPageResponse } from './serveAcl'
+import { deniedAclResponse, servedPageResponse, viewerFromChannels } from './serveAcl'
 import { verifyPagePassword } from './passwords'
 
 import type {
   AclViewer,
   AuthenticatedViewer,
+  BasicPasswordVerification,
   CollectionAcl,
   CollectionDefaultVisibility,
   CollectionSlug,
@@ -81,6 +82,11 @@ function collectionAcl(row: CollectionRow): CollectionAcl {
   }
 }
 
+function hasBasicAuthorization(request: Request): boolean {
+  const authorization = request.headers.get('authorization')
+  return /^Basic\s+/i.test(authorization ?? '')
+}
+
 function parseBasicPassword(request: Request): string | null {
   const authorization = request.headers.get('authorization')
   const match = /^Basic\s+(.+)$/i.exec(authorization ?? '')
@@ -103,37 +109,35 @@ function parseBasicPassword(request: Request): string | null {
 async function verifyBasicPassword(
   request: Request,
   passwordHash: string | null,
-): Promise<boolean> {
+): Promise<BasicPasswordVerification | undefined> {
+  if (!hasBasicAuthorization(request)) {
+    return undefined
+  }
   const password = parseBasicPassword(request)
   if (!password || !passwordHash) {
-    return false
+    return { verified: false }
   }
   try {
-    return await verifyPagePassword(password, passwordHash)
+    return { verified: await verifyPagePassword(password, passwordHash) }
   } catch {
-    return false
+    return { verified: false }
   }
 }
 
 async function viewerForRequest(request: Request, row: PageRow): Promise<AclViewer> {
+  const basicPassword =
+    row.visibility === 'password' ? await verifyBasicPassword(request, row.passwordHash) : undefined
   const session = await auth.api.getSession({ headers: request.headers })
   if (session) {
     const dbUser = await db.query.user.findFirst({
       where: eq(user.id, session.user.id),
     })
     if (dbUser) {
-      return authenticatedViewer(dbUser)
+      return viewerFromChannels({ authenticated: authenticatedViewer(dbUser), basicPassword })
     }
   }
 
-  if (request.headers.get('authorization')?.toLowerCase().startsWith('basic ')) {
-    return {
-      kind: 'basic-password',
-      verified: await verifyBasicPassword(request, row.passwordHash),
-    }
-  }
-
-  return { kind: 'anonymous' }
+  return viewerFromChannels({ basicPassword })
 }
 
 async function servedPageEndpointUnchecked(request: Request): Promise<Response> {

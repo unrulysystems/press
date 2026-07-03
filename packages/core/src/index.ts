@@ -61,16 +61,20 @@ export function parseFileSlug(value: string): FileSlug {
   return value as FileSlug
 }
 
+export type BasicPasswordVerification = {
+  readonly verified: boolean
+}
+
 export type AuthenticatedViewer = {
   readonly kind: 'authenticated'
   readonly userId: string
   readonly email: string
   readonly role: UserRole
+  readonly basicPassword?: BasicPasswordVerification
 }
 
 export type AclViewer =
-  | { readonly kind: 'anonymous' }
-  | { readonly kind: 'basic-password'; readonly verified: boolean }
+  | { readonly kind: 'anonymous'; readonly basicPassword?: BasicPasswordVerification }
   | AuthenticatedViewer
 
 export type AclOperation =
@@ -150,6 +154,10 @@ function isOwnerOrAdmin(viewer: AclViewer, collection: CollectionAcl): boolean {
   return ownsCollection(viewer, collection) || isAdmin(viewer)
 }
 
+function basicPasswordVerification(viewer: AclViewer): BasicPasswordVerification | null {
+  return viewer.basicPassword ?? null
+}
+
 function resolveVisibility(page: PageAcl, collection: CollectionAcl): PageVisibility {
   return page.visibility ?? collection.defaultVisibility ?? 'default'
 }
@@ -192,16 +200,14 @@ function decideReadAcl(
       if (isOwnerOrAdmin(viewer, collection)) {
         return allow(resolvedVisibility)
       }
+      const basicPassword = basicPasswordVerification(viewer)
       if (!page.passwordHash) {
-        return deny(
-          viewer.kind === 'basic-password' ? 'password-invalid' : 'password-required',
-          resolvedVisibility,
-        )
+        return deny(basicPassword ? 'password-invalid' : 'password-required', resolvedVisibility)
       }
-      if (viewer.kind !== 'basic-password') {
+      if (!basicPassword) {
         return deny('password-required', resolvedVisibility)
       }
-      return viewer.verified
+      return basicPassword.verified
         ? allow(resolvedVisibility)
         : deny('password-invalid', resolvedVisibility)
     default: {

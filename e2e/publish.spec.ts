@@ -662,11 +662,10 @@ test('private page: allowlisted external user -> 200; non-allowlisted same-domai
   expect(await expectServedOk(await owner.get(`/p/${collectionSlug}/${fileSlug}`))).toBe(body)
 })
 
-test('password page: no credentials -> 401 + Basic challenge; correct password -> 200; wrong password -> 401; owner session -> 200', async ({
-  baseURL,
-}) => {
+test('password page accepts independent Basic and owner session channels', async ({ baseURL }) => {
   const api = await playwrightRequest.newContext({ baseURL })
   const owner = await signIn(baseURL, 'owner')
+  const wrongDomain = await signIn(baseURL, 'wrongDomain')
   const collectionSlug = `${runSlug}-srv-password`
   const fileSlug = 'password.html'
   const body = '<!doctype html><title>Password</title>'
@@ -700,7 +699,25 @@ test('password page: no credentials -> 401 + Basic challenge; correct password -
   expect(wrongPassword.status()).toBe(401)
   expect(wrongPassword.headers()['www-authenticate']).toBe('Basic realm="press"')
 
+  const signedInCorrectPassword = await wrongDomain.get(`/p/${collectionSlug}/${fileSlug}`, {
+    headers: { authorization: basicAuth(publishBody.password) },
+  })
+  expect(await expectServedOk(signedInCorrectPassword)).toBe(body)
+
+  const signedInWrongPassword = await wrongDomain.get(`/p/${collectionSlug}/${fileSlug}`, {
+    headers: { authorization: basicAuth('wrong-password') },
+  })
+  expect(signedInWrongPassword.status()).toBe(401)
+  expect(signedInWrongPassword.headers()['www-authenticate']).toBe('Basic realm="press"')
+
   expect(await expectServedOk(await owner.get(`/p/${collectionSlug}/${fileSlug}`))).toBe(body)
+  expect(
+    await expectServedOk(
+      await owner.get(`/p/${collectionSlug}/${fileSlug}`, {
+        headers: { authorization: basicAuth('wrong-password') },
+      }),
+    ),
+  ).toBe(body)
 })
 
 test('Unpublish via API archives; subsequent GET -> 404; ACL-filtered list endpoints no longer include it', async ({

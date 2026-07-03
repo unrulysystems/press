@@ -37,8 +37,29 @@ const pageWithoutVisibility: PageAcl = {
 
 const viewers = {
   anonymous: { kind: 'anonymous' },
-  passwordVerified: { kind: 'basic-password', verified: true },
-  passwordRejected: { kind: 'basic-password', verified: false },
+  passwordVerified: { kind: 'anonymous', basicPassword: { verified: true } },
+  passwordRejected: { kind: 'anonymous', basicPassword: { verified: false } },
+  wrongDomainPasswordVerified: {
+    kind: 'authenticated',
+    userId: 'user-wrong-domain',
+    email: 'wrong@example.com',
+    role: 'user',
+    basicPassword: { verified: true },
+  },
+  wrongDomainPasswordRejected: {
+    kind: 'authenticated',
+    userId: 'user-wrong-domain',
+    email: 'wrong@example.com',
+    role: 'user',
+    basicPassword: { verified: false },
+  },
+  ownerPasswordRejected: {
+    kind: 'authenticated',
+    userId: 'user-owner',
+    email: 'owner@send.it',
+    role: 'user',
+    basicPassword: { verified: false },
+  },
   owner: {
     kind: 'authenticated',
     userId: 'user-owner',
@@ -108,6 +129,9 @@ const readMatrix = [
   { visibility: 'password', viewer: 'anonymous', expected: 'password-required' },
   { visibility: 'password', viewer: 'passwordVerified', expected: 'allow' },
   { visibility: 'password', viewer: 'passwordRejected', expected: 'password-invalid' },
+  { visibility: 'password', viewer: 'wrongDomainPasswordVerified', expected: 'allow' },
+  { visibility: 'password', viewer: 'wrongDomainPasswordRejected', expected: 'password-invalid' },
+  { visibility: 'password', viewer: 'ownerPasswordRejected', expected: 'allow' },
   { visibility: 'password', viewer: 'owner', expected: 'allow' },
   { visibility: 'password', viewer: 'admin', expected: 'allow' },
   { visibility: 'password', viewer: 'domainUser', expected: 'password-required' },

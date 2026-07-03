@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { deniedAclResponse, servedPageHeaders } from './serveAcl'
+import { deniedAclResponse, servedPageHeaders, viewerFromChannels } from './serveAcl'
 
 import type { AclDecision, AclDenyReason } from '@press/core'
 
@@ -62,4 +62,32 @@ describe('deniedAclResponse', () => {
       expectServedHeaders(response)
     },
   )
+})
+
+describe('viewerFromChannels', () => {
+  const authenticated = {
+    kind: 'authenticated',
+    userId: 'user-second',
+    email: 'second@send.it',
+    role: 'user',
+  } as const
+
+  test('keeps Basic verification alongside an authenticated session', () => {
+    expect(
+      viewerFromChannels({
+        authenticated,
+        basicPassword: { verified: true },
+      }),
+    ).toEqual({
+      ...authenticated,
+      basicPassword: { verified: true },
+    })
+  })
+
+  test('keeps Basic verification for anonymous requests without inventing a session', () => {
+    expect(viewerFromChannels({ basicPassword: { verified: false } })).toEqual({
+      kind: 'anonymous',
+      basicPassword: { verified: false },
+    })
+  })
 })
