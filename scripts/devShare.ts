@@ -352,30 +352,33 @@ async function main(): Promise<number> {
   let devShareEnv = bootstrapEnv
   let siloUp: ChildProcess | undefined
   let siloReadyForDown = false
-  let lifecycleCleanupStarted = false
+  let cleanupPromise: Promise<void> | undefined
 
-  async function cleanup(): Promise<void> {
-    if (lifecycleCleanupStarted) {
-      return
+  function cleanup(): Promise<void> {
+    if (cleanupPromise) {
+      return cleanupPromise
     }
-    lifecycleCleanupStarted = true
-    try {
-      await cleanupAgentToken()
-    } catch (error) {
-      logCleanupError('agent token cleanup', error)
-    }
-    try {
-      await stopSiloUp(siloUp)
-    } catch (error) {
-      logCleanupError('stopping silo up', error)
-    }
-    if (siloReadyForDown) {
+
+    cleanupPromise = (async () => {
       try {
-        await teardown(devShareEnv)
+        await cleanupAgentToken()
       } catch (error) {
-        logCleanupError('silo down --clean', error)
+        logCleanupError('agent token cleanup', error)
       }
-    }
+      try {
+        await stopSiloUp(siloUp)
+      } catch (error) {
+        logCleanupError('stopping silo up', error)
+      }
+      if (siloReadyForDown) {
+        try {
+          await teardown(devShareEnv)
+        } catch (error) {
+          logCleanupError('silo down --clean', error)
+        }
+      }
+    })()
+    return cleanupPromise
   }
 
   async function handleSignal(signal: NodeJS.Signals): Promise<void> {
