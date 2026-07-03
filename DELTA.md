@@ -1,6 +1,26 @@
 # press — DELTA
 
-## 2026-07-03
+## 2026-07-03 — v1.1 loop wrap (production build, prod serving, image)
+
+Status: the v1.1 loop is complete — all 4 phases done and independently
+reviewed. `nub run build:web` produces a production-mode One build (the
+upstream `React$<N>` Rolldown deconfliction bug is neutralized by an
+app-level transform); e2e runs the built artifact via `one serve` and the
+cold-start reproducibility deviation is retired on 3x consecutive
+maximally-cold 80/80 runs; `press-web:local` builds locally and
+`nub run smoke:image` proves boot refusal, the seeded feed, and the exact
+sandbox CSP from inside the container. Full harness at wrap:
+`nub run check` + `test` (98) + `e2e` (80/80) + `build:web` + `smoke:image`
+all green. Nothing pushed; the working tree is committed on local `main`.
+The v1.1 loop plan (`loop.md`, commit `fe84121`) was absorbed into this file,
+`DEVIATIONS.md`, and `SPEC.md`, then deleted per its own wrap prescription.
+
+Surviving law from the absorbed plan: the build-fix intervention ladder
+(app config → committed patch → dependency version change, forking One out
+of scope) governs any future regression of the upstream bug; deviation
+retirement always requires recorded evidence, never assertion.
+
+## 2026-07-03 — v1 loop wrap
 
 Status: all 8 loop phases are complete. The full harness is green from a clean
 localnet boot, and the magazine screenshot oracle reached quorum in round 3
