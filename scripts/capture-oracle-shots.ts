@@ -319,33 +319,37 @@ async function main(): Promise<number> {
   let oracleEnv = bootstrapEnv
   let siloUp: ChildProcess | undefined
   let siloReadyForDown = false
-  let cleanupPromise: Promise<void> | undefined
+  let cleanupPromise: Promise<Error[]> | undefined
 
-  function cleanup(): Promise<void> {
+  function cleanup(): Promise<Error[]> {
     if (cleanupPromise) {
       return cleanupPromise
     }
 
     cleanupPromise = (async () => {
+      const errors: Error[] = []
       try {
         await stopSiloUp(siloUp)
       } catch (error) {
         logCleanupError('stopping silo up', error)
+        errors.push(error instanceof Error ? error : new Error(String(error)))
       }
       if (siloReadyForDown) {
         try {
           await teardown(oracleEnv)
         } catch (error) {
           logCleanupError('silo down --clean', error)
+          errors.push(error instanceof Error ? error : new Error(String(error)))
         }
       }
+      return errors
     })()
     return cleanupPromise
   }
 
   async function handleSignal(signal: NodeJS.Signals): Promise<void> {
-    await cleanup()
-    process.exit(signal === 'SIGINT' ? 130 : 143)
+    const errors = await cleanup()
+    process.exit(errors.length > 0 ? 1 : signal === 'SIGINT' ? 130 : 143)
   }
 
   process.once('SIGINT', () => {
@@ -357,6 +361,7 @@ async function main(): Promise<number> {
 
   await mkdir(outputDir, { recursive: true })
 
+  let capturedOk = false
   try {
     await runRequired('silo', ['env', oracleInstanceName, '--force'], bootstrapEnv)
     const siloEnv = await readSiloEnv()
@@ -374,10 +379,14 @@ async function main(): Promise<number> {
       }
     }
 
-    return 0
+    capturedOk = true
   } finally {
-    await cleanup()
+    const cleanupErrors = await cleanup()
+    if (capturedOk && cleanupErrors.length > 0) {
+      capturedOk = false
+    }
   }
+  return capturedOk ? 0 : 1
 }
 
 void main()
