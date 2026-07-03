@@ -1,5 +1,36 @@
 # press — DELTA
 
+## 2026-07-03 — phase 5 final verification
+
+Sandbox-runnable verification is green on the final silo/Tilt localnet migration
+state. `nub run check` exits 0: `tsgo -b`, `oxlint .`, and
+`oxfmt --check .` pass, with oxlint reporting only the existing console and
+await-in-loop warnings. `nub run test` exits 0 with `114 pass`, `0 fail`, and
+`213 expect() calls` across 13 files.
+
+The clean break holds. `scripts/localnet.ts` does not exist. The repository
+search for `scripts/localnet\.ts|press-localnet|bootLocalnet|startLocalnet|withLocalnetDefaults|localnet:e2e`,
+excluding `node_modules/`, `.rl/`, `.git/`, and `DELTA.md`, returns no matches.
+The four silo lifecycle scripts (`scripts/e2e.ts`, `scripts/devShare.ts`,
+`scripts/capture-oracle-shots.ts`, `scripts/backupRestoreDrill.ts`) tear down
+through env-scoped `docker compose down -v --remove-orphans` using captured
+`COMPOSE_PROJECT_NAME` plus absolute `COMPOSE_FILE`; none use a nameless
+`silo down` teardown.
+
+Driver-run executable proofs are green in the real Docker/Chromium environment.
+The full Playwright e2e suite passes against the isolated `e2e` silo instance:
+82 passed, exit 0, with 0 residual `press-e2e` containers after scoped
+`docker compose down`. The isolation proof holds: a running `silo up main`
+(`dev:share`) remains healthy during concurrent `nub run e2e`,
+`press-main-postgres-1` survives, and the e2e run leaves 0 residual containers;
+teardowns are scoped to each script's captured `COMPOSE_PROJECT_NAME` and
+absolute `COMPOSE_FILE`, independent of lockfiles. The backup/restore drill
+prints `PASS backup/restore drill`, proves `contentHash == blobHash`, ACL
+`public=200` / `default-non-html=401`, DB-dump-first order, and 0 residual
+containers. The `dev:share` smoke passes with seeded human sign-in plus
+minted-token CLI publish; SIGINT cleanup runs scoped compose-down to completion
+with 0 residual containers and `.dev/agent.env` removed.
+
 ## 2026-07-03 — silo/Tilt localnet clean break
 
 The localnet migration is complete. `silo.toml`, `Tiltfile`, `tilt/**`, and
