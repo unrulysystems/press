@@ -1,0 +1,54 @@
+{
+  "name": "press",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "type": "module",
+  "scripts": {
+    "setup": "nub scripts/setup.ts",
+    "build": "nub run -r --filter './packages/*' build && nub run -r --filter './apps/*' build",
+    "build:web": "nub run --filter @press/web build",
+    "typecheck": "tsgo -b",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check .",
+    "check": "nub run typecheck && nub run lint && nub run format:check",
+    "test": "bun test packages apps/web/src",
+    "e2e": "bun scripts/e2e.ts",
+    "drill:backup-restore": "nub run --filter @press/core build && bun scripts/backupRestoreDrill.ts",
+    "smoke:image": "bun scripts/smokeImage.ts",
+    "dev:share": "nub run --filter @press/core build && bun scripts/devShare.ts",
+    "dev:share:smoke": "bun scripts/devShareSmoke.ts",
+    "localnet": "nub run --filter @press/core build && bun scripts/localnet.ts",
+    "localnet:e2e": "nub run --filter @press/core build && bun scripts/localnet.ts --server=prod",
+    "knip": "knip",
+    "jscpd": "jscpd .",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "nub run build && changeset publish"
+  },
+  "dependencies": {
+    "@press/cli": "workspace:*",
+    "@press/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.11.0",
+    "@changesets/cli": "^2.31.0",
+    "@playwright/test": "^1.61.1",
+    "@types/bun": "^1.3.14",
+    "@types/pg": "^8.20.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.1.7",
+    "@typescript/native-preview": "^7.0.0-dev.20260628.1",
+    "drizzle-kit": "^0.31.10",
+    "jscpd": "^4.2.5",
+    "knip": "^5.88.1",
+    "oxfmt": "^0.27.0",
+    "oxlint": "^1.71.0",
+    "typescript": "^5.9.3",
+    "zshy": "^0.7.3"
+  }
+}
