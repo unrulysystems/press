@@ -4,11 +4,12 @@ import { chmodSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
-import { expect, request as playwrightRequest, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { db } from '../apps/web/src/db/client'
 import { findPage } from '../apps/web/src/publish/e2eSupport'
+import { newE2EAPIContext } from './api'
 
 const root = resolve(import.meta.dirname, '..')
 const pressBin = resolve(root, 'packages/cli/src/index.ts')
@@ -173,7 +174,7 @@ async function loginViaLoopback(
     setTimeout(() => reject(new Error('press login did not print authorize URL')), 10_000).unref()
   })
 
-  const browserSession = await playwrightRequest.newContext({ baseURL })
+  const browserSession = await newE2EAPIContext({ baseURL })
   const signIn = await browserSession.post('/api/auth/sign-in/email', {
     headers: { 'content-type': 'application/json' },
     data: {
@@ -201,7 +202,7 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
 
   const ownerEnv = await makePressEnv(baseURL, 'owner')
   const secondEnv = await makePressEnv(baseURL, 'second')
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-flow`
   const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
   await writeFile(reportPath, '<!doctype html><title>CLI Report</title><h1>CLI</h1>')

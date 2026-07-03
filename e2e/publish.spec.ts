@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process'
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { expect, request as playwrightRequest, test } from '@playwright/test'
+import { expect, test } from '@playwright/test'
 
 import type { APIRequestContext, APIResponse } from '@playwright/test'
 
@@ -18,6 +18,7 @@ import {
   installFailingAuditTrigger,
   removeFailingAuditTrigger,
 } from '../apps/web/src/publish/e2eSupport'
+import { newE2EAPIContext } from './api'
 
 const runSlug = `pub-${Date.now().toString(36)}`
 
@@ -89,7 +90,7 @@ async function signIn(
   baseURL: string | undefined,
   key: keyof typeof localnetUsers,
 ): Promise<APIRequestContext> {
-  const context = await playwrightRequest.newContext({ baseURL })
+  const context = await newE2EAPIContext({ baseURL })
   const response = await context.post('/api/auth/sign-in/email', {
     headers: { 'content-type': 'application/json' },
     data: {
@@ -160,13 +161,13 @@ test.afterAll(async () => {
 test('publish endpoint enforces bearer auth, validation, storage, overwrite, and audit', async ({
   baseURL,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-main`
   const fileSlug = 'index.html'
   const body = '<!doctype html><title>Launch Report</title><h1>Launch</h1>'
   const expectedHash = hashBody(body)
 
-  const cookieContext = await playwrightRequest.newContext({ baseURL })
+  const cookieContext = await newE2EAPIContext({ baseURL })
   await cookieContext.post('/api/auth/sign-in/email', {
     headers: { 'content-type': 'application/json' },
     data: {
@@ -269,7 +270,7 @@ test('publish endpoint enforces bearer auth, validation, storage, overwrite, and
 test('password publishing, patching, listing, reroll, and admin unpublish stay audited', async ({
   baseURL,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-secure`
   const passwordFile = 'secret.html'
   const passwordBody = '<!doctype html><title>Secret</title>'
@@ -513,7 +514,7 @@ test('Anonymous GET of a public page -> 200 with sandbox CSP', async ({
   context,
   page: browserPage,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-srv-public`
   const fileSlug = 'public.html'
   const body =
@@ -555,7 +556,7 @@ test('Anonymous GET of a public page -> 200 with sandbox CSP', async ({
 test('Anonymous browser GET of a default page -> 302 to /login; non-HTML -> 401', async ({
   baseURL,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-srv-default-anon`
   const fileSlug = 'default.html'
   const body = '<!doctype html><title>Default</title>'
@@ -586,7 +587,7 @@ test('Anonymous browser GET of a default page -> 302 to /login; non-HTML -> 401'
 })
 
 test('Authenticated wrong-domain user GET of a default page -> 403', async ({ baseURL }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const wrongDomain = await signIn(baseURL, 'wrongDomain')
   const collectionSlug = `${runSlug}-srv-wrong-domain`
   const fileSlug = 'default.html'
@@ -609,7 +610,7 @@ test('Authenticated wrong-domain user GET of a default page -> 403', async ({ ba
 })
 
 test('Authenticated allowed-domain user GET of a default page -> 200', async ({ baseURL }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const secondUser = await signIn(baseURL, 'secondUser')
   const collectionSlug = `${runSlug}-srv-domain`
   const fileSlug = 'default.html'
@@ -634,7 +635,7 @@ test('Authenticated allowed-domain user GET of a default page -> 200', async ({ 
 test('private page: allowlisted external user -> 200; non-allowlisted same-domain -> 403; owner -> 200', async ({
   baseURL,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const external = await signIn(baseURL, 'external')
   const secondUser = await signIn(baseURL, 'secondUser')
   const owner = await signIn(baseURL, 'owner')
@@ -663,7 +664,7 @@ test('private page: allowlisted external user -> 200; non-allowlisted same-domai
 })
 
 test('password page accepts independent Basic and owner session channels', async ({ baseURL }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const owner = await signIn(baseURL, 'owner')
   const wrongDomain = await signIn(baseURL, 'wrongDomain')
   const collectionSlug = `${runSlug}-srv-password`
@@ -723,7 +724,7 @@ test('password page accepts independent Basic and owner session channels', async
 test('Unpublish via API archives; subsequent GET -> 404; ACL-filtered list endpoints no longer include it', async ({
   baseURL,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-srv-unpublish`
   const fileSlug = 'gone.html'
   const body = '<!doctype html><title>Gone</title>'
@@ -816,7 +817,7 @@ test('Boot with credential auth enabled in production -> refuses to start', asyn
 test('transaction rollback restores the previous blob when audit insert fails', async ({
   baseURL,
 }) => {
-  const api = await playwrightRequest.newContext({ baseURL })
+  const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-rollback`
   const fileSlug = 'rollback.html'
   const originalBody = '<!doctype html><title>Original</title>'
