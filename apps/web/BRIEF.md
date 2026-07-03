@@ -85,6 +85,10 @@ publication he'd read — the human gate no quorum replaces.
 - Tamagui is the styling system; design tokens (type scale, spacing scale,
   palette) are defined once in the Tamagui config and are the source the floors
   assert against.
+- Feed entry titles carry no static at-rest link affordance; the underline
+  appears on hover only (magazine convention). Judge G's round-3 dissent
+  requesting a static affordance is resolved: hover-only stands (ratified
+  2026-07-03).
 
 ## Boundary (Allen's alone)
 

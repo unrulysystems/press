@@ -42,7 +42,8 @@ User        (Better Auth) id, email, role: 'user' | 'admin'
 Session     (Better Auth) cookie-backed, HttpOnly
 ApiToken    (Better Auth api-key or equivalent) hashed, revocable, userId,
             name, lastUsedAt
-Collection  slug PK, ownerId → User, title?, defaultVisibility, createdAt
+Collection  slug PK, ownerId → User, title?,
+            defaultVisibility: 'default' | 'public' | 'private', createdAt
 Page        id, collectionSlug → Collection, fileSlug, title (extracted),
             visibility: 'default' | 'public' | 'password' | 'private',
             passwordHash? (argon2), allowlist: email[], contentHash (sha256),
@@ -138,7 +139,11 @@ title, visibility, password? }`.
   only). Publisher-chosen passwords are not supported.
 - **REQ-PUB-006** `PATCH /api/pages/:collection/:file` updates visibility /
   allowlist / title (owner only). `PATCH /api/collections/:collection` updates
-  defaultVisibility / title (owner only).
+  defaultVisibility / title (owner only). `defaultVisibility` accepts only
+  `default | public | private`; `password` is page-explicit because its
+  server-generated material (one-time password, argon2 hash — REQ-PUB-005) is
+  per-page and cannot be supplied by collection inheritance. Requests offering
+  `password` as a collection default receive 400.
 - **REQ-PUB-007** `DELETE /api/pages/:collection/:file` soft-deletes: sets
   archivedAt, moves the blob to an archive dir, removes the page from all
   indexes and serving (404). Owner or admin.

@@ -84,6 +84,10 @@ published page to attack its readers.
 - Visibility: `default` (org domains) / `public` / `password` / `private`
   (email allowlist, externals allowed); per-page with collection default.
   Page passwords are server-generated, shown once, argon2-hashed.
+  Collection `defaultVisibility` ranges over `default | public | private`
+  only — `password` is page-explicit, never a collection default, because its
+  server-generated per-page material cannot be supplied by inheritance
+  (ratified 2026-07-03).
 - Ownership: first publisher owns the collection; only owners publish into
   their collections; admins may moderate (unpublish) but never publish-as.
 - Serving prefix **`/p/`** for all visibilities (prefix never encodes

@@ -1,5 +1,21 @@
 # press — DELTA
 
+## 2026-07-03 — Allen ratifications (visibility default, link affordance)
+
+Both open ratifications are resolved by Allen, attended:
+
+- `password` as a collection `defaultVisibility` is **rejected, ratified**.
+  SPEC.md now types `Collection.defaultVisibility` as
+  `'default' | 'public' | 'private'` and REQ-PUB-006 states the 400 contract;
+  the root `BRIEF.md` visibility Decision records it. Code and tests already
+  enforced this (`packages/core/src/index.ts:9`, `e2e/publish.spec.ts:339`).
+- Judge G's round-3 dissent on entry-title static link affordance is
+  **resolved: hover-only stands** (magazine convention). Recorded as a
+  ratified Decision in `apps/web/BRIEF.md`; no code change.
+
+With these, no pending ratifications remain. Everything left is the Boundary
+handoff list below (push onward).
+
 ## 2026-07-03 — v1.2 loop wrap (CI completeness, keep-alive evidence)
 
 Status: the v1.2 loop is complete — both phases done and independently
@@ -267,7 +283,7 @@ Boundary handoff for Allen:
 
 ## 2026-07-02 — password as collection defaultVisibility rejected
 
-Pending Allen's ratification: `password` is rejected as a collection
+Ratified by Allen 2026-07-03 (see entry above): `password` is rejected as a collection
 `defaultVisibility`. The SPEC Domain model types the four-value visibility union
 on `Page.visibility`; `Collection.defaultVisibility` is not explicitly typed.
 Password visibility requires per-page server-generated material: the one-time
