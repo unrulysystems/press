@@ -9,6 +9,7 @@
   "scripts": {
     "setup": "nub scripts/setup.ts",
     "build": "nub run -r --filter './packages/*' build && nub run -r --filter './apps/*' build",
+    "build:web": "nub run --filter @press/web build",
     "typecheck": "tsgo -b",
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",

@@ -78,7 +78,7 @@ converges, record the evidence in `DEVIATIONS.md` and block honestly.
 - **Packet scope:** `apps/web/**` (config only, no feature changes),
   `patches/**`, `package.json`, `lock.yaml`, `DEVIATIONS.md`, `DELTA.md`
 - **Acceptance:** the phase-0 build gate exits 0; `nub run check && nub run
-  test && nub run e2e` all green (e2e still on dev server in this phase);
+test && nub run e2e` all green (e2e still on dev server in this phase);
   the fix is the minimal intervention from the allowed space, and `DELTA.md`
   records what was chosen and why.
 - **Description:** Turn the phase-0 gate green. Prefer app-level
