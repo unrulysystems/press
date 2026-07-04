@@ -178,7 +178,8 @@ title, visibility, password?, allow? }` — `allow` is the page's resolved
 - **REQ-SRV-001** `GET /p/:collection/:file` streams the blob after the ACL
   check. The filesystem path is constructed only from the DB row's validated
   slugs — never from raw URL input.
-- **REQ-SRV-002** Every `/p/` response carries:
+- **REQ-SRV-002** Every `/p/` response — except the REQ-SRV-004 password entry page,
+  the sole exception — carries:
   `Content-Security-Policy: sandbox allow-scripts allow-popups`,
   `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
   `Cache-Control: no-store`. (Sandbox ⇒ opaque origin: report JS cannot read
@@ -250,7 +251,9 @@ frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that 
 
 - **INV-1** Mutations authenticate solely via Bearer API tokens; a session
   cookie alone never authorizes a mutation.
-- **INV-2** Every `/p/` response carries the sandbox CSP of REQ-SRV-002.
+- **INV-2** Every `/p/` response carries the sandbox CSP of REQ-SRV-002, except the
+  branded password entry page (REQ-SRV-004) — the sole exception — which carries its
+  own strict, form-capable CSP (no scripts, no report body, `form-action 'self'`).
 - **INV-3** Served file paths derive only from DB-validated slugs.
 - **INV-4** No secret value ever appears in argv, logs, or the repo. Page
   passwords exist in plaintext only inside the single publish/re-roll response.
@@ -298,7 +301,9 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 - [ ] `/login` renders the enabled provider affordance in both localnet
       (credential form + seeded hint) and Google-configured modes, and is never
       copy-only (REQ-AUTH-008)
-- [ ] Every `/p/` 200 in the suite carries the exact CSP of REQ-SRV-002
+- [ ] Every `/p/` 200 serving report content carries the exact CSP of REQ-SRV-002;
+      the password entry page (REQ-SRV-004) instead carries its strict form-capable
+      CSP (no scripts, no report body)
 - [ ] `press publish` (real CLI binary) creates a collection, publishes, prints
       URL; republish overwrites; second user's publish to same collection → 403
       (exit 3)

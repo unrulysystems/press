@@ -28,14 +28,14 @@ published page to attack its readers.
 
 ## Floors (gate, not ceiling)
 
-| Floor                                                    | Measured by                                                                                                                                                   |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Types/lint/format green                                  | `nub run check` (tsgo -b, oxlint, oxfmt --check)                                                                                                              |
-| ACL matrix + slug grammar + password hashing unit-tested | `nub run test` — includes exhaustive table test over REQ-ACL-001 via the pure ACL function                                                                    |
-| Full e2e acceptance list green                           | `nub run e2e` against localnet (`nub run localnet` boots Postgres + server + seeded users; suite = SPEC.md acceptance criteria, Playwright + real CLI binary) |
-| Sandbox CSP on every served page                         | e2e asserts REQ-SRV-002 headers on every `/p/` 200 in the run                                                                                                 |
-| Publish path exercised end-to-end                        | e2e drives the actual `press` binary (spawned process), not raw HTTP shortcuts                                                                                |
-| Boot fail-closed                                         | e2e asserts prod+credential-auth boot refusal (INV-5) and missing-config abort (REQ-CFG-002)                                                                  |
+| Floor                                                    | Measured by                                                                                                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Types/lint/format green                                  | `nub run check` (tsgo -b, oxlint, oxfmt --check)                                                                                                                               |
+| ACL matrix + slug grammar + password hashing unit-tested | `nub run test` — includes exhaustive table test over REQ-ACL-001 via the pure ACL function                                                                                     |
+| Full e2e acceptance list green                           | `nub run e2e` against localnet (`nub run localnet` boots Postgres + server + seeded users; suite = SPEC.md acceptance criteria, Playwright + real CLI binary)                  |
+| Sandbox CSP on served report pages                       | e2e asserts REQ-SRV-002 headers on every `/p/` 200 serving report content; the REQ-SRV-004 entry page instead carries its strict form-capable CSP (no scripts, no report body) |
+| Publish path exercised end-to-end                        | e2e drives the actual `press` binary (spawned process), not raw HTTP shortcuts                                                                                                 |
+| Boot fail-closed                                         | e2e asserts prod+credential-auth boot refusal (INV-5) and missing-config abort (REQ-CFG-002)                                                                                   |
 
 ## Oracle
 
@@ -57,7 +57,8 @@ published page to attack its readers.
 - A secret value (OAuth secret, session secret, API token, page password) in
   argv, logs, committed files, or chat output.
 - A mutation authorized by a session cookie (INV-1).
-- A `/p/` response missing the exact sandbox CSP (INV-2).
+- A `/p/` report response missing the exact sandbox CSP, or the REQ-SRV-004 entry
+  page carrying a report-executing CSP (INV-2).
 - A served path derived from raw URL input instead of DB-validated slugs
   (INV-3).
 - Credential auth enabled in production (INV-5).

@@ -18,6 +18,11 @@ const schemes = ['light', 'dark'] as const
 const targets = [
   { name: 'feed', path: '/' },
   { name: 'market-notes', path: '/c/market-notes' },
+  // Identity + password gates are first-class editorial surfaces (apps/web/BRIEF.md,
+  // ratified 2026-07-04). The signed-in oracle session still renders both: /login has
+  // no authenticated redirect, and the seeded password page gates a non-owner viewer.
+  { name: 'login', path: '/login' },
+  { name: 'password-gate', path: '/p/market-notes/checkout-cohort-notes.html' },
 ] as const
 
 type OracleEnv = NodeJS.ProcessEnv & Record<string, string>
