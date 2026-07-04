@@ -917,6 +917,19 @@ test('password gate: branded HTML entry, form+cookie unlock, Basic for programma
   expect(wrongHtml).toContain('Incorrect')
   expect(wrongHtml).not.toContain(bodyMarker)
 
+  // 4b. the unlock 303 is a /p/ response that is not the entry page → it carries the
+  // sandbox CSP + security headers (INV-2 / REQ-SRV-002), plus Location and the cookie
+  const unlock303 = await api.post(path, {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: `password=${secret}`,
+    maxRedirects: 0,
+  })
+  expect(unlock303.status()).toBe(303)
+  expect(unlock303.headers()['content-security-policy']).toContain('sandbox')
+  expect(unlock303.headers()['x-content-type-options']).toBe('nosniff')
+  expect(unlock303.headers()['referrer-policy']).toBe('no-referrer')
+  expect(unlock303.headers()['set-cookie']).toContain('press_pw_')
+
   // 5. real browser: gate renders, form submits under the CSP, cookie unlocks the report
   await page.goto(path)
   await expect(page.locator('input[name="password"]')).toBeVisible()

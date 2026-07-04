@@ -293,12 +293,14 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
   }
   const expiryMs = Date.now() + PAGE_PASSWORD_COOKIE_TTL_MS
   const value = signPagePasswordCookie(dbConfig.betterAuthSecret, row.page.id, expiryMs)
-  return new Response(null, {
+  // The 303 is a `/p/` response that is not the entry page, so it carries the sandbox
+  // CSP + security headers of REQ-SRV-002 / INV-2 (via servedPageResponse), plus the
+  // redirect Location and the page-scoped unlock cookie.
+  return servedPageResponse(null, {
     status: 303,
     headers: {
       location: actionPath,
       'set-cookie': serializeUnlockCookie(row.page.id, value, actionPath),
-      'cache-control': 'no-store',
     },
   })
 }
