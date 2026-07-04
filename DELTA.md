@@ -1,5 +1,60 @@
 # press — DELTA
 
+## 2026-07-04 — agent publish plugin + enforced minimal-auth footprint
+
+press now ships an agent-facing publishing plugin and enforces an identity-only
+Google auth footprint that stores no provider tokens.
+
+**Minimal auth footprint (REQ-1).** `apps/web/src/auth/server.ts` enforces the
+posture in two layers. A Better Auth `hooks.before` middleware
+(`stripClientRequestedOAuthScopes`) removes client-supplied `scopes`/`scope` on
+`/sign-in/social` and `/link-social`, and the Google provider is pinned to
+identity-only scopes (`openid`, `email`, `profile`) with no offline access, so
+the authorize URL is always identity-only. An `account` databaseHook
+(`stripStoredProviderTokens`, wired on `databaseHooks.account.create.before` and
+`update.before`) nulls `accessToken`, `refreshToken`, `idToken`, and their expiry
+fields before any account row is written — closing Better Auth's ID-token
+sign-in flow, which would otherwise persist client-supplied provider tokens. No
+Google provider token reaches the database on any sign-in path; the columns
+remain (no schema change) and are stored null via a supported hook, not an
+adapter override. `apps/web/src/auth/server.test.ts` proves both layers: a
+`drive.readonly` request still yields an identity-only authorize URL, and the
+account create/update hooks null every provider token. F-04's provider-token
+exposure is resolved (see `DEVIATIONS.md`, `AUDIT.md`); Better Auth session
+bearer tokens remain the accepted residual, covered by the secret-bearing
+backup runbook.
+
+**CLI walkthrough support (REQ-3).** `packages/cli/src/index.ts` adds
+`press doctor`: it reports the resolved host, token source (keychain / env /
+none), the `whoami` identity when authenticated, and a next-step otherwise. The
+authentication-required error names both paths — `press login` for interactive
+use, `PRESS_TOKEN` + `PRESS_HOST` for agents. The `publish`/`list`/`whoami`/
+`login` contracts are unchanged.
+
+**Agent plugin (REQ-2).** `plugins/press/` is a cross-tool plugin with both
+ingestion manifests (`.claude-plugin/plugin.json` for Claude Code,
+`.codex-plugin/plugin.json` for Codex) sharing one `./skills` directory, plus
+`CLAUDE.md`/`AGENTS.md` entry docs. Two skills drive the `press` CLI:
+`press-setup` (acquire and verify a token — agent path via `nub run dev:share`
+or a provided `PRESS_TOKEN`/`PRESS_HOST`, interactive via `press login`) and
+`press-publish` (compose an HTML report, publish it, read it back, confirm the
+ACL). `packages/cli/src/pressPlugin.test.ts` asserts both manifests are valid,
+the Codex `interface` block is present, both skills exist, and every cited
+`press` command is real.
+
+**Executable proofs (REQ-4).** `nub run check` and `nub run test` are green
+(`144 pass`, `0 fail`). The new `nub run walkthrough`
+(`scripts/agentWalkthrough.ts`) boots an isolated `walkthrough` silo instance,
+mints a seeded owner API token (no real Google), publishes a public and a
+private report through the real `press` CLI, and verifies read-back plus ACL:
+the public page returns HTTP 200 to an unauthenticated reader, the private page
+returns HTTP 401, and `press list` shows both. The full Playwright suite passes
+against the isolated `e2e` instance: `82 passed`. Both harnesses tear down
+through env-scoped `docker compose down -v --remove-orphans` (captured
+`COMPOSE_PROJECT_NAME` + absolute `COMPOSE_FILE`), leaving 0 residual containers.
+Every milestone (auth footprint, `press doctor`, plugin, walkthrough) passed an
+independent Codex structured review at its commit SHA.
+
 ## 2026-07-03 — phase 5 final verification
 
 Sandbox-runnable verification is green on the final silo/Tilt localnet migration
