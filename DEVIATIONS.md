@@ -1,3 +1,23 @@
+## 2026-07-03 — F-04 accepted with mitigation: minimal Google auth footprint
+
+F-04 from the whole-repo security ultra-audit is accepted with mitigation, not
+eliminated. press uses Google OAuth only to establish identity at sign-in; the
+application does not read Better Auth's stored `account.accessToken`,
+`account.refreshToken`, or `account.idToken` afterward.
+
+**Decision:** the Google provider is pinned to identity-only scopes (`openid`,
+`email`, `profile`) and does not request offline access or a consent prompt. With
+that posture, Google issues only a short-lived, minimal-scope access token plus an
+ID token, and no refresh token. The phase-3 backup runbook already treats the DB
+and all dumps as secret-bearing, which remains required because session bearer
+tokens stay at Better Auth's default unhashed-at-rest posture.
+
+**Rejected alternatives:** hashing Better Auth session tokens and dropping the
+`account` token columns were both declined. Each requires overriding Better
+Auth's adapter/storage behavior, which fights the framework and increases upgrade
+risk for marginal benefit once Google scopes are minimal and press reads none of
+the provider tokens.
+
 ## 2026-07-03 — silo/Tilt migration: sandbox cannot run executable proofs (driver is the execution gate)
 
 The silo + Tilt localnet migration (`silo.toml`, `Tiltfile`, `tilt/**`,
