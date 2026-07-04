@@ -1,0 +1,13 @@
+{
+  "name": "press",
+  "description": "Publish identity-gated HTML reports with the press CLI. Two skills walk an agent from zero to a shared URL: press-setup acquires and verifies an auth token, press-publish composes a report, publishes it, and confirms the returned URL and its access control.",
+  "author": {
+    "name": "Allen Eubank",
+    "url": "https://github.com/alleneubank"
+  },
+  "repository": "https://github.com/alleneubank/press",
+  "version": "0.1.0",
+  "skills": "./skills",
+  "license": "MIT",
+  "keywords": ["press", "publish", "report", "html", "cli", "agent"]
+}
