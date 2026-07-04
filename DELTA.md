@@ -1,5 +1,39 @@
 # press — DELTA
 
+## 2026-07-04 — blind-oracle judgment: web surface PASSES (incl. the F1/F5 gates)
+
+Ran the `apps/web/BRIEF.md` § Oracle — the blind screenshot quorum — against a fresh
+16-shot capture that now includes the F1 branded password-entry page and the F5 `/login`
+identity gate (`bun scripts/capture-oracle-shots.ts`; `{feed, market-notes, login,
+password-gate} × {light, dark} × {360, 1280}`). Three fresh-context, blind judge agents
+(maker ≠ judge; each saw only the screenshots + Bar + Dimensions + exemplar names, never
+the code/diff/repo) each rated every Dimension.
+
+**Verdict: PASS.** All three judges rated all seven Dimensions `magazine-grade` (3/3 on
+every Dimension — the ≥2/3 quorum is met with unanimity). Full dossier + verbatim verdicts
+in `artifacts/oracle/JUDGMENT.md` (gitignored evidence). Representative evidence:
+
+- Typographic hierarchy — "a large serif display head ('Reports for close reading.'), rust
+  sans category labels, serif entry titles, and small sans bylines into one deliberate
+  Stripe-Press-like system" (J1).
+- Palette restraint — "near-monochrome cream/near-black base with a single restrained
+  terracotta accent … confined to category labels" (J3).
+- Responsiveness — "reflows cleanly from the 1280 two-column title/byline layout to a
+  stacked single column at 360 … without overflow or crowding" (J3).
+- Overall — "reads unmistakably as a modern editorial magazine in the Stripe Press mold,
+  not an internal tool or dashboard" (J3); "a calm, typographic editorial magazine, not an
+  internal tool" (J2).
+
+**Watch-item (non-blocking, next-round input per Oracle step 3).** Judge 3 still rated
+Accessibility `magazine-grade` but flagged that "the small terracotta labels on dark sit
+near the lower edge of the range." Not a floor failure — the automated axe/contrast floor
+passes in `nub run e2e` — but the dark-scheme category-label contrast margin is thin and
+worth tightening if the palette is next revisited.
+
+**Boundary.** This is the loop-side blind quorum. `apps/web/BRIEF.md` § Oracle "Final
+acceptance" — Allen looking at the deployed instance and judging it reads like a
+publication — is the human gate no quorum replaces, and remains outstanding.
+
 ## 2026-07-04 — dogfood bug bash fixes: password + identity-gate reader surfaces (F1–F5)
 
 A Jefferson-persona dogfood/bug-bash of localnet surfaced five reader-facing gaps on the
