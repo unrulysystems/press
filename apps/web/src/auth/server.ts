@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
+import { createAuthMiddleware } from 'better-auth/api'
 import { betterAuth } from 'better-auth/minimal'
 import { admin } from 'better-auth/plugins'
 
@@ -10,6 +11,35 @@ import { account, session, user, verification } from '../db/schema'
 import { buildAuthProviderConfig } from './providerConfig'
 
 const authProviderConfig = buildAuthProviderConfig(dbConfig)
+
+const socialOAuthPaths = new Set(['/sign-in/social', '/link-social'])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+export function stripClientRequestedOAuthScopes(body: unknown): void {
+  if (!isRecord(body)) {
+    return
+  }
+
+  // Better Auth deep-merges hook return contexts, so deleting in place is the
+  // faithful way to prevent client scopes from reaching the social endpoint.
+  delete body.scopes
+  delete body.scope
+
+  if (isRecord(body.idToken)) {
+    delete body.idToken.scopes
+    delete body.idToken.scope
+  }
+}
+
+export const stripClientRequestedOAuthScopesHook = createAuthMiddleware(async (ctx) => {
+  if (!socialOAuthPaths.has(ctx.path)) {
+    return
+  }
+  stripClientRequestedOAuthScopes(ctx.body)
+})
 
 export const authOptions = {
   baseURL: `${dbConfig.baseUrl}/api/auth`,
@@ -50,6 +80,9 @@ export const authOptions = {
     },
   },
   plugins: [admin()],
+  hooks: {
+    before: stripClientRequestedOAuthScopesHook,
+  },
   databaseHooks: {
     user: {
       create: {

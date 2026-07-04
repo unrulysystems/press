@@ -179,11 +179,11 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 **Location**: `apps/web/src/db/schema.ts:43-76`
 **First anchor line**: 43
 
-**Claim**: Session bearer tokens and OAuth provider tokens are modeled as plaintext database fields; a read of Postgres or its backups can expose replayable auth material rather than only hashes or encrypted blobs. This remains an accepted risk under the DEVIATIONS.md F-04 decision: Google is pinned to minimal identity-only scopes with no offline access, so no refresh token is requested, and press does not read the stored provider tokens.
+**Claim**: Session bearer tokens and OAuth provider tokens are modeled as plaintext database fields; a read of Postgres or its backups can expose replayable auth material rather than only hashes or encrypted blobs. This remains an accepted risk under the DEVIATIONS.md F-04 decision: Better Auth social requests strip client-supplied scopes server-side, Google is pinned to minimal identity-only scopes with no offline access, no refresh token is requested, and press does not read the stored provider tokens.
 
-**Evidence**: schema.ts:43-49 defines `session.token` as unique `text`; schema.ts:61-72 defines `account.accessToken`, `refreshToken`, and `idToken` as `text`. auth/server.ts:17-27 passes these tables to the Drizzle adapter, and auth/server.ts:41-43 enables database-backed sessions. DEVIATIONS.md records the accepted-with-mitigation posture and keeps DB/backups classified as secret-bearing.
+**Evidence**: schema.ts:43-49 defines `session.token` as unique `text`; schema.ts:61-72 defines `account.accessToken`, `refreshToken`, and `idToken` as `text`. auth/server.ts passes these tables to the Drizzle adapter, strips client `scopes` / `scope` values from `/sign-in/social` and `/link-social` before Better Auth creates the Google authorize URL, and keeps database-backed sessions enabled. providerConfig.ts pins Google to `openid`, `email`, `profile` without `accessType` or `prompt`. DEVIATIONS.md records the accepted-with-mitigation posture and keeps DB/backups classified as secret-bearing.
 
-**Suggested fix**: The original hashing/column-drop fixes were consciously declined because they require Better Auth adapter overrides for marginal benefit after scope minimization. Session bearer tokens remain Better Auth's default unhashed database values. Continue treating DB/backups as secret-bearing and rotate sessions after restore exposure.
+**Suggested fix**: The original hashing/column-drop fixes were consciously declined because they require Better Auth adapter overrides for marginal benefit after enforced scope minimization. Session bearer tokens remain Better Auth's default unhashed database values. Continue treating DB/backups as secret-bearing and rotate sessions after restore exposure.
 
 **Discovered by**: secrets-and-keys
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
