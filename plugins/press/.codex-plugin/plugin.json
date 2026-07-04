@@ -1,0 +1,26 @@
+{
+  "name": "press",
+  "description": "Publish identity-gated HTML reports with the press CLI. Two skills walk an agent from zero to a shared URL: press-setup acquires and verifies an auth token, press-publish composes a report, publishes it, and confirms the returned URL and its access control.",
+  "author": {
+    "name": "Allen Eubank",
+    "url": "https://github.com/alleneubank"
+  },
+  "repository": "https://github.com/alleneubank/press",
+  "version": "0.1.0",
+  "skills": "./skills",
+  "license": "MIT",
+  "keywords": ["press", "publish", "report", "html", "cli", "agent", "codex", "claude"],
+  "interface": {
+    "displayName": "press",
+    "shortDescription": "Publish identity-gated HTML reports via the press CLI",
+    "longDescription": "Two skills take an agent from auth setup to a shared URL: press-setup acquires and verifies a token; press-publish composes an HTML report, publishes it, and confirms the returned URL and its access control.",
+    "developerName": "Allen Eubank",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Read", "Write"],
+    "defaultPrompt": [
+      "Set up press auth and verify my token",
+      "Publish this HTML report with press and share the URL",
+      "Publish a private press page and confirm its access control"
+    ]
+  }
+}

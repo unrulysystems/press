@@ -46,12 +46,29 @@ function citedPressCommands(markdown: string): string[] {
 }
 
 describe('press plugin manifest', () => {
-  test('is valid JSON with the required fields', async () => {
-    const manifest = JSON.parse(await read('.claude-plugin/plugin.json')) as Record<string, unknown>
-    expect(manifest.name).toBe('press')
-    expect(typeof manifest.description).toBe('string')
-    expect(manifest.skills).toBe('./skills')
-    expect(typeof manifest.version).toBe('string')
+  // A cross-tool plugin needs BOTH ingestion manifests: Claude Code reads
+  // .claude-plugin/plugin.json, Codex reads .codex-plugin/plugin.json. Both must point at
+  // the same shared ./skills.
+  const manifestPaths = ['.claude-plugin/plugin.json', '.codex-plugin/plugin.json'] as const
+
+  for (const manifestPath of manifestPaths) {
+    test(`${manifestPath} is valid JSON with the required fields`, async () => {
+      const manifest = JSON.parse(await read(manifestPath)) as Record<string, unknown>
+      expect(manifest.name).toBe('press')
+      expect(typeof manifest.description).toBe('string')
+      expect(manifest.skills).toBe('./skills')
+      expect(typeof manifest.version).toBe('string')
+    })
+  }
+
+  test('the Codex manifest carries the interface block Codex ingestion expects', async () => {
+    const codex = JSON.parse(await read('.codex-plugin/plugin.json')) as {
+      readonly interface?: Record<string, unknown>
+    }
+    expect(codex.interface).toBeDefined()
+    expect(typeof codex.interface?.displayName).toBe('string')
+    expect(Array.isArray(codex.interface?.capabilities)).toBe(true)
+    expect(Array.isArray(codex.interface?.defaultPrompt)).toBe(true)
   })
 
   test('ships both cross-tool entry docs', async () => {
