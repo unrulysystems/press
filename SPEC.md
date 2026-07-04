@@ -196,9 +196,12 @@ title, visibility, password?, allow? }` — `allow` is the page's resolved
   page, then 303-redirects to the GET, which serves the blob; on a wrong password
   it re-renders the page with an error at 401. This read-side unlock is not a page
   mutation — INV-1 (mutations are Bearer-only) is unaffected. The entry page never
-  contains the report body before unlock, carries the sandbox CSP of REQ-SRV-002,
-  and holds the web design floors (`apps/web/BRIEF.md`). Basic auth (REQ-ACL-002)
-  remains the programmatic channel.
+  contains the report body before unlock and holds the web design floors
+  (`apps/web/BRIEF.md`). It is press's own trusted chrome, so it carries a strict CSP
+  (`default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none';
+frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that sandbox
+  omits `allow-forms` and would block the unlock form. Basic auth (REQ-ACL-002) remains
+  the programmatic channel.
 
 ### IDX — indexes / news surface
 

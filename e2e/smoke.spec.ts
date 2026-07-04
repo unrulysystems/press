@@ -147,6 +147,26 @@ for (const colorScheme of colorSchemes) {
       }
     }
 
+    // The branded password entry page (REQ-SRV-004 / F1) is an editorial surface too:
+    // navigate to a seeded `password` page unauthenticated to render the gate.
+    for (const width of widths) {
+      test(`password gate has no horizontal scroll at ${width}px`, async ({ page }) => {
+        await page.setViewportSize({ width, height: 900 })
+        await page.goto('/p/market-notes/checkout-cohort-notes.html')
+        await page.locator('input[name="password"]').waitFor()
+
+        const dimensions = await page.evaluate(() => ({
+          body: document.body.scrollWidth,
+          document: document.documentElement.scrollWidth,
+          viewport: window.innerWidth,
+        }))
+
+        expect(Math.max(dimensions.body, dimensions.document)).toBeLessThanOrEqual(
+          dimensions.viewport,
+        )
+      })
+    }
+
     for (const route of floorRoutes) {
       test(`${route.label} passes automated accessibility and contrast checks`, async ({
         page,

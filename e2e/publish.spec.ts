@@ -862,3 +862,65 @@ test('transaction rollback restores the previous blob when audit insert fails', 
   expect(await readFile(blobPath(collectionSlug, fileSlug), 'utf8')).toBe(originalBody)
   expect((await findPage(db, collectionSlug, fileSlug))?.title).toBe('Original')
 })
+
+test('password gate: branded HTML entry, form+cookie unlock, Basic for programmatic (F1)', async ({
+  baseURL,
+  page,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-gate`
+  const file = 'locked.html'
+  const secret = 'liberty-1776'
+  const bodyMarker = 'TOP-SECRET-DECLARATION-BODY'
+
+  // publish a password page with a known custom password (via the M2 header)
+  const published = await api.put(`/api/pages/${collectionSlug}/${file}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, {
+      'content-type': 'text/html',
+      'x-press-page-password': secret,
+    }),
+    data: `<!doctype html><title>Locked Report</title><article>${bodyMarker}</article>`,
+  })
+  expect(published.status()).toBe(200)
+  const path = `/p/${collectionSlug}/${file}`
+
+  // 1. HTML reader with no credential → branded gate (200), no body leak, form-capable CSP
+  const gate = await api.get(path, { headers: { accept: 'text/html' } })
+  expect(gate.status()).toBe(200)
+  const gateHtml = await gate.text()
+  expect(gateHtml).toContain('name="password"')
+  expect(gateHtml).not.toContain(bodyMarker)
+  expect(gate.headers()['content-security-policy']).toContain("form-action 'self'")
+
+  // 2. programmatic (non-HTML) reader → Basic challenge, not the branded page
+  const programmatic = await api.get(path, { headers: { accept: 'application/json' } })
+  expect(programmatic.status()).toBe(401)
+  expect(programmatic.headers()['www-authenticate']).toBe('Basic realm="press"')
+
+  // 3. Basic auth with the password still works (programmatic channel retained)
+  const basic = await api.get(path, {
+    headers: { authorization: `Basic ${Buffer.from(`:${secret}`).toString('base64')}` },
+  })
+  expect(basic.status()).toBe(200)
+  expect(await basic.text()).toContain(bodyMarker)
+
+  // 4. wrong password POST → 401 gate with an error, no body leak
+  const wrong = await api.post(path, {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: 'password=not-the-password',
+  })
+  expect(wrong.status()).toBe(401)
+  const wrongHtml = await wrong.text()
+  expect(wrongHtml).toContain('Incorrect')
+  expect(wrongHtml).not.toContain(bodyMarker)
+
+  // 5. real browser: gate renders, form submits under the CSP, cookie unlocks the report
+  await page.goto(path)
+  await expect(page.locator('input[name="password"]')).toBeVisible()
+  await page.fill('input[name="password"]', secret)
+  await page.click('button[type="submit"]')
+  await expect(page.locator('body')).toContainText(bodyMarker)
+})
