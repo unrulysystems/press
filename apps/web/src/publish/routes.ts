@@ -13,7 +13,7 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 import { verifyApiToken } from '../auth/apiTokens'
 import { db, dbConfig } from '../db/client'
 import { auditEvent, collection, page } from '../db/schema'
-import { hashPagePassword } from './passwords'
+import { MIN_PAGE_PASSWORD_LENGTH, hashPagePassword, isStrongPagePassword } from './passwords'
 import { publishResponseBody } from './responseShape'
 import { archiveBlob, installBlob, removeTempBlob, writeTempBlob } from './storage'
 
@@ -213,6 +213,14 @@ function generatePagePassword(): string {
   return randomBytes(18).toString('base64url')
 }
 
+// A publisher-supplied custom password (REQ-PUB-005 / F3) arrives in a request
+// header, never a query param (which access logs would capture) — see INV-4. The
+// raw value is used as-is for hashing.
+function readCustomPagePassword(request: Request): string | undefined {
+  const raw = request.headers.get('x-press-page-password')
+  return raw === null ? undefined : raw
+}
+
 function extractTitle(html: string, fileSlug: FileSlug, override?: string): string {
   if (override) {
     return override
@@ -392,11 +400,26 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
   const { viewer } = await authenticatedViewer(request)
   const url = new URL(request.url)
   if (url.searchParams.has('password')) {
-    throw new HttpError(400, 'publisher-chosen passwords are unsupported')
+    throw new HttpError(
+      400,
+      'supply a custom page password via the X-Press-Page-Password header, not a query param (it would be logged)',
+    )
   }
   const requestedVisibility = parseVisibility(url.searchParams.get('visibility'), 'visibility')
   const requestedAllowlist = parseAllowlist(url.searchParams.get('allow'))
   const titleOverride = parseOptionalString(url.searchParams.get('title') ?? undefined, 'title')
+  const customPassword = readCustomPagePassword(request)
+  if (customPassword !== undefined) {
+    if (requestedVisibility !== 'password') {
+      throw new HttpError(400, 'a custom page password requires visibility=password')
+    }
+    if (!isStrongPagePassword(customPassword)) {
+      throw new HttpError(
+        400,
+        `page password must be at least ${MIN_PAGE_PASSWORD_LENGTH} characters`,
+      )
+    }
+  }
 
   const existingCollection = await db.query.collection.findFirst({
     where: eq(collection.slug, route.collectionSlug),
@@ -494,10 +517,12 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
 
       const visibility = requestedVisibility ?? txPage?.visibility ?? null
       const allowlist = requestedAllowlist ?? txPage?.allowlist ?? []
-      const generatedPassword =
-        requestedVisibility === 'password' ? generatePagePassword() : undefined
-      const passwordHash = generatedPassword
-        ? await hashPagePassword(generatedPassword)
+      // Publisher-supplied password when provided (validated above), else a strong
+      // server-generated one; only when the publish sets visibility=password.
+      const effectivePassword =
+        requestedVisibility === 'password' ? (customPassword ?? generatePagePassword()) : undefined
+      const passwordHash = effectivePassword
+        ? await hashPagePassword(effectivePassword)
         : visibility === 'password'
           ? (txPage?.passwordHash ?? null)
           : null
@@ -560,7 +585,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
         title,
         visibility: resolvedVisibility(visibility, collectionAcl(txCollection).defaultVisibility),
         allowlist,
-        ...(generatedPassword ? { password: generatedPassword } : {}),
+        ...(effectivePassword ? { password: effectivePassword } : {}),
       })
     })
     const cleanupBlob = commitBlob
@@ -687,7 +712,14 @@ async function rerollPassword(request: Request, route: PageRoute): Promise<Respo
     operation: { kind: 'change-password' },
   })
 
-  const password = generatePagePassword()
+  const customPassword = readCustomPagePassword(request)
+  if (customPassword !== undefined && !isStrongPagePassword(customPassword)) {
+    throw new HttpError(
+      400,
+      `page password must be at least ${MIN_PAGE_PASSWORD_LENGTH} characters`,
+    )
+  }
+  const password = customPassword ?? generatePagePassword()
   await db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${route.collectionSlug}), hashtext(${route.fileSlug}))`,

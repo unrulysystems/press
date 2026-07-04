@@ -2,6 +2,7 @@
 
 import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
+import { readPagePassword } from './pagePassword'
 import { formatPublishOutput } from './publishOutput'
 
 type JsonRecord = Record<string, unknown>
@@ -485,7 +486,9 @@ async function commandLogout(ctx: CliContext): Promise<void> {
 }
 
 async function commandPublish(ctx: CliContext, args: readonly string[]): Promise<void> {
-  const [filePath] = stripOptions(args, ['--to', '--as', '--visibility', '--allow'])
+  const [filePath] = stripFlags(stripOptions(args, ['--to', '--as', '--visibility', '--allow']), [
+    '--password',
+  ])
   if (!filePath) {
     throw new CliError('publish requires a file path')
   }
@@ -496,7 +499,9 @@ async function commandPublish(ctx: CliContext, args: readonly string[]): Promise
   const fileSlug = optionValue(args, '--as') ?? deriveFileSlug(filePath)
   const collectionSlug = parseCollectionSlug(collection)
   parseFileSlug(fileSlug)
-  const visibility = optionValue(args, '--visibility')
+  const wantsPassword = hasFlag(args, '--password')
+  // `--password` without an explicit visibility implies a password-protected page.
+  const visibility = optionValue(args, '--visibility') ?? (wantsPassword ? 'password' : undefined)
   const allow = optionValue(args, '--allow')
   const query = new URLSearchParams()
   if (visibility) {
@@ -511,11 +516,16 @@ async function commandPublish(ctx: CliContext, args: readonly string[]): Promise
     .catch(() => {
       throw new CliError(`failed to read ${filePath}`)
     })
+  const headers: Record<string, string> = { 'content-type': 'text/html' }
+  if (wantsPassword) {
+    // Acquired out-of-band and sent as a header — never argv/query/logs (INV-4).
+    headers['x-press-page-password'] = await readPagePassword()
+  }
   const suffix = query.size > 0 ? `?${query.toString()}` : ''
   const body = (await apiFetch(ctx, `/api/pages/${collectionSlug}/${fileSlug}${suffix}`, {
     method: 'PUT',
     token: source.token,
-    headers: { 'content-type': 'text/html' },
+    headers,
     body: html,
   })) as JsonRecord
   if (ctx.json) {
@@ -552,26 +562,39 @@ async function commandList(ctx: CliContext, args: readonly string[]): Promise<vo
 }
 
 async function commandPageSet(ctx: CliContext, args: readonly string[]): Promise<void> {
-  const [target] = stripOptions(args, ['--visibility', '--allow'])
+  const [target] = stripFlags(stripOptions(args, ['--visibility', '--allow']), ['--password'])
   if (!target) {
     throw new CliError('page set requires <collection>/<file>')
   }
   const { collection, file } = parseTarget(target)
   const visibility = optionValue(args, '--visibility')
   const allow = optionValue(args, '--allow')
-  if (!visibility && allow === undefined) {
-    throw new CliError('page set requires --visibility or --allow')
+  const wantsPassword = hasFlag(args, '--password')
+  if (!visibility && allow === undefined && !wantsPassword) {
+    throw new CliError('page set requires --visibility, --allow, or --password')
   }
   const source = await requireToken(ctx)
-  const body = (await apiFetch(ctx, `/api/pages/${collection}/${file}`, {
-    method: 'PATCH',
-    token: source.token,
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      ...(visibility ? { visibility } : {}),
-      ...(allow !== undefined ? { allowlist: allow.split(',').map((item) => item.trim()) } : {}),
-    }),
-  })) as JsonRecord
+  let body: JsonRecord = {}
+  if (visibility || allow !== undefined) {
+    body = (await apiFetch(ctx, `/api/pages/${collection}/${file}`, {
+      method: 'PATCH',
+      token: source.token,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...(visibility ? { visibility } : {}),
+        ...(allow !== undefined ? { allowlist: allow.split(',').map((item) => item.trim()) } : {}),
+      }),
+    })) as JsonRecord
+  }
+  if (wantsPassword) {
+    // Set a custom password (and flip the page to visibility=password) via the
+    // re-roll endpoint; the password travels in a header, never argv/query (INV-4).
+    body = (await apiFetch(ctx, `/api/pages/${collection}/${file}/password`, {
+      method: 'POST',
+      token: source.token,
+      headers: { 'x-press-page-password': await readPagePassword() },
+    })) as JsonRecord
+  }
   printSuccess(ctx, { message: `${collection}/${file} updated`, ...body })
 }
 

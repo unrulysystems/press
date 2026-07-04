@@ -353,6 +353,46 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
   expect(jsonLine(unauthenticated.stdout)).toMatchObject({ ok: false })
 })
 
+test('press publish --password: custom password (PRESS_PAGE_PASSWORD) unlocks; weak rejected (F3)', async ({
+  baseURL,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const env = await makePressEnv(baseURL, 'custom-pw')
+  const collectionSlug = `${runSlug}-custompw`
+  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  await writeFile(reportPath, '<!doctype html><title>Custom PW</title><h1>x</h1>')
+  await loginViaLoopback(baseURL, env, 'owner')
+  const api = await newE2EAPIContext({ baseURL })
+
+  // strong custom password supplied out-of-band (never argv); the response echoes it once
+  const strong = 'liberty-1776'
+  const pub = await runPress(
+    ['publish', reportPath, '--to', collectionSlug, '--as', 'secret.html', '--password', '--json'],
+    { ...env, PRESS_PAGE_PASSWORD: strong },
+  )
+  expect(pub.code).toBe(0)
+  expect(jsonLine(pub.stdout)).toMatchObject({
+    ok: true,
+    data: { visibility: 'password', password: strong },
+  })
+
+  // the custom password unlocks via the Basic (programmatic) channel
+  const unlocked = await api.get(`/p/${collectionSlug}/secret.html`, {
+    headers: { authorization: `Basic ${Buffer.from(`:${strong}`).toString('base64')}` },
+  })
+  expect(unlocked.status()).toBe(200)
+
+  // a password shorter than the floor is rejected (400 → CLI error, no page written)
+  const weak = await runPress(
+    ['publish', reportPath, '--to', collectionSlug, '--as', 'weak.html', '--password', '--json'],
+    { ...env, PRESS_PAGE_PASSWORD: 'short' },
+  )
+  expect(weak.code).not.toBe(0)
+  expect(jsonLine(weak.stdout)).toMatchObject({ ok: false })
+})
+
 test('press publish human output: password guidance + private allowlist echo (F2/F4)', async ({
   baseURL,
 }) => {

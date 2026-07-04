@@ -1,5 +1,16 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 
+// Minimum length for a publisher-supplied custom page password (REQ-PUB-005 / F3).
+// Security > ergonomics: a memorable password still may not be trivially short.
+// Server-generated passwords are always well above this.
+export const MIN_PAGE_PASSWORD_LENGTH = 8
+
+// Pure strength check for a publisher-supplied password. Trimmed length only —
+// surrounding whitespace does not count toward the minimum.
+export function isStrongPagePassword(password: string): boolean {
+  return password.trim().length >= MIN_PAGE_PASSWORD_LENGTH
+}
+
 const ARGON2_MEMORY_KIB = 19_456
 const ARGON2_PASSES = 2
 const ARGON2_PARALLELISM = 1
