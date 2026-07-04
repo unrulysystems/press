@@ -18,6 +18,7 @@
     "check": "nub run typecheck && nub run lint && nub run format:check",
     "test": "bun test packages apps/web/src",
     "e2e": "bun scripts/e2e.ts",
+    "walkthrough": "bun scripts/agentWalkthrough.ts",
     "drill:backup-restore": "nub run --filter @press/core build && bun scripts/backupRestoreDrill.ts",
     "smoke:image": "bun scripts/smokeImage.ts",
     "dev:share": "nub run --filter @press/core build && bun scripts/devShare.ts",
