@@ -1,27 +1,41 @@
-## 2026-07-04 — F-04 accepted with mitigation: enforced minimal Google auth footprint
+## 2026-07-04 — F-04: Google provider tokens are never persisted; residual session-token exposure accepted
 
-F-04 from the whole-repo security ultra-audit is accepted with mitigation, not
-eliminated. press uses Google OAuth only to establish identity at sign-in; the
-application does not read Better Auth's stored `account.accessToken`,
-`account.refreshToken`, or `account.idToken` afterward.
+The provider-token half of F-04 (whole-repo security ultra-audit) is eliminated,
+not merely mitigated: press stores no Google `accessToken`, `refreshToken`, or
+`idToken` at rest. press uses Google OAuth only to establish identity at sign-in
+and reads none of these tokens afterward.
 
-**Decision:** press enforces an identity-only Google OAuth posture server-side.
-The Better Auth `hooks.before` middleware strips client-supplied `scopes` /
-`scope` values from social sign-in and social-link requests before Better Auth
-builds the Google authorize URL, and the Google provider is pinned to
-identity-only scopes (`openid`, `email`, `profile`) as defense in depth. press
-does not request offline access or a consent prompt. With that enforced posture,
-Google receives only identity scopes and issues only a short-lived,
-minimal-scope access token plus an ID token, with no refresh token. The phase-3
-backup runbook already treats the DB and all dumps as secret-bearing, which
-remains required because session bearer tokens stay at Better Auth's default
-unhashed-at-rest posture.
+**Decision:** press enforces the minimal Google auth footprint in two layers.
+
+1. _Request enforcement._ The Better Auth `hooks.before` middleware
+   (`stripClientRequestedOAuthScopes` in `apps/web/src/auth/server.ts`) removes
+   client-supplied `scopes` / `scope` from `/sign-in/social` and `/link-social`
+   before Better Auth builds the Google authorize URL, and the provider is pinned
+   to identity-only scopes (`openid`, `email`, `profile`) with no offline access
+   or consent prompt. So Google is only ever asked for identity and issues no
+   refresh token. This is verified by `apps/web/src/auth/server.test.ts`
+   (a `drive.readonly` request still yields an identity-only authorize URL).
+
+2. _Storage enforcement._ An `account` databaseHook
+   (`stripStoredProviderTokens`, wired on `databaseHooks.account.create.before`
+   and `update.before`) nulls `accessToken`, `refreshToken`, `idToken`,
+   `accessTokenExpiresAt`, and `refreshTokenExpiresAt` before any account row is
+   written. This closes Better Auth's ID-token sign-in flow, which would
+   otherwise persist client-supplied `idToken.accessToken` / `refreshToken` that
+   are not bound to the enforced authorize scopes. No provider token reaches the
+   database on any sign-in path; the columns remain (no schema change) and are
+   stored null. Verified by `server.test.ts` (the create + update hooks null all
+   provider tokens).
+
+**Residual (accepted):** Better Auth session bearer tokens remain at the
+framework default (unhashed at rest). The phase-3 backup runbook already treats
+the DB and all dumps as secret-bearing, which covers this residual.
 
 **Rejected alternatives:** hashing Better Auth session tokens and dropping the
-`account` token columns were both declined. Each requires overriding Better
-Auth's adapter/storage behavior, which fights the framework and increases upgrade
-risk for marginal benefit once Google scopes are enforced as identity-only and
-press reads none of the provider tokens.
+`account` token columns were both declined — each overrides Better Auth's
+adapter/storage schema, which fights the framework for marginal benefit.
+Nulling via the supported `databaseHook` achieves "store no provider auth
+material" without an adapter override or a schema change.
 
 ## 2026-07-03 — silo/Tilt migration: sandbox cannot run executable proofs (driver is the execution gate)
 

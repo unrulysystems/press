@@ -41,6 +41,36 @@ export const stripClientRequestedOAuthScopesHook = createAuthMiddleware(async (c
   stripClientRequestedOAuthScopes(ctx.body)
 })
 
+// press uses Google solely to establish identity at sign-in; it never calls Google APIs
+// afterward. Better Auth would otherwise persist the provider's access/refresh/id tokens in
+// the `account` row — and its ID-token sign-in flow (/sign-in/social, /link-social) persists
+// CLIENT-supplied `idToken.accessToken`/`refreshToken`, which are not tied to the enforced
+// identity-only authorize scopes. Null every provider token before it is stored so no Google
+// auth material is ever kept at rest. Identity is already resolved from the validated ID
+// token by the time this hook runs, so nulling the stored copies is safe. This uses Better
+// Auth's supported account databaseHook (like the user/session hooks below), NOT an adapter
+// override or schema change — the columns remain; we simply store null.
+type NulledProviderTokens = {
+  accessToken: null
+  refreshToken: null
+  idToken: null
+  accessTokenExpiresAt: null
+  refreshTokenExpiresAt: null
+}
+
+export function stripStoredProviderTokens<T extends Record<string, unknown>>(
+  accountRow: T,
+): Omit<T, keyof NulledProviderTokens> & NulledProviderTokens {
+  return {
+    ...accountRow,
+    accessToken: null,
+    refreshToken: null,
+    idToken: null,
+    accessTokenExpiresAt: null,
+    refreshTokenExpiresAt: null,
+  }
+}
+
 export const authOptions = {
   baseURL: `${dbConfig.baseUrl}/api/auth`,
   secret: dbConfig.betterAuthSecret,
@@ -106,6 +136,18 @@ export const authOptions = {
           if (existingUser && dbConfig.adminEmails.includes(existingUser.email.toLowerCase())) {
             await db.update(user).set({ role: 'admin' }).where(eq(user.id, existingUser.id))
           }
+        },
+      },
+    },
+    account: {
+      create: {
+        async before(newAccount) {
+          return { data: stripStoredProviderTokens(newAccount) }
+        },
+      },
+      update: {
+        async before(newAccount) {
+          return { data: stripStoredProviderTokens(newAccount) }
         },
       },
     },
