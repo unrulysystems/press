@@ -382,7 +382,10 @@ type SignInFactory = (baseUrl: string, user: SeededUser) => SignInStrategy
 // Establish a session via the email/password sign-in, then drive the authorize URL with that
 // session cookie so the loopback callback receives the code.
 const credentialSignIn: SignInFactory = (baseUrl, user) => async (authorizeUrl) => {
-  const signIn = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
+  // Bound both requests: a stalled sign-in or authorize redirect must abort, not hang the
+  // walkthrough forever (which would skip cleanup/logout/silo teardown). 10s matches the
+  // login-URL wait used elsewhere in this harness.
+  const signIn = await fetchWithTimeout(`${baseUrl}/api/auth/sign-in/email`, 10_000, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email: user.email, password: user.password, rememberMe: true }),
@@ -398,7 +401,10 @@ const credentialSignIn: SignInFactory = (baseUrl, user) => async (authorizeUrl) 
   if (!cookie) {
     fail('credential sign-in returned no session cookie')
   }
-  const authorized = await fetch(authorizeUrl, { headers: { cookie }, redirect: 'follow' })
+  const authorized = await fetchWithTimeout(authorizeUrl, 10_000, {
+    headers: { cookie },
+    redirect: 'follow',
+  })
   if (!authorized.ok) {
     fail(`cli authorize handshake failed: HTTP ${authorized.status}`)
   }
