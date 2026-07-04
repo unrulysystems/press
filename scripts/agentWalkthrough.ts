@@ -327,7 +327,9 @@ async function publishReport(
     env,
   )
   if (result.code !== 0) {
-    throw new Error(`press publish (${visibility}) exited with ${result.signal ?? result.code}`)
+    throw new Error(
+      `press publish (${visibility}) exited with ${result.signal ?? result.code}: ${result.stdout.trim()}`,
+    )
   }
   const parsed = JSON.parse(result.stdout) as {
     readonly ok?: boolean
@@ -483,16 +485,20 @@ async function main(): Promise<number> {
     await writeFile(publicFile, reportHtml('Walkthrough Public Report'))
     await writeFile(privateFile, reportHtml('Walkthrough Private Report'))
 
+    // File slugs must end in .html (parseFileSlug: /^[a-z0-9][a-z0-9._-]{0,120}\.html$/).
+    const publicSlug = 'public-report.html'
+    const privateSlug = 'private-report.html'
+
     console.log('publishing reports through the press CLI...')
-    const publicUrl = await publishReport(cliEnv, publicFile, 'public-report', 'public')
-    const privateUrl = await publishReport(cliEnv, privateFile, 'private-report', 'private')
+    const publicUrl = await publishReport(cliEnv, publicFile, publicSlug, 'public')
+    const privateUrl = await publishReport(cliEnv, privateFile, privateSlug, 'private')
 
     console.log('verifying read-back and access control...')
     // Publisher/anyone can read the public page; an unauthenticated reader is denied the
     // private page. This proves publish + serve + ACL differentiation end to end.
     await assertStatus(publicUrl, 200, 'public page read-back (unauthenticated)')
     await assertStatus(privateUrl, 401, 'private page denied to unauthenticated reader')
-    await assertListed(cliEnv, ['public-report', 'private-report'])
+    await assertListed(cliEnv, [publicSlug, privateSlug])
 
     console.log('agent walkthrough passed')
     exitCode = 0

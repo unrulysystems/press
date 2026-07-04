@@ -17,8 +17,11 @@ serves one file). Keep it to a temp/scratch path, e.g. `report.html`.
 
 ## 2. Choose the collection, slug, and visibility
 
-- `--to <collection>` — required; the collection slug (e.g. `weekly`).
-- `--as <slug>` — optional; the file slug. Omit to derive it from the filename.
+- `--to <collection>` — required; the collection slug, `^[a-z0-9][a-z0-9-]{0,62}$`
+  (e.g. `weekly`).
+- `--as <slug>` — optional; the file slug. It MUST end in `.html`
+  (`^[a-z0-9][a-z0-9._-]{0,120}\.html$`, e.g. `q3-summary.html`). Omit to derive it from
+  the filename.
 - `--visibility <v>` — one of `public`, `default`, `password`, `private`. Default
   collection policy applies when omitted.
 - `--allow <emails>` — comma-separated allowlist for `private` pages.
@@ -26,7 +29,7 @@ serves one file). Keep it to a temp/scratch path, e.g. `report.html`.
 ## 3. Publish
 
 ```
-press publish report.html --to weekly --as q3-summary --visibility public
+press publish report.html --to weekly --as q3-summary.html --visibility public
 ```
 
 The command prints the page URL on stdout. When `--visibility password`, it also
@@ -63,13 +66,13 @@ token):
 To change a page's access later:
 
 ```
-press page set weekly/q3-summary --visibility private --allow teammate@send.it
+press page set weekly/q3-summary.html --visibility private --allow teammate@send.it
 ```
 
 To remove it:
 
 ```
-press unpublish weekly/q3-summary
+press unpublish weekly/q3-summary.html
 ```
 
 ## Done when
