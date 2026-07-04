@@ -112,7 +112,7 @@ login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with a
   pages: an HTML request without a valid page-password credential renders the
   branded password-entry page (REQ-SRV-004) at 200 with no content leak; a
   non-HTML (programmatic/CLI) request is challenged with `WWW-Authenticate: Basic
-  realm="press"` and 401. Both channels resolve the same password-verified viewer
+realm="press"` and 401. Both channels resolve the same password-verified viewer
   channel through the single ACL function (REQ-ACL-006).
 - **REQ-ACL-003** Page visibility = page-level value if set, else the
   collection's `defaultVisibility`, else `default`.
