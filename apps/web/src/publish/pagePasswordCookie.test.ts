@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   PAGE_PASSWORD_COOKIE_TTL_MS,
   pagePasswordCookieName,
+  readCookieValue,
   signPagePasswordCookie,
   verifyPagePasswordCookie,
 } from './pagePasswordCookie'
@@ -47,5 +48,28 @@ describe('page password unlock cookie (REQ-SRV-004 / F1)', () => {
     expect(verifyPagePasswordCookie(SECRET, PAGE, undefined, NOW)).toBe(false)
     expect(verifyPagePasswordCookie(SECRET, PAGE, '', NOW)).toBe(false)
     expect(verifyPagePasswordCookie(SECRET, PAGE, 'no-dot', NOW)).toBe(false)
+  })
+})
+
+describe('readCookieValue (boundary-tolerant cookie parsing / F1 review)', () => {
+  test('returns the named cookie value', () => {
+    expect(readCookieValue('a=1; press_pw_x=abc.def; b=2', 'press_pw_x')).toBe('abc.def')
+  })
+
+  test('returns undefined when the cookie is absent or the header is empty', () => {
+    expect(readCookieValue('a=1; b=2', 'press_pw_x')).toBeUndefined()
+    expect(readCookieValue(null, 'press_pw_x')).toBeUndefined()
+    expect(readCookieValue('', 'press_pw_x')).toBeUndefined()
+  })
+
+  test('ignores a malformed percent-encoded value instead of throwing (client-controlled)', () => {
+    // decodeURIComponent('%E0%A4%A') throws URIError; a bad cookie must not 500 the
+    // request nor block a fallback to Basic auth / the branded gate.
+    expect(() => readCookieValue('press_pw_x=%E0%A4%A', 'press_pw_x')).not.toThrow()
+    expect(readCookieValue('press_pw_x=%E0%A4%A', 'press_pw_x')).toBeUndefined()
+  })
+
+  test('decodes a percent-encoded value', () => {
+    expect(readCookieValue('press_pw_x=a%2Eb', 'press_pw_x')).toBe('a.b')
   })
 })

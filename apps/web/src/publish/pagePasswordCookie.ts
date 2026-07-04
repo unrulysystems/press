@@ -11,6 +11,33 @@ export function pagePasswordCookieName(pageId: string): string {
   return `press_pw_${pageId}`
 }
 
+// Read one cookie value from a `Cookie` header. The header is client-controlled, so a
+// malformed percent-encoding must not throw (it would 500 the read and, since the unlock
+// cookie is checked before Basic auth, block a request carrying valid Basic credentials).
+// A bad value is treated as absent so the request falls back to Basic / the branded gate.
+export function readCookieValue(cookieHeader: string | null, name: string): string | undefined {
+  if (!cookieHeader) {
+    return undefined
+  }
+  for (const part of cookieHeader.split(';')) {
+    const eq = part.indexOf('=')
+    if (eq === -1) {
+      continue
+    }
+    if (part.slice(0, eq).trim() !== name) {
+      continue
+    }
+    const raw = part.slice(eq + 1).trim()
+    try {
+      return decodeURIComponent(raw)
+    } catch {
+      // Malformed percent-encoding in a client cookie: boundary validation, treat as absent.
+      return undefined
+    }
+  }
+  return undefined
+}
+
 function sign(secret: string, payload: string): string {
   return createHmac('sha256', secret).update(payload).digest('base64url')
 }

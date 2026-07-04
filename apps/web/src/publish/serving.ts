@@ -19,6 +19,7 @@ import {
 import {
   PAGE_PASSWORD_COOKIE_TTL_MS,
   pagePasswordCookieName,
+  readCookieValue,
   signPagePasswordCookie,
   verifyPagePasswordCookie,
 } from './pagePasswordCookie'
@@ -158,23 +159,6 @@ async function verifyBasicPassword(
   }
 }
 
-function readCookie(request: Request, name: string): string | undefined {
-  const header = request.headers.get('cookie')
-  if (!header) {
-    return undefined
-  }
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=')
-    if (eq === -1) {
-      continue
-    }
-    if (part.slice(0, eq).trim() === name) {
-      return decodeURIComponent(part.slice(eq + 1).trim())
-    }
-  }
-  return undefined
-}
-
 // A valid unlock cookie (browser reader who already entered the password) or Basic
 // credentials (programmatic client) both satisfy the password channel. The cookie is
 // checked first so browsers do not re-submit the password on every request.
@@ -182,7 +166,7 @@ async function resolvePagePasswordChannel(
   request: Request,
   row: PageRow,
 ): Promise<BasicPasswordVerification | undefined> {
-  const cookie = readCookie(request, pagePasswordCookieName(row.id))
+  const cookie = readCookieValue(request.headers.get('cookie'), pagePasswordCookieName(row.id))
   if (verifyPagePasswordCookie(dbConfig.betterAuthSecret, row.id, cookie, Date.now())) {
     return { verified: true }
   }
