@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
-import { chmodSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -10,6 +9,7 @@ import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { findUserIdByEmail } from '../apps/web/src/auth/apiTokens'
 import { db } from '../apps/web/src/db/client'
 import { findMatchingAuditEvent, findPage } from '../apps/web/src/publish/e2eSupport'
+import { writeKeychainStub } from '../scripts/pressCliKeychain'
 import { newE2EAPIContext } from './api'
 
 const root = resolve(import.meta.dirname, '..')
@@ -63,59 +63,9 @@ function countOccurrences(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1
 }
 
-async function writeSecurityStub(dir: string): Promise<void> {
-  const path = join(dir, 'security')
-  await writeFile(
-    path,
-    `#!/usr/bin/env bun
-const file = process.env.PRESS_E2E_KEYCHAIN_FILE
-if (!file) process.exit(64)
-const args = Bun.argv.slice(2)
-function option(name) {
-  const index = args.indexOf(name)
-  return index === -1 ? undefined : args[index + 1]
-}
-async function readState() {
-  try {
-    return JSON.parse(await Bun.file(file).text())
-  } catch {
-    return {}
-  }
-}
-async function writeState(state) {
-  await Bun.write(file, JSON.stringify(state))
-}
-const service = option('-s')
-const account = option('-a') || 'token'
-const key = service + ':' + account
-const state = await readState()
-switch (args[0]) {
-  case 'find-generic-password':
-    if (!state[key]) process.exit(44)
-    process.stdout.write(state[key])
-    break
-  case 'add-generic-password': {
-    const token = await new Response(Bun.stdin.stream()).text()
-    if (!token) process.exit(65)
-    state[key] = token
-    await writeState(state)
-    break
-  }
-  case 'delete-generic-password':
-    delete state[key]
-    await writeState(state)
-    break
-  default:
-    process.exit(64)
-}
-`,
-  )
-  chmodSync(path, 0o700)
-}
-
 async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
   const dir = await mkdtemp(join(tmpdir(), `press-cli-${label}-`))
-  await writeSecurityStub(dir)
+  await writeKeychainStub(dir)
   const keychainFile = join(dir, 'keychain.json')
   return {
     ...baseProcessEnv(),

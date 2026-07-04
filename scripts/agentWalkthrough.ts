@@ -3,14 +3,14 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import type { db as dbClient } from '../apps/web/src/db/client'
-
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
+import { writeKeychainStub } from './pressCliKeychain'
 
-// The agent walkthrough is the executable proof of the press-publish skill flow: mint a
-// seeded token (NO real Google — REQ-AUTH-002), publish a report through the real `press`
-// CLI, read it back at the returned URL, and confirm the ACL differentiates an authorized
-// publisher from an unauthenticated reader. It reuses the isolated-silo lifecycle from
+// The agent walkthrough is the executable proof of BOTH plugin skills: it performs a real
+// `press login` via the localnet seeded credential provider (press-setup; NO real Google —
+// REQ-AUTH-002), then publishes a report through the real `press` CLI, reads it back at the
+// returned URL, and confirms the ACL differentiates an authorized publisher from an
+// unauthenticated reader (press-publish). It reuses the isolated-silo lifecycle from
 // scripts/e2e.ts on its own instance so it never collides with `main`/`e2e`.
 const root = resolve(import.meta.dirname, '..')
 const siloEnvFile = resolve(root, '.silo.env')
@@ -303,7 +303,8 @@ function reportHtml(title: string): string {
 }
 
 // Publish a report through the real `press` CLI (--json) and return the served URL. The
-// token is supplied via PRESS_TOKEN in the environment, never on argv.
+// login-acquired token comes from the hermetic keychain (PRESS_E2E_KEYCHAIN_FILE on the CLI
+// env), never on argv.
 async function publishReport(
   env: WalkthroughEnv,
   file: string,
@@ -367,6 +368,161 @@ async function assertListed(env: WalkthroughEnv, slugs: readonly string[]): Prom
   console.log(`  ok: press list shows ${slugs.join(', ')}`)
 }
 
+type SeededUser = { readonly email: string; readonly password: string }
+
+// The auth-agnostic seam. `press login` runs a provider-neutral loopback: it prints an authorize
+// URL on the press host, waits for sign-in to complete there, receives the code on its 127.0.0.1
+// callback, and exchanges it for a token stored in the keychain. Only the *sign-in* step is
+// provider-specific — so switching identity providers is a one-strategy change here and nothing
+// downstream (loopback, exchange, keychain, publish) changes.
+type SignInStrategy = (authorizeUrl: string) => Promise<void>
+type SignInFactory = (baseUrl: string, user: SeededUser) => SignInStrategy
+
+// Localnet: the seeded credential provider (username/password). NEVER real Google (REQ-AUTH-002).
+// Establish a session via the email/password sign-in, then drive the authorize URL with that
+// session cookie so the loopback callback receives the code.
+const credentialSignIn: SignInFactory = (baseUrl, user) => async (authorizeUrl) => {
+  const signIn = await fetch(`${baseUrl}/api/auth/sign-in/email`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: user.email, password: user.password, rememberMe: true }),
+  })
+  if (!signIn.ok) {
+    fail(`credential sign-in failed for ${user.email}: HTTP ${signIn.status}`)
+  }
+  const cookie = signIn.headers
+    .getSetCookie()
+    .map((entry) => entry.split(';', 1)[0])
+    .filter(Boolean)
+    .join('; ')
+  if (!cookie) {
+    fail('credential sign-in returned no session cookie')
+  }
+  const authorized = await fetch(authorizeUrl, { headers: { cookie }, redirect: 'follow' })
+  if (!authorized.ok) {
+    fail(`cli authorize handshake failed: HTTP ${authorized.status}`)
+  }
+}
+
+// Live seam: Google OAuth needs a real human consent screen, so it is never driven on localnet
+// (REQ-AUTH-002). Going live means selecting this strategy in a human-attended run and completing
+// consent in a real browser; the rest of the harness is byte-for-byte identical.
+const googleOAuthSignIn: SignInFactory = () => async () => {
+  fail(
+    'google-oauth sign-in requires a human Google consent screen and is never run on localnet ' +
+      '(REQ-AUTH-002); complete it in a real browser during a live, human-attended run',
+  )
+}
+
+const signInFactories = { credential: credentialSignIn, 'google-oauth': googleOAuthSignIn } as const
+type AuthMode = keyof typeof signInFactories
+
+function selectSignIn(baseUrl: string, user: SeededUser): SignInStrategy {
+  const mode = (process.env.PRESS_WALKTHROUGH_AUTH ?? 'credential') as AuthMode
+  const factory = signInFactories[mode]
+  if (!factory) {
+    fail(
+      `unknown PRESS_WALKTHROUGH_AUTH mode: ${String(mode)} (expected credential | google-oauth)`,
+    )
+  }
+  return factory(baseUrl, user)
+}
+
+// Run a real `press login` (loopback, --no-open) with the hermetic keychain env and complete the
+// sign-in through the chosen strategy. This is the executable proof of the interactive press-setup
+// path: no minted token, no PRESS_TOKEN.
+async function pressLogin(
+  cliEnv: WalkthroughEnv,
+  user: SeededUser,
+  signIn: SignInStrategy,
+): Promise<void> {
+  const child = spawn('bun', [pressCli, 'login', '--no-open'], {
+    cwd: root,
+    env: cliEnv,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  const exit = new Promise<CommandResult>((resolveExit) => {
+    child.on('exit', (code, signal) => resolveExit({ code: code ?? (signal ? 1 : 0), signal }))
+  })
+  const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
+    child.stdout?.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString()
+      const match = /(https?:\/\/[^\s]+\/cli\/authorize\?[^\s]+)/.exec(stdout)
+      if (match?.[1]) {
+        resolveUrl(match[1])
+      }
+    })
+    child.stderr?.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString()
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        reject(
+          new Error(
+            `press login exited ${code} before printing authorize URL: ${stderr || stdout}`,
+          ),
+        )
+      }
+    })
+    setTimeout(
+      () => reject(new Error('press login did not print an authorize URL within 15s')),
+      15_000,
+    ).unref()
+  })
+  await signIn(authorizeUrl)
+  const result = await exit
+  if (result.code !== 0) {
+    fail(`press login exited with ${result.signal ?? result.code}: ${stderr || stdout}`)
+  }
+  if (!stdout.includes(`logged in as ${user.email}`)) {
+    fail(`press login did not confirm sign-in as ${user.email}: ${stdout.trim()}`)
+  }
+  console.log(`  ok: press login → logged in as ${user.email}`)
+}
+
+// press-setup done-when: doctor reports authenticated with the owner identity, and whoami agrees.
+async function confirmSetup(cliEnv: WalkthroughEnv, user: SeededUser): Promise<void> {
+  const doctor = await runCapture('bun', [pressCli, 'doctor', '--json'], cliEnv)
+  if (doctor.code !== 0) {
+    fail(`press doctor exited with ${doctor.signal ?? doctor.code}: ${doctor.stdout.trim()}`)
+  }
+  const doctorReport = JSON.parse(doctor.stdout) as {
+    readonly ok?: boolean
+    readonly data?: { readonly authenticated?: boolean; readonly email?: unknown }
+  }
+  if (!doctorReport.ok || doctorReport.data?.authenticated !== true) {
+    fail(`press doctor did not report authenticated: ${doctor.stdout.trim()}`)
+  }
+  if (doctorReport.data.email !== user.email) {
+    fail(`press doctor reported ${String(doctorReport.data.email)}, expected ${user.email}`)
+  }
+
+  const whoami = await runCapture('bun', [pressCli, 'whoami', '--json'], cliEnv)
+  if (whoami.code !== 0) {
+    fail(`press whoami exited with ${whoami.signal ?? whoami.code}: ${whoami.stdout.trim()}`)
+  }
+  const whoamiBody = JSON.parse(whoami.stdout) as {
+    readonly data?: { readonly user?: { readonly email?: unknown } }
+  }
+  if (whoamiBody.data?.user?.email !== user.email) {
+    fail(`press whoami reported ${String(whoamiBody.data?.user?.email)}, expected ${user.email}`)
+  }
+  console.log(`  ok: press doctor + whoami confirm ${user.email}`)
+}
+
+// Best-effort revocation of the login-acquired token (server-side + keychain) on teardown.
+async function pressLogout(cliEnv: WalkthroughEnv): Promise<void> {
+  const result = await runCapture('bun', [pressCli, 'logout', '--json'], cliEnv)
+  if (result.code !== 0) {
+    throw new Error(
+      `press logout exited with ${result.signal ?? result.code}: ${result.stdout.trim()}`,
+    )
+  }
+}
+
 async function main(): Promise<number> {
   const bootstrapEnv = {
     ...process.env,
@@ -376,9 +532,9 @@ async function main(): Promise<number> {
   let walkthroughEnv = bootstrapEnv
   let composeProjectName: string | undefined
   let siloUp: ChildProcess | undefined
-  let tokenDb: typeof dbClient | undefined
-  let closeTokenDb: (() => Promise<void>) | undefined
-  let mintedTokenId: string | undefined
+  let cliEnv: WalkthroughEnv | undefined
+  let loggedIn = false
+  let keychainDir: string | undefined
   let workDir: string | undefined
   let cleanupPromise: Promise<Error[]> | undefined
 
@@ -388,20 +544,12 @@ async function main(): Promise<number> {
     }
     cleanupPromise = (async () => {
       const errors: Error[] = []
-      if (mintedTokenId && tokenDb) {
+      // Revoke the login-acquired token while the server is still up (server-side + keychain).
+      if (loggedIn && cliEnv) {
         try {
-          const { revokeApiToken } = await import('../apps/web/src/auth/apiTokens')
-          await revokeApiToken(tokenDb, mintedTokenId)
+          await pressLogout(cliEnv)
         } catch (error) {
-          logCleanupError('api token revocation', error)
-          errors.push(asError(error))
-        }
-      }
-      if (closeTokenDb) {
-        try {
-          await closeTokenDb()
-        } catch (error) {
-          logCleanupError('token database close', error)
+          logCleanupError('press logout', error)
           errors.push(asError(error))
         }
       }
@@ -422,6 +570,14 @@ async function main(): Promise<number> {
           await rm(workDir, { recursive: true, force: true })
         } catch (error) {
           logCleanupError('temp report removal', error)
+          errors.push(asError(error))
+        }
+      }
+      if (keychainDir) {
+        try {
+          await rm(keychainDir, { recursive: true, force: true })
+        } catch (error) {
+          logCleanupError('temp keychain removal', error)
           errors.push(asError(error))
         }
       }
@@ -454,30 +610,28 @@ async function main(): Promise<number> {
     siloUp = startSiloUp(walkthroughEnv)
     await waitForHealth(siloEnv.PRESS_BASE_URL, waitForExit(siloUp), healthTimeoutMs)
 
-    // Mint a seeded owner API token directly (the interactive login path needs a browser;
-    // agents use a provided token). This exercises the same token an agent would export as
-    // PRESS_TOKEN. NO real Google.
-    for (const [key, value] of Object.entries(walkthroughEnv)) {
-      process.env[key] = value
-    }
-    const [{ findUserIdByEmail, mintApiTokenRecordForUser }, dbModule] = await Promise.all([
-      import('../apps/web/src/auth/apiTokens'),
-      import('../apps/web/src/db/client'),
-    ])
-    tokenDb = dbModule.db
-    closeTokenDb = dbModule.closeDb
-    const userId = await findUserIdByEmail(dbModule.db, localnetUsers.owner.email)
-    const minted = await mintApiTokenRecordForUser(dbModule.db, {
-      userId,
-      name: 'agent-walkthrough',
-    })
-    mintedTokenId = minted.id
-
-    const cliEnv: WalkthroughEnv = {
+    // Set up the CLI the way a human does (press-setup): a hermetic keychain shadows the macOS
+    // `security` binary so a genuine `press login` round-trips a REAL token via the seeded
+    // credential provider — no minted token, no PRESS_TOKEN, no real Google (REQ-AUTH-002). The
+    // sign-in step is pluggable (credential now, Google OAuth once live) via selectSignIn.
+    keychainDir = await mkdtemp(join(tmpdir(), 'press-walkthrough-keychain-'))
+    await writeKeychainStub(keychainDir)
+    cliEnv = {
       ...walkthroughEnv,
+      PATH: `${keychainDir}:${process.env.PATH ?? ''}`,
       PRESS_HOST: siloEnv.PRESS_BASE_URL,
-      PRESS_TOKEN: minted.token,
+      PRESS_E2E_KEYCHAIN_FILE: join(keychainDir, 'keychain.json'),
     }
+    delete cliEnv.PRESS_TOKEN
+
+    console.log('setting up the CLI: real press login via the seeded credential provider...')
+    await pressLogin(
+      cliEnv,
+      localnetUsers.owner,
+      selectSignIn(siloEnv.PRESS_BASE_URL, localnetUsers.owner),
+    )
+    loggedIn = true
+    await confirmSetup(cliEnv, localnetUsers.owner)
 
     workDir = await mkdtemp(join(tmpdir(), 'press-walkthrough-'))
     const publicFile = join(workDir, 'public-report.html')
