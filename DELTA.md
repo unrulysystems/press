@@ -1,5 +1,61 @@
 # press — DELTA
 
+## 2026-07-04 — dogfood bug bash fixes: password + identity-gate reader surfaces (F1–F5)
+
+A Jefferson-persona dogfood/bug-bash of localnet surfaced five reader-facing gaps on the
+password and identity-gate surfaces. All five are now fixed against newly-ratified contract
+deltas (SPEC REQ-ACL-002, REQ-SRV-004, REQ-PUB-004/005, REQ-CLI-001/004, REQ-AUTH-008,
+REQ-CFG-002; BRIEF + `apps/web/BRIEF.md` Decisions dated 2026-07-04).
+
+**F1 — branded password entry page (REQ-SRV-004).** A browser reader of a `password` page now
+gets a branded, self-contained editorial entry page (HTTP 200, no report body leak) instead of
+the OS Basic-Auth dialog. `POST /p/:collection/:file` verifies the password, sets a short-lived
+(1h), page-scoped, HttpOnly, SameSite=Lax, Secure-in-prod, HMAC-signed unlock cookie, then 303s
+to the GET. The cookie feeds the same pure-ACL `basicPassword` channel — this is a read-side
+unlock, not a mutation (INV-1 holds). Basic auth stays the programmatic-only channel
+(`WWW-Authenticate: Basic` for non-HTML). The entry page carries a strict form-capable CSP
+(`default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; …`) — the report sandbox
+omits `allow-forms` and would block the unlock form — so it is the sole documented exception to
+INV-2 / REQ-SRV-002; every other `/p/` response (including the unlock 303) still carries the
+report sandbox CSP. Title/error are HTML-escaped. Malformed client cookies are ignored (boundary
+validation) rather than 500ing and blocking a Basic fallback.
+
+**F2 — reader guidance on publish (REQ-CLI-004).** `press publish` of a `password` page prints
+the effective password once plus a guidance line pointing readers at the branded entry page.
+
+**F3 — publisher-supplied custom page password (REQ-PUB-005, REQ-CLI-001).** A publisher may set
+a custom page password (≥ 8 chars) via `--password` (value-less flag) → hidden TTY prompt /
+`PRESS_PAGE_PASSWORD` / stdin, transported in the `X-Press-Page-Password` header — never argv,
+never a query param, never logged (INV-4). Argon2-hashed, returned once. Weak (< 8) → 400.
+
+**F4 — publish output honesty (REQ-PUB-004).** The publish response and CLI output echo the
+resolved allowlist for `private` pages; `--json` carries `allow` and stays machine-clean.
+
+**F5 — identity gate never a dead-end (REQ-AUTH-008, REQ-CFG-002).** `/login` always presents the
+enabled provider's affordance, a reader-guidance line for someone who cannot sign in, and — on
+localnet — a seeded-account hint (the literal F5 complaint: "what were the passwords?"). With no
+provider it shows an explicit unavailable notice, not a copy-only dead-end. A pure
+`loginAffordances()` decides the states (unit-tested incl. the never-dead-end invariant across all
+provider combos). `loadServerConfig` now fails closed at boot when no provider is enabled
+(REQ-CFG-002). Seeded creds flow only when credential auth is on (localnet); never shipped in
+production, where credential auth is boot-refused (INV-5). The entry page and `/login` are added
+to the blind screenshot oracle capture (`scripts/capture-oracle-shots.ts`).
+
+**Harness discipline.** Pure, DB-free modules extracted for fast unit testing: page-password
+cookie sign/verify + tolerant cookie parse, publish-response shape, CLI publish-output format,
+page-password source resolution, login affordances. Every new REQ has a test observed red before
+its fix. Web design floors extended: the branded entry page joins the no-horizontal-scroll matrix
+at 360/768/1280/1920 (light + dark).
+
+**Proofs.** `nub run check` + `nub run test` green (191 tests). `nub run e2e` green (94 passed,
+0 residual) — full Playwright incl. the password-gate flow (branded gate → form unlock under CSP →
+cookie read; Basic programmatic channel; wrong-password 401; unlock-303 sandbox CSP) and the
+`/login` seeded-hint + guidance + design floors. `nub run walkthrough` green (real `press login`
+as `owner@send.it` → publish → public 200 / private 401 → `press list`; 0 residual). Each F1–F5
+milestone passed an independent Codex structured review (F1 through four fix cycles: guidance
+reword, no error-swallow, CSP-contract reconciliation, malformed-cookie tolerance, unlock-303
+headers). No push/deploy — Boundary is Allen's.
+
 ## 2026-07-04 — walkthrough proves the interactive setup path (credential provider, Google-OAuth seam)
 
 `nub run walkthrough` (`scripts/agentWalkthrough.ts`) now performs a REAL `press login` instead of
