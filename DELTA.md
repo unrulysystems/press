@@ -1,5 +1,36 @@
 # press — DELTA
 
+## 2026-07-04 — walkthrough proves the interactive setup path (credential provider, Google-OAuth seam)
+
+`nub run walkthrough` (`scripts/agentWalkthrough.ts`) now performs a REAL `press login` instead of
+minting a token, so it proves the interactive setup path end to end and exercises both plugin skills
+against localnet.
+
+**Auth-agnostic login.** The harness spawns `press login --no-open`, captures the loopback authorize
+URL, and completes sign-in through a pluggable seam (`selectSignIn` / `SignInFactory`). On localnet
+`credentialSignIn` drives the seeded credential provider — `POST /api/auth/sign-in/email` for
+`localnetUsers.owner`, then a cookie-bearing GET of the authorize URL so the CLI's 127.0.0.1 callback
+receives the code and stores a real token. A `googleOAuthSignIn` seam names the live path and refuses
+to run on localnet (REQ-AUTH-002: never real Google in tests/loops). Switching identity providers when
+press goes live is a one-strategy change; the loopback, code exchange, keychain, and publish path are
+byte-for-byte identical.
+
+**Hermetic keychain.** The macOS `security` keychain stub is extracted to
+`scripts/pressCliKeychain.ts` (`writeKeychainStub`) and shared with `e2e/cli.spec.ts` (no behavior
+change). A genuine `press login` round-trips a real token through a temp keychain
+(`PRESS_E2E_KEYCHAIN_FILE`) without touching the operator's OS keychain or tripping a biometric; the
+token never appears on argv. Teardown revokes it with `press logout` under the fail-closed cleanup.
+
+**Both skills, executed.** press-setup: login → `press doctor --json` (`authenticated`, owner) →
+`whoami --json`. press-publish: publish a public and a private report → read back HTTP 200 (public,
+unauthenticated) / 401 (private, unauthenticated) → `press list` shows both.
+
+**Proofs.** `nub run walkthrough` passed against the isolated `walkthrough` silo instance: logged in
+as `owner@send.it`, doctor + whoami confirm, public 200 / private 401, list shows both, 0 residual
+`press-walkthrough` containers. `nub run e2e` passed (82 passed, 0 residual) — the refactored
+`e2e/cli.spec.ts` still green through the shared stub. `nub run check` and `nub run test` are green
+(144 pass).
+
 ## 2026-07-04 — agent publish plugin + enforced minimal-auth footprint
 
 press now ships an agent-facing publishing plugin and enforces an identity-only
