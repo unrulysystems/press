@@ -14,13 +14,11 @@ export function formatPublishOutput(body: PublishOutputBody): string[] {
     lines.push(body.url)
   }
   // Password pages: print the effective password once, then tell the publisher how a
-  // reader unlocks it — the browser prompt asks for a username that does not exist
-  // (F2 / REQ-CLI-004).
+  // reader unlocks it — readers open the link and type the password on the branded
+  // entry page (F1/F2 / REQ-CLI-004 / REQ-SRV-004).
   if (typeof body.password === 'string') {
     lines.push(`password: ${body.password}`)
-    lines.push(
-      'share the link; readers enter this password in the browser prompt (leave username blank)',
-    )
+    lines.push('share the link; readers open it and enter this password on the page to read it')
   }
   // Private pages: echo the resolved allowlist so the publisher can confirm exactly
   // who was granted (F4 / REQ-PUB-004).

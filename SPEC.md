@@ -231,10 +231,10 @@ frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that 
   `press:<host>`).
 - **REQ-CLI-004** `press publish` prints the final URL. For a `password` page it
   also prints the effective password once plus one line of reader guidance (share
-  the link; the reader enters the password in the browser prompt — no username).
-  For a `private` page it echoes the resolved allowlist so the publisher can
-  confirm who was granted. `--json` output includes `allow` and stays
-  machine-clean (no guidance prose).
+  the link; the reader opens it and enters the password on the branded entry page
+  of REQ-SRV-004). For a `private` page it echoes the resolved allowlist so the
+  publisher can confirm who was granted. `--json` output includes `allow` and
+  stays machine-clean (no guidance prose).
 
 ### CFG — instance configuration
 

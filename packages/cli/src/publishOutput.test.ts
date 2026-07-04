@@ -17,10 +17,10 @@ describe('formatPublishOutput', () => {
     })
     expect(lines[0]).toBe('https://press.test/p/c/f.html')
     expect(lines).toContain('password: hunter2xy')
-    const guidance = lines.find((l) => /browser prompt/i.test(l) && /username/i.test(l))
+    const guidance = lines.find((l) => /enter this password on the page/i.test(l))
     expect(
       guidance,
-      'expected reader guidance mentioning the browser prompt and username',
+      'expected reader guidance pointing at the branded entry page (not a browser prompt)',
     ).toBeDefined()
   })
 

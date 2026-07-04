@@ -421,8 +421,7 @@ test('press publish human output: password guidance + private allowlist echo (F2
   )
   expect(pw.code).toBe(0)
   expect(pw.stdout).toMatch(/password:/)
-  expect(pw.stdout).toMatch(/browser prompt/i)
-  expect(pw.stdout).toMatch(/username/i)
+  expect(pw.stdout).toMatch(/enter this password on the page/i)
 
   // private page (no --json) → resolved allowlist echoed for the publisher
   const priv = await runPress(

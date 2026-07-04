@@ -291,7 +291,9 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
     return notFound()
   }
   // The branded gate posts application/x-www-form-urlencoded; parse without FormData.
-  const bodyText = await request.text().catch(() => '')
+  // A genuine body-read failure propagates to the endpoint's 500 handler rather than
+  // being masked as a wrong password — an empty body still parses to no password (401).
+  const bodyText = await request.text()
   const password = new URLSearchParams(bodyText).get('password') ?? ''
   const actionPath = servedPagePath(route)
   const verified = row.page.passwordHash
