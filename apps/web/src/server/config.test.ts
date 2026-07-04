@@ -72,6 +72,7 @@ describe('Better Auth provider gating', () => {
       google: {
         clientId: 'google-client-id',
         clientSecret: 'google-client-secret',
+        scope: ['openid', 'email', 'profile'],
       },
     })
   })

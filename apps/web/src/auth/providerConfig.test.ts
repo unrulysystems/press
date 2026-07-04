@@ -25,7 +25,9 @@ describe('auth provider config', () => {
     }).socialProviders?.google
 
     expect(google?.scope).toEqual(['openid', 'email', 'profile'])
-    expect(google?.disableDefaultScope).toBe(true)
+    expect(google).toHaveProperty('scope')
+    expect(Object.keys(google ?? {})).toContain('scope')
+    expect(google).not.toHaveProperty('disableDefaultScope')
     expect(google).not.toHaveProperty('accessType')
     expect(google).not.toHaveProperty('prompt')
   })

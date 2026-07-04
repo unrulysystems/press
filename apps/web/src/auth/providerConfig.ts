@@ -5,8 +5,7 @@ const googleIdentityScopes = ['openid', 'email', 'profile'] as const
 type GoogleProviderConfig = {
   readonly clientId: string
   readonly clientSecret: string
-  readonly disableDefaultScope?: boolean
-  readonly scope?: string[]
+  readonly scope: string[]
 }
 
 type AuthProviderConfig = {
@@ -22,20 +21,11 @@ type AuthProviderConfig = {
 }
 
 function buildGoogleProviderConfig(clientId: string, clientSecret: string): GoogleProviderConfig {
-  const provider = {
+  return {
     clientId,
     clientSecret,
-    disableDefaultScope: true,
     scope: [...googleIdentityScopes],
   }
-
-  for (const property of ['disableDefaultScope', 'scope']) {
-    Object.defineProperty(provider, property, {
-      enumerable: false,
-    })
-  }
-
-  return provider
 }
 
 export function buildAuthProviderConfig(config: PressConfig): AuthProviderConfig {
