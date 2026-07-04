@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { useLoader } from 'one'
 
 import { dbConfig } from '@press/web/db/client'
+import { loginAffordances } from '@press/web/auth/loginAffordances'
+import { localnetUsers } from '@press/web/auth/localnetFixtures'
 
 import type { FormEvent } from 'react'
 import type { LoaderProps } from 'one'
@@ -10,6 +12,9 @@ type LoginData = {
   readonly credentialEnabled: boolean
   readonly googleEnabled: boolean
   readonly next: string
+  // Only present when credential auth is enabled (localnet). Never shipped in production,
+  // where credential auth is boot-refused (INV-5) — so seeded credentials never leak.
+  readonly seeded?: { readonly email: string; readonly password: string }
 }
 
 function safeNext(raw: string | null): string {
@@ -21,15 +26,20 @@ function safeNext(raw: string | null): string {
 
 export function loader({ request }: LoaderProps): LoginData {
   const url = new URL(request?.url ?? dbConfig.baseUrl)
+  const credentialEnabled = dbConfig.credentialAuthEnabled
   return {
-    credentialEnabled: dbConfig.credentialAuthEnabled,
+    credentialEnabled,
     googleEnabled: Boolean(dbConfig.googleClientId && dbConfig.googleClientSecret),
     next: safeNext(url.searchParams.get('next')),
+    ...(credentialEnabled
+      ? { seeded: { email: localnetUsers.owner.email, password: localnetUsers.owner.password } }
+      : {}),
   }
 }
 
 export function LoginPage() {
   const data = useLoader(loader)
+  const view = loginAffordances(data)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const googleHref = `/api/auth/sign-in/social?provider=google&callbackURL=${encodeURIComponent(
@@ -77,7 +87,7 @@ export function LoginPage() {
             reports use your session.
           </p>
 
-          {data.credentialEnabled ? (
+          {view.credentialForm ? (
             <form className="press-login-form" onSubmit={submit}>
               <label>
                 <span>Email</span>
@@ -98,11 +108,30 @@ export function LoginPage() {
             </form>
           ) : null}
 
-          {data.googleEnabled ? (
+          {view.google ? (
             <a className="press-google-button" href={googleHref}>
               Continue with Google
             </a>
           ) : null}
+
+          {view.unavailable ? (
+            <p className="press-login-notice" role="alert">
+              Sign-in is unavailable — this instance has no identity provider configured. Contact
+              the site operator.
+            </p>
+          ) : null}
+
+          {view.seededHint && data.seeded ? (
+            <p className="press-login-hint">
+              Localnet seeded account — sign in with <strong>{data.seeded.email}</strong> and
+              password <strong>{data.seeded.password}</strong>.
+            </p>
+          ) : null}
+
+          <p className="press-login-guidance">
+            Can&rsquo;t sign in? Access follows your organization account — ask whoever shared the
+            report to grant your address or send you the page password.
+          </p>
         </section>
       </div>
     </main>

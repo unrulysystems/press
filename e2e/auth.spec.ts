@@ -68,3 +68,21 @@ test('signed-in reader can sign out from the masthead', async ({ page }) => {
   })
   expect(whoami.authenticated).toBe(false)
 })
+
+test('localnet identity gate shows the seeded account hint and reader guidance (F5 / REQ-AUTH-008)', async ({
+  page,
+}) => {
+  await page.goto('/login?next=/')
+  await expect(page.getByRole('heading', { name: 'Sign in to keep reading.' })).toBeVisible()
+
+  // Credential form is present on localnet (the enabled provider affordance).
+  await expect(page.getByLabel('Email')).toBeVisible()
+  await expect(page.getByLabel('Password')).toBeVisible()
+
+  // Seeded account hint answers the dogfood F5 complaint ("what were the passwords?").
+  await expect(page.getByText(localnetUsers.owner.email)).toBeVisible()
+  await expect(page.getByText(localnetUsers.owner.password)).toBeVisible()
+
+  // Reader guidance for someone who cannot sign in — the gate is never a dead-end.
+  await expect(page.getByText(/access follows your organization account/i)).toBeVisible()
+})

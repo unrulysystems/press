@@ -349,6 +349,37 @@ select {
   line-height: 1.4;
 }
 
+.press-login-notice {
+  margin: var(--press-space-6) 0 0;
+  max-width: 440px;
+  padding: var(--press-space-4);
+  border: 1px solid var(--press-rule);
+  color: var(--press-ink);
+  font-size: var(--press-type-3);
+  line-height: 1.4;
+}
+
+.press-login-hint {
+  margin: var(--press-space-5) 0 0;
+  max-width: 440px;
+  color: var(--press-muted);
+  font-size: var(--press-type-2);
+  line-height: 1.45;
+}
+
+.press-login-hint strong {
+  color: var(--press-ink);
+  font-weight: 600;
+}
+
+.press-login-guidance {
+  margin: var(--press-space-4) 0 0;
+  max-width: 440px;
+  color: var(--press-soft);
+  font-size: var(--press-type-2);
+  line-height: 1.45;
+}
+
 .press-wordmark:hover,
 .press-nav-link:hover,
 .press-nav-button:hover,

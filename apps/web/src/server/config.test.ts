@@ -37,6 +37,34 @@ describe('server boot config', () => {
   })
 })
 
+describe('zero-provider fail-closed (REQ-CFG-002 / F5)', () => {
+  test('refuses boot when neither credential nor Google auth is enabled', () => {
+    expect(() =>
+      loadServerConfig({
+        ...validEnv,
+        PRESS_ENABLE_CREDENTIAL_AUTH: '0',
+      }),
+    ).toThrow(ServerBootError)
+    expect(() =>
+      loadServerConfig({
+        ...validEnv,
+        PRESS_ENABLE_CREDENTIAL_AUTH: '0',
+      }),
+    ).toThrow(/no sign-in provider/i)
+  })
+
+  test('accepts Google-only (credential disabled but a provider remains)', () => {
+    expect(() =>
+      loadServerConfig({
+        ...validEnv,
+        PRESS_ENABLE_CREDENTIAL_AUTH: '0',
+        GOOGLE_CLIENT_ID: 'google-client-id',
+        GOOGLE_CLIENT_SECRET: 'google-client-secret',
+      }),
+    ).not.toThrow()
+  })
+})
+
 describe('Better Auth provider gating', () => {
   test('enables credential auth only from PRESS_ENABLE_CREDENTIAL_AUTH', () => {
     expect(buildAuthProviderConfig(loadServerConfig(validEnv)).emailAndPassword).toEqual({
@@ -45,9 +73,13 @@ describe('Better Auth provider gating', () => {
     })
     expect(
       buildAuthProviderConfig(
+        // Google configured so disabling credential auth does not trip the zero-provider
+        // boot refusal (REQ-CFG-002); this asserts the credential toggle in isolation.
         loadServerConfig({
           ...validEnv,
           PRESS_ENABLE_CREDENTIAL_AUTH: '0',
+          GOOGLE_CLIENT_ID: 'google-client-id',
+          GOOGLE_CLIENT_SECRET: 'google-client-secret',
         }),
       ).emailAndPassword,
     ).toEqual({
