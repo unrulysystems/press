@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createLoopbackCallbackHandler } from './index'
+import { buildDoctorReport, createLoopbackCallbackHandler } from './index'
 
 describe('createLoopbackCallbackHandler', () => {
   test('ignores mismatched state and waits for a matching callback', async () => {
@@ -40,5 +40,44 @@ describe('createLoopbackCallbackHandler', () => {
     })
 
     expect(fetch(new Request('http://127.0.0.1:4321/')).status).toBe(404)
+  })
+})
+
+describe('buildDoctorReport', () => {
+  const host = 'https://press.send.it'
+
+  test('reports unauthenticated with setup guidance when no token is found', () => {
+    const report = buildDoctorReport({ host, tokenSource: 'none', whoami: null })
+    expect(report.authenticated).toBe(false)
+    expect(report.email).toBeNull()
+    expect(report.tokenSource).toBe('none')
+    // Guidance names both the interactive and the agent paths.
+    expect(report.nextStep).toContain('press login')
+    expect(report.nextStep).toContain('PRESS_TOKEN')
+    expect(report.nextStep).toContain('PRESS_HOST')
+  })
+
+  test('reports authenticated with the resolved identity and no next step', () => {
+    const report = buildDoctorReport({
+      host,
+      tokenSource: 'env',
+      whoami: { ok: true, email: 'agent@send.it' },
+    })
+    expect(report.authenticated).toBe(true)
+    expect(report.email).toBe('agent@send.it')
+    expect(report.tokenSource).toBe('env')
+    expect(report.nextStep).toBeNull()
+  })
+
+  test('flags a present-but-rejected token with the rejection detail', () => {
+    const report = buildDoctorReport({
+      host,
+      tokenSource: 'keychain',
+      whoami: { ok: false, error: 'request failed with HTTP 401' },
+    })
+    expect(report.authenticated).toBe(false)
+    expect(report.tokenSource).toBe('keychain')
+    expect(report.nextStep).toContain('token was rejected')
+    expect(report.detail).toBe('request failed with HTTP 401')
   })
 })

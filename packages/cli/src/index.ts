@@ -156,6 +156,60 @@ async function resolveToken(host: string): Promise<TokenSource | null> {
   return envToken ? { kind: 'env', token: envToken } : null
 }
 
+type WhoamiProbe =
+  | { readonly ok: true; readonly email: string | null }
+  | { readonly ok: false; readonly error: string }
+
+type DoctorReport = {
+  readonly host: string
+  readonly tokenSource: 'keychain' | 'env' | 'none'
+  readonly authenticated: boolean
+  readonly email: string | null
+  readonly nextStep: string | null
+  readonly detail: string | null
+}
+
+// Pure report builder so `press doctor` can be unit-tested without the macOS
+// keychain or a live server. `commandDoctor` supplies the resolved token source
+// and the whoami probe result; this decides the human-facing verdict + guidance.
+export function buildDoctorReport(input: {
+  readonly host: string
+  readonly tokenSource: 'keychain' | 'env' | 'none'
+  readonly whoami: WhoamiProbe | null
+}): DoctorReport {
+  const { host, tokenSource, whoami } = input
+  if (tokenSource === 'none') {
+    return {
+      host,
+      tokenSource,
+      authenticated: false,
+      email: null,
+      nextStep: authRequiredGuidance,
+      detail: null,
+    }
+  }
+  if (whoami?.ok) {
+    return {
+      host,
+      tokenSource,
+      authenticated: true,
+      email: whoami.email,
+      nextStep: null,
+      detail: null,
+    }
+  }
+  // A token is present but the server rejected it or was unreachable.
+  return {
+    host,
+    tokenSource,
+    authenticated: false,
+    email: null,
+    nextStep:
+      'token was rejected: run "press login" again, or set a valid PRESS_TOKEN for this host',
+    detail: whoami ? whoami.error : null,
+  }
+}
+
 function printSuccess(ctx: CliContext, data: JsonRecord): void {
   if (ctx.json) {
     console.log(JSON.stringify({ ok: true, data }))
@@ -209,10 +263,14 @@ async function apiFetch(
   return body
 }
 
+const authRequiredGuidance =
+  'authentication required: run "press login" for interactive use, ' +
+  'or set PRESS_TOKEN and PRESS_HOST for agents. Run "press doctor" to check.'
+
 async function requireToken(ctx: CliContext): Promise<TokenSource> {
   const source = await resolveToken(ctx.host)
   if (!source) {
-    throw new CliError('authentication required: run press login', 2)
+    throw new CliError(authRequiredGuidance, 2)
   }
   return source
 }
@@ -378,6 +436,40 @@ async function commandWhoami(ctx: CliContext): Promise<void> {
   })
 }
 
+async function commandDoctor(ctx: CliContext): Promise<void> {
+  const source = await resolveToken(ctx.host)
+  const tokenSource = source?.kind ?? 'none'
+  let whoami: WhoamiProbe | null = null
+  if (source) {
+    try {
+      const body = (await apiFetch(ctx, '/api/cli/whoami', { token: source.token })) as JsonRecord
+      const email =
+        body.user && typeof body.user === 'object' && 'email' in body.user
+          ? String(body.user.email)
+          : null
+      whoami = { ok: true, email }
+    } catch (error) {
+      whoami = { ok: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  }
+  const report = buildDoctorReport({ host: ctx.host, tokenSource, whoami })
+  if (ctx.json) {
+    printSuccess(ctx, { ...report })
+    return
+  }
+  console.log(`host:          ${report.host}`)
+  console.log(`token source:  ${report.tokenSource}`)
+  console.log(
+    `authenticated: ${report.authenticated ? `yes${report.email ? ` (${report.email})` : ''}` : 'no'}`,
+  )
+  if (report.detail) {
+    console.log(`detail:        ${report.detail}`)
+  }
+  if (report.nextStep) {
+    console.log(`next step:     ${report.nextStep}`)
+  }
+}
+
 async function commandLogout(ctx: CliContext): Promise<void> {
   const source = await requireToken(ctx)
   await apiFetch(ctx, '/api/cli/logout', {
@@ -513,6 +605,9 @@ async function run(argv: readonly string[]): Promise<void> {
     case 'whoami':
       await commandWhoami(ctx)
       return
+    case 'doctor':
+      await commandDoctor(ctx)
+      return
     case 'publish':
       await commandPublish(ctx, presentStrings([subcommand, ...rest]))
       return
@@ -529,7 +624,9 @@ async function run(argv: readonly string[]): Promise<void> {
       await commandUnpublish(ctx, presentStrings([subcommand, ...rest]))
       return
     default:
-      throw new CliError('usage: press <login|logout|whoami|publish|list|page set|unpublish>')
+      throw new CliError(
+        'usage: press <login|logout|whoami|doctor|publish|list|page set|unpublish>',
+      )
   }
 }
 
