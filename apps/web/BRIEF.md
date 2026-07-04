@@ -32,7 +32,7 @@ looks, news portals with competing sidebars/tickers.
 
 | Floor                                      | Measured by                                                                                                |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
-| No horizontal scroll                       | Playwright at 360, 768, 1280, 1920 px widths on `/`, `/c/:slug`, `/login`                                  |
+| No horizontal scroll                       | Playwright at 360, 768, 1280, 1920 px widths on `/`, `/c/:slug`, `/login`, and the `password` entry page   |
 | Contrast ≥ WCAG AA                         | automated axe/contrast audit in the e2e run                                                                |
 | Zero third-party requests                  | Playwright network log: every request originates from the instance origin (fonts self-hosted; sovereignty) |
 | Type scale is systematic                   | font sizes on rendered pages ∈ the defined scale tokens (asserted from computed styles)                    |
@@ -67,6 +67,9 @@ publication he'd read — the human gate no quorum replaces.
 - More than 2 typefaces, or any typeface loaded from a third-party origin.
 - Horizontal scroll at any supported width; overlapping/clipped text.
 - Default-looking UI-kit styling leaking through (unthemed buttons/inputs).
+- A reader gate with no way through: an OS Basic-Auth dialog instead of a branded
+  `password` entry page, or a `/login` that renders copy with no sign-in
+  affordance.
 - Shipping a milestone with "style comes later" — design floors run from the
   first rendered page.
 
@@ -89,6 +92,11 @@ publication he'd read — the human gate no quorum replaces.
   appears on hover only (magazine convention). Judge G's round-3 dissent
   requesting a static affordance is resolved: hover-only stands (ratified
   2026-07-03).
+- The `password` entry page and the `/login` identity gate are first-class
+  editorial surfaces (same masthead, type scale, spacing, dark/light) — a reader
+  who hits a gate stays inside the publication. Both are captured in the blind
+  screenshot oracle alongside `/` and a collection page (ratified 2026-07-04,
+  from the dogfood bug bash).
 
 ## Boundary (Allen's alone)
 

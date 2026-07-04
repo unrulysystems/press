@@ -87,6 +87,15 @@ login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with a
   accepts it as a command argument.
 - **REQ-AUTH-007** Instance admins are the users whose emails appear in
   `PRESS_ADMIN_EMAILS` (role assigned at sign-in).
+- **REQ-AUTH-008** The `/login` identity gate always renders the sign-in
+  affordance for every enabled provider — the credential form when
+  `PRESS_ENABLE_CREDENTIAL_AUTH=1` (localnet), the "Continue with Google" button
+  when the Google client is configured (prod) — and never renders as copy-only
+  with no way in. For a reader who cannot sign in it states that access follows
+  their organization account and to ask the page's publisher. On localnet
+  (credential provider enabled) it shows a seeded-account hint. A running
+  instance with zero enabled providers is a fail-closed config error
+  (REQ-CFG-002), not a silent dead-end.
 
 ### ACL — authorization
 
@@ -100,7 +109,11 @@ login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with a
 - **REQ-ACL-002** Unauthenticated browser requests (Accept: text/html) to
   `default`/`private` pages 302-redirect to `/login?next=<url>`; non-HTML
   requests receive 401. Authenticated-but-forbidden receives 403. `password`
-  pages challenge with `WWW-Authenticate: Basic realm="press"` and 401.
+  pages: an HTML request without a valid page-password credential renders the
+  branded password-entry page (REQ-SRV-004) at 200 with no content leak; a
+  non-HTML (programmatic/CLI) request is challenged with `WWW-Authenticate: Basic
+  realm="press"` and 401. Both channels resolve the same password-verified viewer
+  channel through the single ACL function (REQ-ACL-006).
 - **REQ-ACL-003** Page visibility = page-level value if set, else the
   collection's `defaultVisibility`, else `default`.
 - **REQ-ACL-004** Private allowlists are exact email matches and may include
@@ -132,11 +145,18 @@ text/html` body publishes a page. First publish to an unknown collection slug
   slug), stores the blob at `PRESS_STORAGE_DIR/<collection>/<file>`, and writes
   the Page row and AuditEvent in the same transaction; blob write is fsynced
   before the transaction commits. Response JSON: `{ url, collection, file,
-title, visibility, password? }`.
-- **REQ-PUB-005** `visibility=password` causes the server to generate a strong
-  random password, return it once in the publish response, and store only the
-  argon2 hash. `POST /api/pages/:collection/:file/password` re-rolls (owner
-  only). Publisher-chosen passwords are not supported.
+title, visibility, password?, allow? }` — `allow` is the page's resolved
+  allowlist (present for `private` pages) so the caller can confirm exactly who
+  was granted.
+- **REQ-PUB-005** `visibility=password`: when the publisher supplies no password,
+  the server generates a strong random one. A publisher MAY instead supply a
+  custom password (≥ 8 characters; 400 otherwise), delivered only through a
+  non-argv channel — a request body/header field the CLI populates from an
+  interactive hidden prompt, `PRESS_PAGE_PASSWORD`, or stdin — never an argv value
+  and never logged (INV-4). Either way the server stores only the argon2 hash and
+  returns the effective password exactly once in the publish response.
+  `POST /api/pages/:collection/:file/password` re-rolls a random password or sets
+  a new custom one (owner only).
 - **REQ-PUB-006** `PATCH /api/pages/:collection/:file` updates visibility /
   allowlist / title (owner only). `PATCH /api/collections/:collection` updates
   defaultVisibility / title (owner only). `defaultVisibility` accepts only
@@ -168,6 +188,17 @@ title, visibility, password? }`.
   existence to unauthorized viewers either: failed ACL on an existing
   `private`/`default` page returns 403 only when the viewer is authenticated;
   anonymous non-HTML gets 401 per REQ-ACL-002).
+- **REQ-SRV-004** The branded password-entry page (HTML request to a `password`
+  page with no valid credential) renders press chrome, the page title, and a
+  password form that POSTs to `POST /p/:collection/:file` (form-encoded
+  `password`). On a correct password the server sets a page-scoped, HttpOnly,
+  SameSite=Lax, Secure-in-prod, short-TTL signed cookie authorizing only that one
+  page, then 303-redirects to the GET, which serves the blob; on a wrong password
+  it re-renders the page with an error at 401. This read-side unlock is not a page
+  mutation — INV-1 (mutations are Bearer-only) is unaffected. The entry page never
+  contains the report body before unlock, carries the sandbox CSP of REQ-SRV-002,
+  and holds the web design floors (`apps/web/BRIEF.md`). Basic auth (REQ-ACL-002)
+  remains the programmatic channel.
 
 ### IDX — indexes / news surface
 
@@ -184,16 +215,23 @@ title, visibility, password? }`.
 
 - **REQ-CLI-001** Commands: `press login [--host <url>]`, `press logout`,
   `press whoami`, `press publish <file> --to <collection> [--as <file-slug>]
-[--visibility <v>] [--allow <emails>]`, `press list [collection]`,
-  `press page set <collection>/<file> [--visibility <v>] [--allow <emails>]`,
-  `press unpublish <collection>/<file>`.
+[--visibility <v>] [--allow <emails>] [--password]`, `press list [collection]`,
+  `press page set <collection>/<file> [--visibility <v>] [--allow <emails>]
+[--password]`, `press unpublish <collection>/<file>`. `--password` is a
+  value-less flag: it triggers a hidden interactive prompt, or reads
+  `PRESS_PAGE_PASSWORD`/stdin when non-interactive — the password never appears as
+  an argv value (INV-4). `--allow` takes a comma-separated email list.
 - **REQ-CLI-002** `--json` on every command emits machine-readable output for
   agent use; exit codes: 0 success, 1 error, 2 auth required, 3 forbidden.
 - **REQ-CLI-003** The default host is baked per-instance via `PRESS_HOST` env or
   `--host`; the CLI stores tokens per-host in the keychain (service name
   `press:<host>`).
-- **REQ-CLI-004** `press publish` prints the final URL, and the one-time
-  password when the server generated one.
+- **REQ-CLI-004** `press publish` prints the final URL. For a `password` page it
+  also prints the effective password once plus one line of reader guidance (share
+  the link; the reader enters the password in the browser prompt — no username).
+  For a `private` page it echoes the resolved allowlist so the publisher can
+  confirm who was granted. `--json` output includes `allow` and stays
+  machine-clean (no guidance prose).
 
 ### CFG — instance configuration
 
@@ -244,8 +282,19 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 - [ ] Authenticated allowed-domain user GET of a `default` page → 200
 - [ ] `private` page: allowlisted external user → 200; non-allowlisted
       same-domain user → 403; owner → 200
-- [ ] `password` page: no credentials → 401 + Basic challenge; correct password
-      → 200; wrong password → 401; owner session → 200
+- [ ] `password` page: non-HTML no credentials → 401 + Basic challenge; correct
+      Basic password → 200; HTML no credentials → 200 branded entry page with no
+      body leak; POST correct password → cookie + 303 → 200; POST wrong password
+      → 401 re-render; owner session → 200 (REQ-SRV-004)
+- [ ] `visibility=password` with a publisher-supplied custom password (≥ 8 chars,
+      via prompt/env/stdin — never argv) unlocks; a < 8-char password → 400
+      (REQ-PUB-005)
+- [ ] `press publish` never places a page password in argv; a password page prints
+      reader guidance, a private page echoes the resolved allowlist; `--json`
+      carries `allow` (REQ-CLI-004, REQ-PUB-004)
+- [ ] `/login` renders the enabled provider affordance in both localnet
+      (credential form + seeded hint) and Google-configured modes, and is never
+      copy-only (REQ-AUTH-008)
 - [ ] Every `/p/` 200 in the suite carries the exact CSP of REQ-SRV-002
 - [ ] `press publish` (real CLI binary) creates a collection, publishes, prints
       URL; republish overwrites; second user's publish to same collection → 403
