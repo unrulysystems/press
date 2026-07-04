@@ -2,6 +2,8 @@
 
 import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
+import { formatPublishOutput } from './publishOutput'
+
 type JsonRecord = Record<string, unknown>
 
 type CliContext = {
@@ -520,9 +522,8 @@ async function commandPublish(ctx: CliContext, args: readonly string[]): Promise
     printSuccess(ctx, body)
     return
   }
-  console.log(String(body.url))
-  if (typeof body.password === 'string') {
-    console.log(`password: ${body.password}`)
+  for (const line of formatPublishOutput(body)) {
+    console.log(line)
   }
 }
 

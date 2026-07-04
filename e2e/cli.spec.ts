@@ -352,3 +352,77 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
   expect(unauthenticated.code).toBe(2)
   expect(jsonLine(unauthenticated.stdout)).toMatchObject({ ok: false })
 })
+
+test('press publish human output: password guidance + private allowlist echo (F2/F4)', async ({
+  baseURL,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const env = await makePressEnv(baseURL, 'human-out')
+  const collectionSlug = `${runSlug}-humanout`
+  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  await writeFile(reportPath, '<!doctype html><title>Human Out</title><h1>x</h1>')
+  await loginViaLoopback(baseURL, env, 'owner')
+
+  // password page (no --json) → password + reader guidance line
+  const pw = await runPress(
+    [
+      'publish',
+      reportPath,
+      '--to',
+      collectionSlug,
+      '--as',
+      'secret.html',
+      '--visibility',
+      'password',
+    ],
+    env,
+  )
+  expect(pw.code).toBe(0)
+  expect(pw.stdout).toMatch(/password:/)
+  expect(pw.stdout).toMatch(/browser prompt/i)
+  expect(pw.stdout).toMatch(/username/i)
+
+  // private page (no --json) → resolved allowlist echoed for the publisher
+  const priv = await runPress(
+    [
+      'publish',
+      reportPath,
+      '--to',
+      collectionSlug,
+      '--as',
+      'priv.html',
+      '--visibility',
+      'private',
+      '--allow',
+      localnetUsers.secondUser.email,
+    ],
+    env,
+  )
+  expect(priv.code).toBe(0)
+  expect(priv.stdout).toContain(localnetUsers.secondUser.email)
+
+  // --json stays machine-clean and carries the allowlist
+  const privJson = await runPress(
+    [
+      'publish',
+      reportPath,
+      '--to',
+      collectionSlug,
+      '--as',
+      'priv2.html',
+      '--visibility',
+      'private',
+      '--allow',
+      localnetUsers.secondUser.email,
+      '--json',
+    ],
+    env,
+  )
+  expect(privJson.code).toBe(0)
+  expect(jsonLine(privJson.stdout)).toMatchObject({
+    ok: true,
+    data: { visibility: 'private', allow: [localnetUsers.secondUser.email] },
+  })
+})

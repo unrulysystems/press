@@ -14,7 +14,10 @@ import { verifyApiToken } from '../auth/apiTokens'
 import { db, dbConfig } from '../db/client'
 import { auditEvent, collection, page } from '../db/schema'
 import { hashPagePassword } from './passwords'
+import { publishResponseBody } from './responseShape'
 import { archiveBlob, installBlob, removeTempBlob, writeTempBlob } from './storage'
+
+import type { PublishResponseBody } from './responseShape'
 
 import type {
   AclOperation,
@@ -345,15 +348,9 @@ function pageResponse(input: {
   readonly title: string
   readonly visibility: PageVisibility
   readonly password?: string
-}): Record<string, string> {
-  return {
-    url: `${dbConfig.baseUrl}/p/${input.collectionSlug}/${input.fileSlug}`,
-    collection: input.collectionSlug,
-    file: input.fileSlug,
-    title: input.title,
-    visibility: input.visibility,
-    ...(input.password ? { password: input.password } : {}),
-  }
+  readonly allowlist?: readonly string[]
+}): PublishResponseBody {
+  return publishResponseBody({ baseUrl: dbConfig.baseUrl, ...input })
 }
 
 async function authenticatedViewer(request: Request) {
@@ -562,6 +559,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
         fileSlug: route.fileSlug,
         title,
         visibility: resolvedVisibility(visibility, collectionAcl(txCollection).defaultVisibility),
+        allowlist,
         ...(generatedPassword ? { password: generatedPassword } : {}),
       })
     })
@@ -660,6 +658,7 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
         visibility === undefined ? existingPage.visibility : visibility,
         collectionAcl(existingCollection).defaultVisibility,
       ),
+      allowlist: allowlist ?? existingPage.allowlist,
       ...(password ? { password } : {}),
     })
   })
