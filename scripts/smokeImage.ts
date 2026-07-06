@@ -242,17 +242,18 @@ async function assertBootRefusals(tmp: string): Promise<void> {
   assertIncludes(prodCredential.stderr, 'production', 'production credential-auth refusal')
 }
 
-async function migrateAndSeed(env: SmokeEnv): Promise<void> {
+async function composeUpPostgres(env: SmokeEnv): Promise<void> {
   await run(
     'docker',
     ['compose', '-f', composeFile, '-p', projectName, 'up', '-d', '--wait', 'postgres'],
     { env, timeoutMs: 60_000, inherit: true },
   )
-  await run('nub', ['run', '--filter', '@press/web', 'db:migrate'], {
-    env,
-    timeoutMs: 60_000,
-    inherit: true,
-  })
+}
+
+// Seed AFTER the app container has booted, so the container migrates the fresh database
+// itself on boot. This is the faithful check for the image's boot-time migration: no host
+// `db:migrate` runs, so a missing/broken in-image migration makes /healthz never come up.
+async function seedDatabase(env: SmokeEnv): Promise<void> {
   await run('nub', ['run', '--filter', '@press/web', 'db:seed'], {
     env,
     timeoutMs: 60_000,
@@ -343,8 +344,11 @@ async function main(): Promise<void> {
       inherit: true,
     })
     await assertBootRefusals(tmp)
-    await migrateAndSeed(env)
+    await composeUpPostgres(env)
     await startAppContainer(envFile, storageDir)
+    // Container migrates the fresh DB on boot before serving; healthz confirms it got there.
+    await waitForHttp(`${baseUrl}/healthz`, 60_000)
+    await seedDatabase(env)
     await assertContainerHttp()
 
     console.log(`press image smoke passed for ${imageName}`)

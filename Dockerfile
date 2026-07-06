@@ -43,9 +43,16 @@ COPY --from=build /app/packages/core/dist ./packages/core/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY apps/web/src/server ./apps/web/src/server
 COPY apps/web/src/setupServer.ts ./apps/web/src/setupServer.ts
+# src/db ships the migration runner + SQL so the container migrates itself on boot
+# (drizzle client, schema, migrate.ts, and migrations/*.sql). Its only cross-dir import
+# is ../server/config, copied above.
+COPY apps/web/src/db ./apps/web/src/db
 
 WORKDIR /app/apps/web
 
 EXPOSE 4174
 
-CMD ["sh", "-c", "bun src/setupServer.ts && exec one serve --host 0.0.0.0 --port ${PRESS_PORT:-4174}"]
+# Boot order (fail-closed): validate config → apply DB migrations → serve. migrate.ts is
+# idempotent (tracks applied files + checksums in __press_migrations), so re-runs are no-ops;
+# if migrations can't apply, the container exits rather than serving against a stale schema.
+CMD ["sh", "-c", "bun src/setupServer.ts && bun src/db/migrate.ts && exec one serve --host 0.0.0.0 --port ${PRESS_PORT:-4174}"]
