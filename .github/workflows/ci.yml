@@ -38,8 +38,14 @@ jobs:
       # HOME-overridden sandbox). Pinned to the versions used locally.
       - name: Install silo + Tilt (localnet orchestration for e2e)
         run: |
+          set -euo pipefail
           bun add -g @0xbigboss/silo@0.5.9
-          curl -fsSL https://raw.githubusercontent.com/tilt-dev/tilt/v0.36.1/scripts/install.sh | bash
+          # Extract the tilt binary straight into a PATH dir. Upstream's install.sh unpacks
+          # `tilt` into the checkout CWD, which collides on the runner
+          # (`tar: tilt: Cannot open: File exists`) and fails the job before any step runs.
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v0.36.0/tilt.0.36.0.linux.x86_64.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" tilt
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         timeout-minutes: 5
 
