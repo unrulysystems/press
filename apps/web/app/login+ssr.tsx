@@ -42,9 +42,30 @@ export function LoginPage() {
   const view = loginAffordances(data)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const googleHref = `/api/auth/sign-in/social?provider=google&callbackURL=${encodeURIComponent(
-    data.next,
-  )}`
+
+  // better-auth's /sign-in/social is POST-only and returns { url } to redirect to; a plain
+  // GET link 404s. Since production refuses credential auth, this is the only way in.
+  async function continueWithGoogle(): Promise<void> {
+    setError(null)
+    setSubmitting(true)
+    const response = await fetch('/api/auth/sign-in/social', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'google', callbackURL: data.next }),
+    })
+    if (!response.ok) {
+      setSubmitting(false)
+      setError('Could not start Google sign-in. Please try again.')
+      return
+    }
+    const body = (await response.json()) as { readonly url?: string }
+    if (!body.url) {
+      setSubmitting(false)
+      setError('Google sign-in did not return a redirect URL.')
+      return
+    }
+    window.location.assign(body.url)
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -109,9 +130,14 @@ export function LoginPage() {
           ) : null}
 
           {view.google ? (
-            <a className="press-google-button" href={googleHref}>
+            <button
+              className="press-google-button"
+              type="button"
+              onClick={continueWithGoogle}
+              disabled={submitting}
+            >
               Continue with Google
-            </a>
+            </button>
           ) : null}
 
           {view.unavailable ? (

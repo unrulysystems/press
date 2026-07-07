@@ -5,7 +5,8 @@ import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 test('credential provider signs in a seeded localnet user', async ({ page, context, baseURL }) => {
   await page.goto('/login?next=/')
   await expect(page.getByRole('heading', { name: 'Sign in to keep reading.' })).toBeVisible()
-  await expect(page.getByRole('link', { name: 'Continue with Google' })).toHaveCount(0)
+  // Google sign-in is a POST-driven <button> (not a GET <a>); it never shows in credential mode.
+  await expect(page.getByRole('button', { name: 'Continue with Google' })).toHaveCount(0)
 
   await page.getByLabel('Email').fill(localnetUsers.owner.email)
   await page.getByLabel('Password').fill('wrong-password')
