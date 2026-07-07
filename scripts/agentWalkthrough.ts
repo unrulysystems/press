@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
-import { writeKeychainStub } from './pressCliKeychain'
 
 // The agent walkthrough is the executable proof of BOTH plugin skills: it performs a real
 // `press login` via the localnet seeded credential provider (press-setup; NO real Google —
@@ -303,8 +302,8 @@ function reportHtml(title: string): string {
 }
 
 // Publish a report through the real `press` CLI (--json) and return the served URL. The
-// login-acquired token comes from the hermetic keychain (PRESS_E2E_KEYCHAIN_FILE on the CLI
-// env), never on argv.
+// login-acquired token comes from the hermetic keychain file backend
+// (PRESS_E2E_KEYCHAIN_FILE on the CLI env), never on argv.
 async function publishReport(
   env: WalkthroughEnv,
   file: string,
@@ -616,15 +615,13 @@ async function main(): Promise<number> {
     siloUp = startSiloUp(walkthroughEnv)
     await waitForHealth(siloEnv.PRESS_BASE_URL, waitForExit(siloUp), healthTimeoutMs)
 
-    // Set up the CLI the way a human does (press-setup): a hermetic keychain shadows the macOS
-    // `security` binary so a genuine `press login` round-trips a REAL token via the seeded
-    // credential provider — no minted token, no PRESS_TOKEN, no real Google (REQ-AUTH-002). The
-    // sign-in step is pluggable (credential now, Google OAuth once live) via selectSignIn.
+    // Set up the CLI the way a human does (press-setup): the CLI's hermetic keychain backend
+    // round-trips a REAL token via the seeded credential provider — no minted token, no
+    // PRESS_TOKEN, no real Google (REQ-AUTH-002). The sign-in step is pluggable (credential now,
+    // Google OAuth once live) via selectSignIn.
     keychainDir = await mkdtemp(join(tmpdir(), 'press-walkthrough-keychain-'))
-    await writeKeychainStub(keychainDir)
     cliEnv = {
       ...walkthroughEnv,
-      PATH: `${keychainDir}:${process.env.PATH ?? ''}`,
       PRESS_HOST: siloEnv.PRESS_BASE_URL,
       PRESS_E2E_KEYCHAIN_FILE: join(keychainDir, 'keychain.json'),
     }
