@@ -289,6 +289,13 @@ async function assertContainerHttp(): Promise<void> {
     fail('/healthz returned unexpected body')
   }
 
+  // `/health` is the Kubernetes probe target (see press-deploy DEPLOYMENT.spec.md); smoke it
+  // against the real image so the endpoint prod depends on is covered, not just `/healthz`.
+  const health2 = await waitForHttp(`${baseUrl}/health`, 30_000)
+  if ((await health2.text()) !== 'ok\n') {
+    fail('/health returned unexpected body')
+  }
+
   await assertText(`${baseUrl}/`, [
     'press-shell',
     'Reports for close reading.',
