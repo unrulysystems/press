@@ -1,3 +1,24 @@
+## 2026-07-06 — Google sign-in button: POST fix + click-path harness gap
+
+Production login was fully broken. `apps/web/app/login+ssr.tsx` rendered the
+"Continue with Google" affordance as a GET `<a href="/api/auth/sign-in/social?…">`,
+but Better Auth's `/sign-in/social` is POST-only (a GET 404s). Because production
+refuses credential auth (INV-5), Google is the only provider — so every sign-in
+attempt 404'd. Fixed by making the affordance a `<button>` that POSTs
+`{provider, callbackURL}` and redirects to the returned `{url}` (mirrors the
+credential-form fetch pattern, which e2e already covers).
+
+**Harness gap (accepted):** the Google click-path is not e2e-covered. Localnet is
+credential-only (REQ-AUTH-002 / the never-real-Google rule), there is no React
+render-test infra, and Playwright cannot re-env the running dev server per test to
+enable the Google provider — so the button's POST→redirect cannot be exercised in
+the existing harness without disproportionate new infrastructure. Verification for
+this fix rests instead on: static `nub run check`; a live-endpoint probe against
+production (`POST /api/auth/sign-in/social` → 200 `{redirect, url:accounts.google.com}`,
+`GET` → 404); and the manual OAuth click-through, which is the Boundary gate for
+Google sign-in regardless. The stale `e2e/auth.spec.ts` assertion was moved from the
+`link` role to the `button` role to match the fix.
+
 ## 2026-07-04 — F-04: Google provider tokens are never persisted; residual session-token exposure accepted
 
 The provider-token half of F-04 (whole-repo security ultra-audit) is eliminated,
