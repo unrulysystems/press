@@ -15,6 +15,7 @@ import { db, dbConfig } from '../db/client'
 import { auditEvent, collection, page } from '../db/schema'
 import { MIN_PAGE_PASSWORD_LENGTH, hashPagePassword, isStrongPagePassword } from './passwords'
 import { publishResponseBody } from './responseShape'
+import { extractTitle } from './title'
 import { archiveBlob, installBlob, removeTempBlob, writeTempBlob } from './storage'
 
 import type { PublishResponseBody } from './responseShape'
@@ -219,15 +220,6 @@ function generatePagePassword(): string {
 function readCustomPagePassword(request: Request): string | undefined {
   const raw = request.headers.get('x-press-page-password')
   return raw === null ? undefined : raw
-}
-
-function extractTitle(html: string, fileSlug: FileSlug, override?: string): string {
-  if (override) {
-    return override
-  }
-  const match = /<title\b[^>]*>([\s\S]*?)<\/title>/i.exec(html)
-  const extracted = match?.[1]?.replace(/\s+/g, ' ').trim()
-  return extracted || fileSlug
 }
 
 async function readHtmlBody(request: Request): Promise<Uint8Array> {

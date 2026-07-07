@@ -19,6 +19,7 @@
     "@tamagui/vite-plugin": "2.3.1",
     "better-auth": "^1.6.23",
     "drizzle-orm": "^0.45.2",
+    "entities": "^8.0.0",
     "one": "1.20.2",
     "pg": "^8.22.0",
     "react": "19.2.0",
