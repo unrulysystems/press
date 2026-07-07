@@ -9,7 +9,6 @@ import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { findUserIdByEmail } from '../apps/web/src/auth/apiTokens'
 import { db } from '../apps/web/src/db/client'
 import { findMatchingAuditEvent, findPage } from '../apps/web/src/publish/e2eSupport'
-import { writeKeychainStub } from '../scripts/pressCliKeychain'
 import { newE2EAPIContext } from './api'
 
 const root = resolve(import.meta.dirname, '..')
@@ -65,11 +64,9 @@ function countOccurrences(haystack: string, needle: string): number {
 
 async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
   const dir = await mkdtemp(join(tmpdir(), `press-cli-${label}-`))
-  await writeKeychainStub(dir)
   const keychainFile = join(dir, 'keychain.json')
   return {
     ...baseProcessEnv(),
-    PATH: `${dir}:${process.env.PATH ?? ''}`,
     PRESS_HOST: baseURL,
     PRESS_E2E_KEYCHAIN_FILE: keychainFile,
   }
