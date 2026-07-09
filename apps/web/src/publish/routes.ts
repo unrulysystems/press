@@ -15,6 +15,7 @@ import { verifyApiToken } from '../auth/apiTokens'
 import { db, dbConfig } from '../db/client'
 import { auditEvent, collection, page, pageRedirect } from '../db/schema'
 import { MIN_PAGE_PASSWORD_LENGTH, hashPagePassword, isStrongPagePassword } from './passwords'
+import { sortPagePathsForLock } from './pagePathLocks'
 import { moveResponseBody, publishResponseBody } from './responseShape'
 import { extractTitle } from './title'
 import { archiveBlob, installBlob, moveBlob, removeTempBlob, writeTempBlob } from './storage'
@@ -725,19 +726,13 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
   let rollbackBlob: (() => Promise<void>) | undefined
   try {
     const result = await db.transaction(async (tx): Promise<MoveResponseBody> => {
-      const lockedPaths = [
+      const lockedPaths = sortPagePathsForLock([
         { collectionSlug: route.collectionSlug, fileSlug: route.fileSlug },
         {
           collectionSlug: destination.collectionSlug,
           fileSlug: destination.fileSlug,
         },
-      ]
-      // oxlint-disable-next-line unicorn/no-array-sort -- ES2022 target lacks Array#toSorted; this is a new local array.
-      lockedPaths.sort((left, right) =>
-        `${left.collectionSlug}\0${left.fileSlug}`.localeCompare(
-          `${right.collectionSlug}\0${right.fileSlug}`,
-        ),
-      )
+      ])
       for (const path of lockedPaths) {
         // Lock in canonical order so concurrent inverse moves cannot deadlock.
         // oxlint-disable-next-line no-await-in-loop

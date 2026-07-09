@@ -29,7 +29,6 @@ type SiloEnv = {
   readonly PRESS_BASE_URL: string
   readonly PRESS_PORT: string
   readonly PRESS_POSTGRES_PORT: string
-  readonly WORKSPACE_NAME: string
 }
 
 function fail(message: string): never {
@@ -75,7 +74,6 @@ async function readSiloEnv(): Promise<SiloEnv> {
     PRESS_BASE_URL: required(parsed, 'PRESS_BASE_URL'),
     PRESS_PORT: required(parsed, 'PRESS_PORT'),
     PRESS_POSTGRES_PORT: required(parsed, 'PRESS_POSTGRES_PORT'),
-    WORKSPACE_NAME: parsed.WORKSPACE_NAME ?? parsed.SILO_WORKSPACE ?? instanceName,
   }
 }
 
@@ -278,7 +276,7 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-function makeWalkthroughEnv(siloEnv: SiloEnv): WalkthroughEnv {
+function makeWalkthroughEnv(siloEnv: SiloEnv, storageDir: string): WalkthroughEnv {
   return {
     ...process.env,
     ...siloEnv,
@@ -288,9 +286,9 @@ function makeWalkthroughEnv(siloEnv: SiloEnv): WalkthroughEnv {
     TILT_EDITOR: 'true',
     PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
     PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
-    PRESS_STORAGE_DIR:
-      process.env.PRESS_STORAGE_DIR ??
-      resolve(root, '.press/silo', siloEnv.WORKSPACE_NAME, 'storage'),
+    // Fixed walkthrough slugs must never collide with blobs from a prior run.
+    // Keep storage in the run's temp directory so cleanup removes DB-external state too.
+    PRESS_STORAGE_DIR: storageDir,
     BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? 'localnet-secret-at-least-32-bytes',
     PRESS_ENABLE_CREDENTIAL_AUTH: process.env.PRESS_ENABLE_CREDENTIAL_AUTH ?? '1',
     PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? `${25 * 1024 * 1024}`,
@@ -687,7 +685,8 @@ async function main(): Promise<number> {
 
     const siloEnv = await readSiloEnv()
     composeProjectName = siloEnv.COMPOSE_PROJECT_NAME
-    walkthroughEnv = makeWalkthroughEnv(siloEnv)
+    workDir = await mkdtemp(join(tmpdir(), 'press-walkthrough-'))
+    walkthroughEnv = makeWalkthroughEnv(siloEnv, join(workDir, 'storage'))
 
     siloUp = startSiloUp(walkthroughEnv)
     await waitForHealth(siloEnv.PRESS_BASE_URL, waitForExit(siloUp), healthTimeoutMs)
@@ -713,7 +712,6 @@ async function main(): Promise<number> {
     loggedIn = true
     await confirmSetup(cliEnv, localnetUsers.owner)
 
-    workDir = await mkdtemp(join(tmpdir(), 'press-walkthrough-'))
     const publicFile = join(workDir, 'public-report.html')
     const privateFile = join(workDir, 'private-report.html')
     await writeFile(publicFile, reportHtml('Walkthrough Public Report'))

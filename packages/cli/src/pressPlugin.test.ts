@@ -17,6 +17,7 @@ const REAL_PRESS_COMMANDS = new Set([
   'list',
   'page',
   'unpublish',
+  'move',
 ])
 
 async function read(relativePath: string): Promise<string> {
@@ -75,6 +76,20 @@ describe('press plugin manifest', () => {
     expect(await read('CLAUDE.md')).toContain('press-setup')
     expect(await read('AGENTS.md')).toContain('press-publish')
   })
+
+  test('both cross-tool entry docs enumerate every real command', async () => {
+    const documented = await Promise.all(
+      (['CLAUDE.md', 'AGENTS.md'] as const).map(async (path) => ({
+        path,
+        cited: new Set(citedPressCommands(await read(path))),
+      })),
+    )
+    for (const { path, cited } of documented) {
+      for (const command of REAL_PRESS_COMMANDS) {
+        expect(cited.has(command), `${path} should document press ${command}`).toBe(true)
+      }
+    }
+  })
 })
 
 describe('press plugin skills', () => {
@@ -104,5 +119,6 @@ describe('press plugin skills', () => {
     // Setup must verify auth; publish must actually publish.
     expect(setup).toContain('whoami')
     expect(publish).toContain('publish')
+    expect(publish).toContain('move')
   })
 })

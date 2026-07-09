@@ -27,6 +27,9 @@ Real subcommands (do not invent others):
 - `press list [collection]` — list collections, or pages within a collection.
 - `press page set <collection>/<file> [--visibility <v>] [--allow <emails>]` — change
   a page's access control.
+- `press move` `<source-collection/source-file> <destination-collection/destination-file>`
+  `[--redirect permanent|none]` — change a page's canonical path; defaults to a
+  permanent redirect from the old path.
 - `press unpublish <collection>/<file>` — remove a page.
 
 Global flags: `--host <url>` (or `PRESS_HOST`), `--json`.

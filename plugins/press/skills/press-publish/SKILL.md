@@ -69,6 +69,16 @@ To change a page's access later:
 press page set weekly/q3-summary.html --visibility private --allow teammate@send.it
 ```
 
+To change its canonical collection/file path while keeping the old reader link:
+
+```
+press move weekly/q3-summary.html archive/q3-summary.html
+```
+
+The old path permanently redirects by default. Pass `--redirect none` only when
+the old path should become a 404. Continue using and verifying the destination
+URL returned by the move.
+
 To remove it:
 
 ```

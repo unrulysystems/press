@@ -38,6 +38,24 @@ Harness evidence on the final pre-review state:
   publish, permanent move/308, canonical read, list cleanup, no-redirect
   move/404, prior-alias retargeting, logout, and isolated teardown.
 
+Independent structured review `review-1783629037934-n0ys4b` rejected commit
+`8f580d0` with two valid findings. The advisory-lock sort used `localeCompare`
+on NUL-delimited paths; ICU can ignore NUL and compare distinct valid path tuples
+as equal, leaving inverse requests in opposite lock order. A new pure regression
+test observed that failure with `a/bc.html` and `ab/c.html`; lock order now uses
+direct ASCII tuple comparison. The agent plugin's exhaustive command inventory
+and publish lifecycle skill also omitted `press move`; new inventory assertions
+observed both docs/skill failures before the command and workflow guidance were
+added.
+
+The post-review dogfood rerun found a harness-isolation bug: fixed walkthrough
+slugs shared a persistent host blob directory, so a second run correctly refused
+to overwrite an orphaned prior destination. The walkthrough now places storage
+inside its per-run temp directory, and cleanup removes database-external state.
+Post-fix evidence: `nub run check` passed; `nub run test` passed 206 tests with 1
+platform skip; `nub run e2e` passed 97/97; `nub run walkthrough` passed with all
+move/redirect assertions and clean teardown.
+
 No production data, push, package/image publication, or deploy occurred.
 
 ## 2026-07-04 — blind-oracle judgment: web surface PASSES (incl. the F1/F5 gates)
