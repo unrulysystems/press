@@ -944,37 +944,41 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
     throw new HttpError(400, 'at least one patch field is required')
   }
 
-  const existingCollection = await db.query.collection.findFirst({
-    where: eq(collection.slug, route.collectionSlug),
-  })
-  const existingPage = await db.query.page.findFirst({
-    where: and(
-      eq(page.collectionSlug, route.collectionSlug),
-      eq(page.fileSlug, route.fileSlug),
-      isNull(page.archivedAt),
-    ),
-  })
-  if (!existingCollection || !existingPage) {
-    throw new HttpError(404, 'page not found')
-  }
-  assertMutationAllowed({
-    user: viewer,
-    collection: existingCollection,
-    page: existingPage,
-    operation: { kind: 'change-visibility' },
-  })
-
   const result = await db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${route.collectionSlug}), hashtext(${route.fileSlug}))`,
     )
+
+    // A move can win the path lock while this mutation is waiting. Resolve the
+    // page and its authorization only after the lock so no stale source row can
+    // produce a successful no-op update or an audit event.
+    const txCollection = await tx.query.collection.findFirst({
+      where: eq(collection.slug, route.collectionSlug),
+    })
+    const txPage = await tx.query.page.findFirst({
+      where: and(
+        eq(page.collectionSlug, route.collectionSlug),
+        eq(page.fileSlug, route.fileSlug),
+        isNull(page.archivedAt),
+      ),
+    })
+    if (!txCollection || !txPage) {
+      throw new HttpError(404, 'page not found')
+    }
+    assertMutationAllowed({
+      user: viewer,
+      collection: txCollection,
+      page: txPage,
+      operation: { kind: 'change-visibility' },
+    })
+
     const password =
-      visibility === 'password' && !existingPage.passwordHash ? generatePagePassword() : undefined
+      visibility === 'password' && !txPage.passwordHash ? generatePagePassword() : undefined
     const passwordHash = password
       ? await hashPagePassword(password)
       : visibility && visibility !== 'password'
         ? null
-        : existingPage.passwordHash
+        : txPage.passwordHash
 
     await tx
       .update(page)
@@ -985,7 +989,7 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
         passwordHash,
         updatedAt: new Date(),
       })
-      .where(and(eq(page.collectionSlug, route.collectionSlug), eq(page.fileSlug, route.fileSlug)))
+      .where(eq(page.id, txPage.id))
 
     await tx.insert(auditEvent).values({
       id: randomUUID(),
@@ -993,18 +997,18 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
       action: 'visibility-change',
       collectionSlug: route.collectionSlug,
       fileSlug: route.fileSlug,
-      contentHash: existingPage.contentHash,
+      contentHash: txPage.contentHash,
     })
 
     return pageResponse({
       collectionSlug: route.collectionSlug,
       fileSlug: route.fileSlug,
-      title: title ?? existingPage.title,
+      title: title ?? txPage.title,
       visibility: resolvedVisibility(
-        visibility === undefined ? existingPage.visibility : visibility,
-        collectionAcl(existingCollection).defaultVisibility,
+        visibility === undefined ? txPage.visibility : visibility,
+        collectionAcl(txCollection).defaultVisibility,
       ),
-      allowlist: allowlist ?? existingPage.allowlist,
+      allowlist: allowlist ?? txPage.allowlist,
       ...(password ? { password } : {}),
     })
   })
@@ -1013,26 +1017,6 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
 
 async function rerollPassword(request: Request, route: PageRoute): Promise<Response> {
   const { viewer } = await authenticatedViewer(request)
-  const existingCollection = await db.query.collection.findFirst({
-    where: eq(collection.slug, route.collectionSlug),
-  })
-  const existingPage = await db.query.page.findFirst({
-    where: and(
-      eq(page.collectionSlug, route.collectionSlug),
-      eq(page.fileSlug, route.fileSlug),
-      isNull(page.archivedAt),
-    ),
-  })
-  if (!existingCollection || !existingPage) {
-    throw new HttpError(404, 'page not found')
-  }
-  assertMutationAllowed({
-    user: viewer,
-    collection: existingCollection,
-    page: existingPage,
-    operation: { kind: 'change-password' },
-  })
-
   const customPassword = readCustomPagePassword(request)
   if (customPassword !== undefined && !isStrongPagePassword(customPassword)) {
     throw new HttpError(
@@ -1040,11 +1024,32 @@ async function rerollPassword(request: Request, route: PageRoute): Promise<Respo
       `page password must be at least ${MIN_PAGE_PASSWORD_LENGTH} characters`,
     )
   }
-  const password = customPassword ?? generatePagePassword()
-  await db.transaction(async (tx) => {
+  const result = await db.transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${route.collectionSlug}), hashtext(${route.fileSlug}))`,
     )
+
+    const txCollection = await tx.query.collection.findFirst({
+      where: eq(collection.slug, route.collectionSlug),
+    })
+    const txPage = await tx.query.page.findFirst({
+      where: and(
+        eq(page.collectionSlug, route.collectionSlug),
+        eq(page.fileSlug, route.fileSlug),
+        isNull(page.archivedAt),
+      ),
+    })
+    if (!txCollection || !txPage) {
+      throw new HttpError(404, 'page not found')
+    }
+    assertMutationAllowed({
+      user: viewer,
+      collection: txCollection,
+      page: txPage,
+      operation: { kind: 'change-password' },
+    })
+
+    const password = customPassword ?? generatePagePassword()
     await tx
       .update(page)
       .set({
@@ -1052,50 +1057,30 @@ async function rerollPassword(request: Request, route: PageRoute): Promise<Respo
         passwordHash: await hashPagePassword(password),
         updatedAt: new Date(),
       })
-      .where(and(eq(page.collectionSlug, route.collectionSlug), eq(page.fileSlug, route.fileSlug)))
+      .where(eq(page.id, txPage.id))
     await tx.insert(auditEvent).values({
       id: randomUUID(),
       userId: viewer.userId,
       action: 'password-reroll',
       collectionSlug: route.collectionSlug,
       fileSlug: route.fileSlug,
-      contentHash: existingPage.contentHash,
+      contentHash: txPage.contentHash,
+    })
+
+    return pageResponse({
+      collectionSlug: route.collectionSlug,
+      fileSlug: route.fileSlug,
+      title: txPage.title,
+      visibility: 'password',
+      password,
     })
   })
 
-  return json(
-    pageResponse({
-      collectionSlug: route.collectionSlug,
-      fileSlug: route.fileSlug,
-      title: existingPage.title,
-      visibility: 'password',
-      password,
-    }),
-  )
+  return json(result)
 }
 
 async function deletePage(request: Request, route: PageRoute): Promise<Response> {
   const { viewer } = await authenticatedViewer(request)
-  const existingCollection = await db.query.collection.findFirst({
-    where: eq(collection.slug, route.collectionSlug),
-  })
-  const existingPage = await db.query.page.findFirst({
-    where: and(
-      eq(page.collectionSlug, route.collectionSlug),
-      eq(page.fileSlug, route.fileSlug),
-      isNull(page.archivedAt),
-    ),
-  })
-  if (!existingCollection || !existingPage) {
-    throw new HttpError(404, 'page not found')
-  }
-  assertMutationAllowed({
-    user: viewer,
-    collection: existingCollection,
-    page: existingPage,
-    operation: { kind: 'unpublish' },
-  })
-
   let rollbackBlob: (() => Promise<void>) | undefined
   return await withPagePathLocks(
     () => pool.connect(),
@@ -1104,21 +1089,39 @@ async function deletePage(request: Request, route: PageRoute): Promise<Response>
       const lockedDb = drizzle(connection, { schema })
       try {
         await lockedDb.transaction(async (tx) => {
+          const txCollection = await tx.query.collection.findFirst({
+            where: eq(collection.slug, route.collectionSlug),
+          })
+          const txPage = await tx.query.page.findFirst({
+            where: and(
+              eq(page.collectionSlug, route.collectionSlug),
+              eq(page.fileSlug, route.fileSlug),
+              isNull(page.archivedAt),
+            ),
+          })
+          if (!txCollection || !txPage) {
+            throw new HttpError(404, 'page not found')
+          }
+          assertMutationAllowed({
+            user: viewer,
+            collection: txCollection,
+            page: txPage,
+            operation: { kind: 'unpublish' },
+          })
+
           const blob = await archiveBlob(dbConfig.storageDir, route.collectionSlug, route.fileSlug)
           rollbackBlob = blob.rollback
           await tx
             .update(page)
             .set({ archivedAt: new Date(), updatedAt: new Date() })
-            .where(
-              and(eq(page.collectionSlug, route.collectionSlug), eq(page.fileSlug, route.fileSlug)),
-            )
+            .where(eq(page.id, txPage.id))
           await tx.insert(auditEvent).values({
             id: randomUUID(),
             userId: viewer.userId,
             action: 'unpublish',
             collectionSlug: route.collectionSlug,
             fileSlug: route.fileSlug,
-            contentHash: existingPage.contentHash,
+            contentHash: txPage.contentHash,
           })
         })
         rollbackBlob = undefined
