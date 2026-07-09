@@ -36,15 +36,18 @@ needed for a normal boot:
 
 ### Snapshot order
 
-Take the Postgres dump first, then copy the blob directory.
+Quiesce mutations, then take the Postgres dump first and copy the blob directory.
 
 Rows are the source of truth for whether a page exists and who may read it.
 A row without its blob is a serving failure; a blob without a row is only an
-orphan file. Press publishes blobs before committing the page row, so a
-database-first snapshot can only include later blob bytes as harmless orphans.
-The reverse order can capture a later committed row without its blob. Put the
-service in maintenance/read-only mode, or otherwise stop publish/delete
-traffic, before starting the snapshot so deletes cannot race the blob copy.
+orphan file. Database-first remains the required order, but ordering alone is
+not a consistency mechanism: publish/overwrite can replace bytes, unpublish can
+remove them, and move can relocate them between the database dump and blob
+copy. Put the service in maintenance/read-only mode and stop all page mutation
+traffic — publish, overwrite, move, unpublish, and page/collection changes — as
+part of quiescing all application mutations before starting `pg_dump`. Keep
+mutations stopped until the blob copy finishes; do not begin either snapshot
+while an earlier mutation is still in flight.
 
 Use Postgres custom format (`pg_dump -Fc`) so restores use `pg_restore`, can
 validate the archive, and are not tied to host `psql` client tooling. The

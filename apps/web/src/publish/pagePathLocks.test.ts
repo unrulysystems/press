@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
-import { sortPagePathsForLock } from './pagePathLocks'
+import { sortPagePathsForLock, withPagePathLocks } from './pagePathLocks'
 
 describe('sortPagePathsForLock', () => {
   test('orders collision-shaped valid paths identically regardless of request order', () => {
@@ -34,5 +34,53 @@ describe('sortPagePathsForLock', () => {
     sortPagePathsForLock(paths)
 
     expect(paths).toEqual(original)
+  })
+})
+
+describe('withPagePathLocks', () => {
+  test('retains both locks until failed work finishes compensation', async () => {
+    const events: string[] = []
+    const connection = {
+      async query(statement: string, values: readonly string[]) {
+        const operation = statement.includes('pg_advisory_unlock') ? 'unlock' : 'lock'
+        events.push(`${operation}:${values.join('/')}`)
+      },
+      release(destroy?: boolean) {
+        events.push(`release:${destroy === true ? 'destroy' : 'reuse'}`)
+      },
+    }
+    const paths = [
+      {
+        collectionSlug: parseCollectionSlug('ab'),
+        fileSlug: parseFileSlug('c.html'),
+      },
+      {
+        collectionSlug: parseCollectionSlug('a'),
+        fileSlug: parseFileSlug('bc.html'),
+      },
+    ]
+
+    await expect(
+      withPagePathLocks(
+        async () => connection,
+        paths,
+        async () => {
+          events.push('transaction:rollback')
+          await Promise.resolve()
+          events.push('blob:rollback')
+          throw new Error('forced transaction failure')
+        },
+      ),
+    ).rejects.toThrow('forced transaction failure')
+
+    expect(events).toEqual([
+      'lock:a/bc.html',
+      'lock:ab/c.html',
+      'transaction:rollback',
+      'blob:rollback',
+      'unlock:ab/c.html',
+      'unlock:a/bc.html',
+      'release:reuse',
+    ])
   })
 })

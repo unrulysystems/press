@@ -8,12 +8,13 @@ import { expect, test } from '@playwright/test'
 import type { APIRequestContext, APIResponse } from '@playwright/test'
 
 import { findUserIdByEmail, mintApiTokenForUser } from '../apps/web/src/auth/apiTokens'
-import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
+import { localnetDemoPages, localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { closeDb, db } from '../apps/web/src/db/client'
 import {
   findCollection,
   findMatchingAuditEvent,
   findPage,
+  findPageRedirect,
   findTokenByUserAndName,
   installFailingAuditTrigger,
   removeFailingAuditTrigger,
@@ -67,6 +68,24 @@ async function publishMoveFixture(input: {
     },
   )
   expect(response.status(), await response.text()).toBe(200)
+}
+
+async function runLocalnetSeed(): Promise<{ readonly code: number; readonly stderr: string }> {
+  return await new Promise((resolve, reject) => {
+    const child = spawn('nub', ['run', '--filter', '@press/web', 'db:seed'], {
+      cwd: process.cwd(),
+      env: process.env,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    })
+    let stderr = ''
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk)
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      resolve({ code: code ?? 1, stderr })
+    })
+  })
 }
 
 async function expectPermanentPageRedirect(
@@ -1291,4 +1310,42 @@ test('page move rejects collisions and non-owners, reclaims archives, and rolls 
     archivedAt: null,
   })
   expect(await findPage(db, rollbackCollection, rollbackDestination)).toBeUndefined()
+})
+
+test('localnet seeding restores a moved demo page without stale redirects or blobs', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const demoPage = localnetDemoPages[0]
+  if (!demoPage) {
+    throw new Error('localnet demo page fixture missing')
+  }
+  const destinationCollection = `${runSlug}-moved-seed`
+  const destinationFile = 'moved-demo.html'
+  const pageBefore = await findPage(db, demoPage.collectionSlug, demoPage.fileSlug)
+  expect(pageBefore?.id).toBe(`demo-${demoPage.collectionSlug}-${demoPage.fileSlug}`)
+
+  const moved = await api.post(`/api/pages/${demoPage.collectionSlug}/${demoPage.fileSlug}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: destinationCollection, file: destinationFile },
+  })
+  expect(moved.status(), await moved.text()).toBe(200)
+  expect(await exists(blobPath(demoPage.collectionSlug, demoPage.fileSlug))).toBe(false)
+  expect(await exists(blobPath(destinationCollection, destinationFile))).toBe(true)
+
+  const seed = await runLocalnetSeed()
+  expect(seed.code, seed.stderr).toBe(0)
+
+  const restoredPage = await findPage(db, demoPage.collectionSlug, demoPage.fileSlug)
+  expect(restoredPage).toMatchObject({
+    id: pageBefore?.id,
+    archivedAt: null,
+  })
+  expect(await findPage(db, destinationCollection, destinationFile)).toBeUndefined()
+  expect(await exists(blobPath(demoPage.collectionSlug, demoPage.fileSlug))).toBe(true)
+  const restoredBody = await readFile(blobPath(demoPage.collectionSlug, demoPage.fileSlug), 'utf8')
+  expect(restoredBody).toContain(`<title>${demoPage.title}</title>`)
+  expect(hashBody(restoredBody)).toBe(restoredPage?.contentHash)
+  expect(await exists(blobPath(destinationCollection, destinationFile))).toBe(false)
+  expect(await findPageRedirect(db, demoPage.collectionSlug, demoPage.fileSlug)).toBeUndefined()
 })

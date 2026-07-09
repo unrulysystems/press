@@ -20,9 +20,10 @@ report bytes; the destination still enforces the original ACL.
 
 The additive migration creates `pageRedirect`, adds the `move` audit action,
 and adds structured audit details for source, destination, and redirect mode.
-The move holds source/destination advisory locks in canonical order, renames the
-blob with fsync, and restores it if the database or audit transaction fails.
-Publishing cannot shadow an active redirect source.
+The move holds source/destination session advisory locks in canonical order
+through database rollback and filesystem compensation, renames the blob with
+fsync, and restores it if the database or audit transaction fails. Publishing
+cannot shadow an active redirect source.
 
 Harness evidence on the final pre-review state:
 
@@ -55,6 +56,25 @@ inside its per-run temp directory, and cleanup removes database-external state.
 Post-fix evidence: `nub run check` passed; `nub run test` passed 206 tests with 1
 platform skip; `nub run e2e` passed 97/97; `nub run walkthrough` passed with all
 move/redirect assertions and clean teardown.
+
+Independent structured review `review-1783631324954-qjudjj` rejected commit
+`836edf8` with four valid findings. A real move→reseed localnet test observed the
+stable demo-page ID colliding at its moved path; seeding now reconciles by that
+ID, restores seed-owned canonical bytes and path, clears its aliases, and removes
+the moved blob. A new lock-envelope unit test observed the absent connection-
+scoped primitive; all blob-coupled publish/move/unpublish transactions now hold
+session locks through database failure and blob compensation. The move changeset
+now releases both `@press/cli` and its new runtime-export provider `@press/core`.
+The backup runbook now requires all application mutations, explicitly including
+move, to remain quiesced from before `pg_dump` through the blob copy.
+
+Observed-red evidence included the exact seed primary-key violation, the missing
+lock-envelope export, and fail-closed package/runbook probes. Post-fix evidence:
+`nub run check` passed; `nub run test` passed 207 tests with 1 platform skip;
+`nub run e2e` passed 98/98 including moved-demo reseeding; `nub run walkthrough`
+passed; `nub run drill:backup-restore` printed `PASS backup/restore drill` with
+matching content/blob hashes and the ACL probe pair; `nub run changeset -- status`
+listed `@press/cli` and `@press/core` for minor bumps.
 
 No production data, push, package/image publication, or deploy occurred.
 

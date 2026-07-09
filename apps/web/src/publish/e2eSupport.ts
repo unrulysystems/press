@@ -1,6 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm'
 
-import { apiToken, auditEvent, collection, page } from '../db/schema'
+import { apiToken, auditEvent, collection, page, pageRedirect } from '../db/schema'
 
 import type { db as dbClient } from '../db/client'
 
@@ -34,6 +34,15 @@ export async function findCollection(db: PressDb, collectionSlug: string) {
 export async function findPage(db: PressDb, collectionSlug: string, fileSlug: string) {
   return db.query.page.findFirst({
     where: and(eq(page.collectionSlug, collectionSlug), eq(page.fileSlug, fileSlug)),
+  })
+}
+
+export async function findPageRedirect(db: PressDb, collectionSlug: string, fileSlug: string) {
+  return db.query.pageRedirect.findFirst({
+    where: and(
+      eq(pageRedirect.sourceCollectionSlug, collectionSlug),
+      eq(pageRedirect.sourceFileSlug, fileSlug),
+    ),
   })
 }
 
