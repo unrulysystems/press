@@ -4,12 +4,13 @@ import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { expect, test } from '@playwright/test'
+import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
 import type { APIRequestContext, APIResponse } from '@playwright/test'
 
 import { findUserIdByEmail, mintApiTokenForUser } from '../apps/web/src/auth/apiTokens'
 import { localnetDemoPages, localnetUsers } from '../apps/web/src/auth/localnetFixtures'
-import { closeDb, db } from '../apps/web/src/db/client'
+import { closeDb, db, pool } from '../apps/web/src/db/client'
 import {
   findCollection,
   findMatchingAuditEvent,
@@ -19,6 +20,7 @@ import {
   installFailingAuditTrigger,
   removeFailingAuditTrigger,
 } from '../apps/web/src/publish/e2eSupport'
+import { moveBlob } from '../apps/web/src/publish/storage'
 import { newE2EAPIContext } from './api'
 
 const runSlug = `pub-${Date.now().toString(36)}`
@@ -68,6 +70,154 @@ async function publishMoveFixture(input: {
     },
   )
   expect(response.status(), await response.text()).toBe(200)
+}
+
+async function raceMutationBehindCommittedPathMove(input: {
+  readonly collectionSlug: string
+  readonly sourceFile: string
+  readonly destinationFile: string
+  readonly mutate: () => Promise<APIResponse>
+}): Promise<APIResponse> {
+  const collectionSlug = parseCollectionSlug(input.collectionSlug)
+  const sourceFile = parseFileSlug(input.sourceFile)
+  const destinationFile = parseFileSlug(input.destinationFile)
+  const connection = await pool.connect()
+  let blobMove: Awaited<ReturnType<typeof moveBlob>> | undefined
+  let mutationPromise: Promise<APIResponse> | undefined
+  let pathLocked = false
+  let transactionOpen = false
+  let transactionCommitted = false
+
+  try {
+    const backend = await connection.query('select pg_backend_pid() as pid')
+    const moverPid = Number(backend.rows[0]?.pid)
+    if (!Number.isInteger(moverPid)) {
+      throw new Error('move-race fixture could not resolve its PostgreSQL backend pid')
+    }
+
+    await connection.query('select pg_advisory_lock(hashtext($1), hashtext($2))', [
+      collectionSlug,
+      sourceFile,
+    ])
+    pathLocked = true
+    await connection.query('begin')
+    transactionOpen = true
+
+    // Model the committed part of a move while retaining the source-path lock.
+    // The competing request can still see the old MVCC row before it waits,
+    // which is the precise stale-read window this regression guards.
+    blobMove = await moveBlob(
+      storageDir(),
+      collectionSlug,
+      sourceFile,
+      collectionSlug,
+      destinationFile,
+    )
+    const updated = await connection.query(
+      'update "page" set "fileSlug" = $1, "updatedAt" = now() where "collectionSlug" = $2 and "fileSlug" = $3',
+      [destinationFile, collectionSlug, sourceFile],
+    )
+    expect(updated.rowCount, 'move-race fixture should move exactly one page row').toBe(1)
+
+    mutationPromise = input.mutate()
+    await expect
+      .poll(
+        async () => {
+          const waiting = await pool.query(
+            'select count(*)::int as "waiterCount" from pg_stat_activity where $1::int = any(pg_blocking_pids(pid))',
+            [moverPid],
+          )
+          return Number(waiting.rows[0]?.waiterCount ?? 0)
+        },
+        {
+          message: 'source mutation should wait behind the move path lock',
+          timeout: 10_000,
+        },
+      )
+      .toBeGreaterThan(0)
+
+    await connection.query('commit')
+    transactionOpen = false
+    transactionCommitted = true
+    await blobMove.commit()
+    await connection.query('select pg_advisory_unlock(hashtext($1), hashtext($2))', [
+      collectionSlug,
+      sourceFile,
+    ])
+    pathLocked = false
+
+    return await mutationPromise
+  } catch (error) {
+    if (transactionOpen) {
+      await connection.query('rollback')
+      transactionOpen = false
+    }
+    if (blobMove && !transactionCommitted) {
+      await blobMove.rollback()
+    }
+    throw error
+  } finally {
+    if (pathLocked) {
+      await connection.query('select pg_advisory_unlock(hashtext($1), hashtext($2))', [
+        collectionSlug,
+        sourceFile,
+      ])
+    }
+    connection.release()
+    if (!transactionCommitted && mutationPromise) {
+      await mutationPromise.catch(() => undefined)
+    }
+  }
+}
+
+async function expectMovedSourceMutationNotFound(input: {
+  readonly api: APIRequestContext
+  readonly token: string
+  readonly collectionSlug: string
+  readonly sourceFile: string
+  readonly destinationFile: string
+  readonly title: string
+  readonly auditAction: 'unpublish' | 'visibility-change' | 'password-reroll'
+  readonly mutate: () => Promise<APIResponse>
+}): Promise<void> {
+  const body = `<!doctype html><title>${input.title}</title><p>stable race bytes</p>`
+  await publishMoveFixture({
+    api: input.api,
+    token: input.token,
+    collectionSlug: input.collectionSlug,
+    fileSlug: input.sourceFile,
+    body,
+    query: '?visibility=public',
+  })
+  const sourceBefore = await findPage(db, input.collectionSlug, input.sourceFile)
+
+  const response = await raceMutationBehindCommittedPathMove({
+    collectionSlug: input.collectionSlug,
+    sourceFile: input.sourceFile,
+    destinationFile: input.destinationFile,
+    mutate: input.mutate,
+  })
+  const responseText = await response.text()
+  expect(response.status(), `${input.auditAction}: ${responseText}`).toBe(404)
+  expect(JSON.parse(responseText)).toEqual({ error: 'page not found' })
+
+  expect(await findPage(db, input.collectionSlug, input.sourceFile)).toBeUndefined()
+  expect(await findPage(db, input.collectionSlug, input.destinationFile)).toMatchObject({
+    id: sourceBefore?.id,
+    title: input.title,
+    archivedAt: null,
+    passwordHash: null,
+  })
+  expect(await exists(blobPath(input.collectionSlug, input.sourceFile))).toBe(false)
+  expect(await readFile(blobPath(input.collectionSlug, input.destinationFile), 'utf8')).toBe(body)
+  expect(
+    await findMatchingAuditEvent(db, {
+      collectionSlug: input.collectionSlug,
+      fileSlug: input.sourceFile,
+      action: input.auditAction,
+      userId: actors.owner.id,
+    }),
+  ).toBeUndefined()
 }
 
 async function runLocalnetSeed(): Promise<{ readonly code: number; readonly stderr: string }> {
@@ -1133,6 +1283,56 @@ test('page move preserves identity and ACL while permanent redirects track the c
   expect(unpublished.status()).toBe(200)
   expect((await api.get(`/p/${sourceCollection}/${sourceFile}`)).status()).toBe(404)
   expect((await api.get(`/p/${destinationCollection}/${destinationFile}`)).status()).toBe(404)
+})
+
+test('page mutations re-read their source after a concurrent move wins the path lock', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-move-mutation-race`
+
+  await expectMovedSourceMutationNotFound({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    sourceFile: 'patch-source.html',
+    destinationFile: 'patch-destination.html',
+    title: 'Patch Race',
+    auditAction: 'visibility-change',
+    mutate: async () =>
+      await api.patch(`/api/pages/${collectionSlug}/patch-source.html`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+        data: { title: 'Must Not Apply' },
+      }),
+  })
+
+  await expectMovedSourceMutationNotFound({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    sourceFile: 'password-source.html',
+    destinationFile: 'password-destination.html',
+    title: 'Password Race',
+    auditAction: 'password-reroll',
+    mutate: async () =>
+      await api.post(`/api/pages/${collectionSlug}/password-source.html/password`, {
+        headers: authHeaders(actors.owner.token),
+      }),
+  })
+
+  await expectMovedSourceMutationNotFound({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    sourceFile: 'delete-source.html',
+    destinationFile: 'delete-destination.html',
+    title: 'Delete Race',
+    auditAction: 'unpublish',
+    mutate: async () =>
+      await api.delete(`/api/pages/${collectionSlug}/delete-source.html`, {
+        headers: authHeaders(actors.owner.token),
+      }),
+  })
 })
 
 test('page move rejects collisions and non-owners, reclaims archives, and rolls storage back', async ({
