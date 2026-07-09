@@ -3,8 +3,10 @@ import {
   boolean,
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
+  primaryKey,
   text,
   timestamp,
   uniqueIndex,
@@ -24,7 +26,22 @@ export const auditAction = pgEnum('audit_action', [
   'visibility-change',
   'password-reroll',
   'token-revoke',
+  'move',
 ])
+export const pageRedirectKind = pgEnum('page_redirect_kind', ['permanent'])
+
+export type MoveAuditDetails = {
+  readonly kind: 'move'
+  readonly source: {
+    readonly collection: string
+    readonly file: string
+  }
+  readonly destination: {
+    readonly collection: string
+    readonly file: string
+  }
+  readonly redirect: 'permanent' | 'none'
+}
 
 export const user = pgTable('user', {
   id: text('id').primaryKey(),
@@ -153,6 +170,31 @@ export const page = pgTable(
   ],
 )
 
+export const pageRedirect = pgTable(
+  'pageRedirect',
+  {
+    sourceCollectionSlug: text('sourceCollectionSlug')
+      .notNull()
+      .references(() => collection.slug, { onDelete: 'restrict' }),
+    sourceFileSlug: text('sourceFileSlug').notNull(),
+    targetPageId: text('targetPageId')
+      .notNull()
+      .references(() => page.id, { onDelete: 'cascade' }),
+    kind: pageRedirectKind('kind').notNull().default('permanent'),
+    createdBy: text('createdBy')
+      .notNull()
+      .references(() => user.id, { onDelete: 'restrict' }),
+    createdAt: timestamp('createdAt', { mode: 'date' }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({
+      name: 'page_redirect_source_pk',
+      columns: [table.sourceCollectionSlug, table.sourceFileSlug],
+    }),
+    index('page_redirect_target_page_id_idx').on(table.targetPageId),
+  ],
+)
+
 export const auditEvent = pgTable(
   'auditEvent',
   {
@@ -166,6 +208,7 @@ export const auditEvent = pgTable(
     }),
     fileSlug: text('fileSlug'),
     contentHash: text('contentHash'),
+    details: jsonb('details').$type<MoveAuditDetails>(),
     createdAt: timestamp('createdAt', { mode: 'date' }).notNull().defaultNow(),
   },
   (table) => [
@@ -181,6 +224,7 @@ export const schema = {
   auditEvent,
   collection,
   page,
+  pageRedirect,
   session,
   user,
   verification,

@@ -52,6 +52,15 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+async function fsyncMoveDirectories(sourcePath: string, destinationPath: string): Promise<void> {
+  const sourceDirectory = dirname(sourcePath)
+  const destinationDirectory = dirname(destinationPath)
+  await fsyncDir(sourceDirectory)
+  if (destinationDirectory !== sourceDirectory) {
+    await fsyncDir(destinationDirectory)
+  }
+}
+
 export function pageBlobPath(
   storageDir: string,
   collectionSlug: CollectionSlug,
@@ -142,6 +151,57 @@ export async function archiveBlob(
         await fsyncFile(sourcePath)
         await fsyncDir(dirname(sourcePath))
       }
+    },
+  }
+}
+
+export async function moveBlob(
+  storageDir: string,
+  sourceCollectionSlug: CollectionSlug,
+  sourceFileSlug: FileSlug,
+  destinationCollectionSlug: CollectionSlug,
+  destinationFileSlug: FileSlug,
+): Promise<BlobInstall> {
+  const sourcePath = blobPath(storageDir, sourceCollectionSlug, sourceFileSlug)
+  const destinationPath = blobPath(storageDir, destinationCollectionSlug, destinationFileSlug)
+  if (await exists(destinationPath)) {
+    throw new Error(
+      `destination blob already exists for ${destinationCollectionSlug}/${destinationFileSlug}`,
+    )
+  }
+
+  await mkdir(dirname(destinationPath), { recursive: true })
+  let moved = false
+  try {
+    await rename(sourcePath, destinationPath)
+    moved = true
+    await fsyncFile(destinationPath)
+    await fsyncMoveDirectories(sourcePath, destinationPath)
+  } catch (error) {
+    if (moved && (await exists(destinationPath))) {
+      await rename(destinationPath, sourcePath)
+      await fsyncFile(sourcePath)
+      await fsyncMoveDirectories(destinationPath, sourcePath)
+    }
+    throw error
+  }
+
+  return {
+    async commit() {},
+    async rollback() {
+      if (!(await exists(destinationPath))) {
+        throw new Error(
+          `cannot roll back missing destination blob ${destinationCollectionSlug}/${destinationFileSlug}`,
+        )
+      }
+      if (await exists(sourcePath)) {
+        throw new Error(
+          `cannot roll back over existing source blob ${sourceCollectionSlug}/${sourceFileSlug}`,
+        )
+      }
+      await rename(destinationPath, sourcePath)
+      await fsyncFile(sourcePath)
+      await fsyncMoveDirectories(destinationPath, sourcePath)
     },
   }
 }

@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 import {
   COLLECTION_DEFAULT_VISIBILITIES,
+  PAGE_REDIRECT_MODES,
   PAGE_VISIBILITIES,
   SlugValidationError,
   decideAcl,
@@ -12,13 +13,13 @@ import { and, eq, isNull, sql } from 'drizzle-orm'
 
 import { verifyApiToken } from '../auth/apiTokens'
 import { db, dbConfig } from '../db/client'
-import { auditEvent, collection, page } from '../db/schema'
+import { auditEvent, collection, page, pageRedirect } from '../db/schema'
 import { MIN_PAGE_PASSWORD_LENGTH, hashPagePassword, isStrongPagePassword } from './passwords'
-import { publishResponseBody } from './responseShape'
+import { moveResponseBody, publishResponseBody } from './responseShape'
 import { extractTitle } from './title'
-import { archiveBlob, installBlob, removeTempBlob, writeTempBlob } from './storage'
+import { archiveBlob, installBlob, moveBlob, removeTempBlob, writeTempBlob } from './storage'
 
-import type { PublishResponseBody } from './responseShape'
+import type { MoveResponseBody, PublishResponseBody } from './responseShape'
 
 import type {
   AclOperation,
@@ -26,6 +27,7 @@ import type {
   CollectionDefaultVisibility,
   CollectionSlug,
   FileSlug,
+  PageRedirectMode,
   PageVisibility,
 } from '@press/core'
 import type { InferSelectModel } from 'drizzle-orm'
@@ -46,7 +48,7 @@ class HttpError extends Error {
 type PageRoute = {
   readonly collectionSlug: CollectionSlug
   readonly fileSlug: FileSlug
-  readonly suffix?: 'password'
+  readonly suffix?: 'move' | 'password'
 }
 
 function json(body: unknown, status = 200): Response {
@@ -80,14 +82,17 @@ function parsePagePath(request: Request): PageRoute {
   const path = new URL(request.url).pathname
   const raw = path.slice('/api/pages/'.length)
   const segments = raw.split('/').map((segment) => decodeURIComponent(segment))
-  if (segments.length !== 2 && !(segments.length === 3 && segments[2] === 'password')) {
+  const suffix = segments[2]
+  if (
+    segments.length !== 2 &&
+    !(segments.length === 3 && (suffix === 'move' || suffix === 'password'))
+  ) {
     throw new HttpError(404, 'page endpoint not found')
   }
-  const suffix = segments[2] === 'password' ? 'password' : undefined
   return {
     collectionSlug: parseCollectionSlug(segments[0] ?? ''),
     fileSlug: parseFileSlug(segments[1] ?? ''),
-    ...(suffix ? { suffix } : {}),
+    ...(suffix === 'move' || suffix === 'password' ? { suffix } : {}),
   }
 }
 
@@ -178,6 +183,14 @@ function parseOptionalString(value: unknown, field: string): string | undefined 
     throw new HttpError(400, `${field} must not be empty`)
   }
   return trimmed
+}
+
+function parseMoveRedirectMode(value: unknown): PageRedirectMode {
+  const mode = value === undefined ? 'permanent' : value
+  if (typeof mode === 'string' && (PAGE_REDIRECT_MODES as readonly string[]).includes(mode)) {
+    return mode as PageRedirectMode
+  }
+  throw new HttpError(400, `redirect must be one of ${PAGE_REDIRECT_MODES.join(', ')}`)
 }
 
 function parseAllowlist(value: string | null): string[] | undefined {
@@ -373,6 +386,12 @@ export async function pagesEndpoint(request: Request): Promise<Response> {
       }
       return await rerollPassword(request, route)
     }
+    if (route.suffix === 'move') {
+      if (request.method !== 'POST') {
+        return json({ error: 'method not allowed' }, 405)
+      }
+      return await movePage(request, route)
+    }
     switch (request.method) {
       case 'PUT':
         return await publishPage(request, route)
@@ -419,6 +438,15 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
   const existingPage = await db.query.page.findFirst({
     where: and(eq(page.collectionSlug, route.collectionSlug), eq(page.fileSlug, route.fileSlug)),
   })
+  const existingRedirect = await db.query.pageRedirect.findFirst({
+    where: and(
+      eq(pageRedirect.sourceCollectionSlug, route.collectionSlug),
+      eq(pageRedirect.sourceFileSlug, route.fileSlug),
+    ),
+  })
+  if (existingRedirect) {
+    throw new HttpError(409, 'page path is reserved by a redirect')
+  }
 
   assertMutationAllowed({
     user: viewer,
@@ -488,6 +516,15 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
           eq(page.fileSlug, route.fileSlug),
         ),
       })
+      const txRedirect = await tx.query.pageRedirect.findFirst({
+        where: and(
+          eq(pageRedirect.sourceCollectionSlug, route.collectionSlug),
+          eq(pageRedirect.sourceFileSlug, route.fileSlug),
+        ),
+      })
+      if (txRedirect) {
+        throw new HttpError(409, 'page path is reserved by a redirect')
+      }
       const action = txPage && !txPage.archivedAt ? 'overwrite' : 'publish'
       assertMutationAllowed({
         user: viewer,
@@ -593,6 +630,291 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
     }
     if (!tempInstalled) {
       await removeTempBlob(tempPath)
+    }
+    throw error
+  }
+}
+
+type MoveDestination = {
+  readonly collectionSlug: CollectionSlug
+  readonly fileSlug: FileSlug
+  readonly redirect: PageRedirectMode
+}
+
+async function readMoveDestination(request: Request): Promise<MoveDestination> {
+  const body = await request.json().catch(() => {
+    throw new HttpError(400, 'request body must be JSON')
+  })
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'request body must be a JSON object')
+  }
+  const input = body as Record<string, unknown>
+  if (typeof input.collection !== 'string' || typeof input.file !== 'string') {
+    throw new HttpError(400, 'collection and file must be strings')
+  }
+  return {
+    collectionSlug: parseCollectionSlug(input.collection),
+    fileSlug: parseFileSlug(input.file),
+    redirect: parseMoveRedirectMode(input.redirect),
+  }
+}
+
+function samePagePath(source: PageRoute, destination: MoveDestination): boolean {
+  return (
+    source.collectionSlug === destination.collectionSlug && source.fileSlug === destination.fileSlug
+  )
+}
+
+function mutationPageAt(
+  row: Pick<PageRow, 'visibility' | 'passwordHash' | 'allowlist'>,
+  collectionSlug: CollectionSlug,
+  fileSlug: FileSlug,
+): Pick<PageRow, 'collectionSlug' | 'fileSlug' | 'visibility' | 'passwordHash' | 'allowlist'> {
+  return {
+    collectionSlug,
+    fileSlug,
+    visibility: row.visibility,
+    passwordHash: row.passwordHash,
+    allowlist: row.allowlist,
+  }
+}
+
+async function movePage(request: Request, route: PageRoute): Promise<Response> {
+  const { viewer } = await authenticatedViewer(request)
+  const destination = await readMoveDestination(request)
+  if (samePagePath(route, destination)) {
+    throw new HttpError(400, 'destination must differ from source')
+  }
+
+  const existingCollection = await db.query.collection.findFirst({
+    where: eq(collection.slug, route.collectionSlug),
+  })
+  const existingPage = await db.query.page.findFirst({
+    where: and(
+      eq(page.collectionSlug, route.collectionSlug),
+      eq(page.fileSlug, route.fileSlug),
+      isNull(page.archivedAt),
+    ),
+  })
+  if (!existingCollection || !existingPage) {
+    throw new HttpError(404, 'page not found')
+  }
+  assertMutationAllowed({
+    user: viewer,
+    collection: existingCollection,
+    page: existingPage,
+    operation: { kind: 'move' },
+  })
+
+  const existingDestinationCollection = await db.query.collection.findFirst({
+    where: eq(collection.slug, destination.collectionSlug),
+  })
+  assertMutationAllowed({
+    user: viewer,
+    collection:
+      existingDestinationCollection ??
+      ({
+        slug: destination.collectionSlug,
+        ownerId: viewer.userId,
+        defaultVisibility: 'default',
+      } satisfies Pick<CollectionRow, 'slug' | 'ownerId' | 'defaultVisibility'>),
+    page: mutationPageAt(existingPage, destination.collectionSlug, destination.fileSlug),
+    operation: { kind: 'move' },
+  })
+
+  let rollbackBlob: (() => Promise<void>) | undefined
+  try {
+    const result = await db.transaction(async (tx): Promise<MoveResponseBody> => {
+      const lockedPaths = [
+        { collectionSlug: route.collectionSlug, fileSlug: route.fileSlug },
+        {
+          collectionSlug: destination.collectionSlug,
+          fileSlug: destination.fileSlug,
+        },
+      ]
+      // oxlint-disable-next-line unicorn/no-array-sort -- ES2022 target lacks Array#toSorted; this is a new local array.
+      lockedPaths.sort((left, right) =>
+        `${left.collectionSlug}\0${left.fileSlug}`.localeCompare(
+          `${right.collectionSlug}\0${right.fileSlug}`,
+        ),
+      )
+      for (const path of lockedPaths) {
+        // Lock in canonical order so concurrent inverse moves cannot deadlock.
+        // oxlint-disable-next-line no-await-in-loop
+        await tx.execute(
+          sql`select pg_advisory_xact_lock(hashtext(${path.collectionSlug}), hashtext(${path.fileSlug}))`,
+        )
+      }
+
+      const txSourceCollection = await tx.query.collection.findFirst({
+        where: eq(collection.slug, route.collectionSlug),
+      })
+      const txSourcePage = await tx.query.page.findFirst({
+        where: and(
+          eq(page.collectionSlug, route.collectionSlug),
+          eq(page.fileSlug, route.fileSlug),
+          isNull(page.archivedAt),
+        ),
+      })
+      if (!txSourceCollection || !txSourcePage) {
+        throw new HttpError(404, 'page not found')
+      }
+      assertMutationAllowed({
+        user: viewer,
+        collection: txSourceCollection,
+        page: txSourcePage,
+        operation: { kind: 'move' },
+      })
+
+      let txDestinationCollection = await tx.query.collection.findFirst({
+        where: eq(collection.slug, destination.collectionSlug),
+      })
+      if (!txDestinationCollection) {
+        await tx
+          .insert(collection)
+          .values({ slug: destination.collectionSlug, ownerId: viewer.userId })
+          .onConflictDoNothing({ target: collection.slug })
+        txDestinationCollection = await tx.query.collection.findFirst({
+          where: eq(collection.slug, destination.collectionSlug),
+        })
+      }
+      if (!txDestinationCollection) {
+        throw new HttpError(500, 'destination collection write failed')
+      }
+      assertMutationAllowed({
+        user: viewer,
+        collection: txDestinationCollection,
+        page: mutationPageAt(txSourcePage, destination.collectionSlug, destination.fileSlug),
+        operation: { kind: 'move' },
+      })
+
+      const destinationPage = await tx.query.page.findFirst({
+        where: and(
+          eq(page.collectionSlug, destination.collectionSlug),
+          eq(page.fileSlug, destination.fileSlug),
+        ),
+      })
+      if (destinationPage && !destinationPage.archivedAt) {
+        throw new HttpError(409, 'destination page already exists')
+      }
+
+      const sourceRedirect = await tx.query.pageRedirect.findFirst({
+        where: and(
+          eq(pageRedirect.sourceCollectionSlug, route.collectionSlug),
+          eq(pageRedirect.sourceFileSlug, route.fileSlug),
+        ),
+      })
+      if (sourceRedirect && sourceRedirect.targetPageId !== txSourcePage.id) {
+        throw new HttpError(409, 'source path conflicts with another page redirect')
+      }
+      const destinationRedirect = await tx.query.pageRedirect.findFirst({
+        where: and(
+          eq(pageRedirect.sourceCollectionSlug, destination.collectionSlug),
+          eq(pageRedirect.sourceFileSlug, destination.fileSlug),
+        ),
+      })
+      if (destinationRedirect && destinationRedirect.targetPageId !== txSourcePage.id) {
+        throw new HttpError(409, 'destination path is reserved by another page redirect')
+      }
+
+      const blob = await moveBlob(
+        dbConfig.storageDir,
+        route.collectionSlug,
+        route.fileSlug,
+        destination.collectionSlug,
+        destination.fileSlug,
+      )
+      rollbackBlob = blob.rollback
+
+      if (sourceRedirect) {
+        await tx
+          .delete(pageRedirect)
+          .where(
+            and(
+              eq(pageRedirect.sourceCollectionSlug, route.collectionSlug),
+              eq(pageRedirect.sourceFileSlug, route.fileSlug),
+            ),
+          )
+      }
+      if (destinationRedirect) {
+        // Moving back to the page's own alias reclaims that canonical path.
+        await tx
+          .delete(pageRedirect)
+          .where(
+            and(
+              eq(pageRedirect.sourceCollectionSlug, destination.collectionSlug),
+              eq(pageRedirect.sourceFileSlug, destination.fileSlug),
+            ),
+          )
+      }
+      if (destinationPage) {
+        // Republish already reclaims archived paths. A move does the same while
+        // retaining the moving page's stable identity and prior aliases.
+        await tx.delete(page).where(eq(page.id, destinationPage.id))
+      }
+
+      const effectiveVisibility = resolvedVisibility(
+        txSourcePage.visibility,
+        collectionAcl(txSourceCollection).defaultVisibility,
+      )
+      const storedVisibility =
+        route.collectionSlug === destination.collectionSlug
+          ? txSourcePage.visibility
+          : effectiveVisibility
+      await tx
+        .update(page)
+        .set({
+          collectionSlug: destination.collectionSlug,
+          fileSlug: destination.fileSlug,
+          visibility: storedVisibility,
+          updatedAt: new Date(),
+        })
+        .where(eq(page.id, txSourcePage.id))
+
+      if (destination.redirect === 'permanent') {
+        await tx.insert(pageRedirect).values({
+          sourceCollectionSlug: route.collectionSlug,
+          sourceFileSlug: route.fileSlug,
+          targetPageId: txSourcePage.id,
+          kind: 'permanent',
+          createdBy: viewer.userId,
+        })
+      }
+
+      await tx.insert(auditEvent).values({
+        id: randomUUID(),
+        userId: viewer.userId,
+        action: 'move',
+        collectionSlug: route.collectionSlug,
+        fileSlug: route.fileSlug,
+        contentHash: txSourcePage.contentHash,
+        details: {
+          kind: 'move',
+          source: { collection: route.collectionSlug, file: route.fileSlug },
+          destination: {
+            collection: destination.collectionSlug,
+            file: destination.fileSlug,
+          },
+          redirect: destination.redirect,
+        },
+      })
+
+      return moveResponseBody({
+        baseUrl: dbConfig.baseUrl,
+        sourceCollectionSlug: route.collectionSlug,
+        sourceFileSlug: route.fileSlug,
+        destinationCollectionSlug: destination.collectionSlug,
+        destinationFileSlug: destination.fileSlug,
+        redirect: destination.redirect,
+        title: txSourcePage.title,
+        visibility: effectiveVisibility,
+      })
+    })
+    rollbackBlob = undefined
+    return json(result)
+  } catch (error) {
+    if (rollbackBlob) {
+      await rollbackBlob()
     }
     throw error
   }

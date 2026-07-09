@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
-import { publishResponseBody } from './responseShape'
+import { moveResponseBody, publishResponseBody } from './responseShape'
 
 import type { PageVisibility } from '@press/core'
 
@@ -46,5 +46,36 @@ describe('publishResponseBody', () => {
       password: 'one-time-secret',
     })
     expect(result.allow).toBeUndefined()
+  })
+})
+
+describe('moveResponseBody', () => {
+  test('returns both canonical paths, URLs, redirect mode, title, and visibility', () => {
+    expect(
+      moveResponseBody({
+        baseUrl: 'https://press.test',
+        sourceCollectionSlug: parseCollectionSlug('reports'),
+        sourceFileSlug: parseFileSlug('old.html'),
+        destinationCollectionSlug: parseCollectionSlug('archive'),
+        destinationFileSlug: parseFileSlug('new.html'),
+        redirect: 'permanent',
+        title: 'Moved report',
+        visibility: 'private',
+      }),
+    ).toEqual({
+      source: {
+        url: 'https://press.test/p/reports/old.html',
+        collection: 'reports',
+        file: 'old.html',
+      },
+      destination: {
+        url: 'https://press.test/p/archive/new.html',
+        collection: 'archive',
+        file: 'new.html',
+      },
+      redirect: 'permanent',
+      title: 'Moved report',
+      visibility: 'private',
+    })
   })
 })

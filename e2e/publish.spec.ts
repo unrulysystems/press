@@ -51,6 +51,38 @@ function hashBody(body: string): string {
   return createHash('sha256').update(new TextEncoder().encode(body)).digest('hex')
 }
 
+async function publishMoveFixture(input: {
+  readonly api: APIRequestContext
+  readonly token: string
+  readonly collectionSlug: string
+  readonly fileSlug: string
+  readonly body: string
+  readonly query?: string
+}): Promise<void> {
+  const response = await input.api.put(
+    `/api/pages/${input.collectionSlug}/${input.fileSlug}${input.query ?? ''}`,
+    {
+      headers: authHeaders(input.token, { 'content-type': 'text/html' }),
+      data: input.body,
+    },
+  )
+  expect(response.status(), await response.text()).toBe(200)
+}
+
+async function expectPermanentPageRedirect(
+  api: APIRequestContext,
+  sourcePath: string,
+  destinationPath: string,
+): Promise<void> {
+  const response = await api.get(sourcePath, { maxRedirects: 0 })
+  expect(response.status()).toBe(308)
+  expect(response.headers().location).toBe(destinationPath)
+  for (const [name, value] of Object.entries(servedPageHeaders)) {
+    expect(response.headers()[name], `${name} redirect header`).toBe(value)
+  }
+  expect(await response.text()).toBe('')
+}
+
 function blobPath(collectionSlug: string, fileSlug: string): string {
   return join(storageDir(), collectionSlug, fileSlug)
 }
@@ -936,4 +968,327 @@ test('password gate: branded HTML entry, form+cookie unlock, Basic for programma
   await page.fill('input[name="password"]', secret)
   await page.click('button[type="submit"]')
   await expect(page.locator('body')).toContainText(bodyMarker)
+})
+
+test('page move preserves identity and ACL while permanent redirects track the canonical path', async ({
+  baseURL,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const api = await newE2EAPIContext({ baseURL })
+  const external = await signIn(baseURL, 'external')
+  const sourceCollection = `${runSlug}-move-source`
+  const destinationCollection = `${runSlug}-move-destination`
+  const finalCollection = `${runSlug}-move-final`
+  const sourceFile = 'old.html'
+  const destinationFile = 'new.html'
+  const finalFile = 'final.html'
+  const body = '<!doctype html><title>Move Contract</title><main>stable move bytes</main>'
+  const bodyHash = hashBody(body)
+
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug: sourceCollection,
+    fileSlug: sourceFile,
+    body,
+    query: `?allow=${encodeURIComponent(localnetUsers.external.email)}`,
+  })
+  const collectionPatch = await api.patch(`/api/collections/${sourceCollection}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { defaultVisibility: 'private' },
+  })
+  expect(collectionPatch.status()).toBe(200)
+
+  const sourceBefore = await findPage(db, sourceCollection, sourceFile)
+  expect(sourceBefore?.visibility).toBeNull()
+  const sourcePublishedAt = sourceBefore?.publishedAt.toISOString()
+
+  const moved = await api.post(`/api/pages/${sourceCollection}/${sourceFile}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: destinationCollection, file: destinationFile },
+  })
+  expect(moved.status()).toBe(200)
+  expect(await moved.json()).toEqual({
+    source: {
+      url: `${baseURL}/p/${sourceCollection}/${sourceFile}`,
+      collection: sourceCollection,
+      file: sourceFile,
+    },
+    destination: {
+      url: `${baseURL}/p/${destinationCollection}/${destinationFile}`,
+      collection: destinationCollection,
+      file: destinationFile,
+    },
+    redirect: 'permanent',
+    title: 'Move Contract',
+    visibility: 'private',
+  })
+  const moveAudit = await findMatchingAuditEvent(db, {
+    collectionSlug: sourceCollection,
+    fileSlug: sourceFile,
+    action: 'move',
+    userId: actors.owner.id,
+    contentHash: bodyHash,
+  })
+  expect(moveAudit?.details).toEqual({
+    kind: 'move',
+    source: { collection: sourceCollection, file: sourceFile },
+    destination: { collection: destinationCollection, file: destinationFile },
+    redirect: 'permanent',
+  })
+
+  const destination = await findPage(db, destinationCollection, destinationFile)
+  expect(destination).toMatchObject({
+    id: sourceBefore?.id,
+    visibility: 'private',
+    contentHash: bodyHash,
+    allowlist: [localnetUsers.external.email],
+  })
+  expect(destination?.publishedAt.toISOString()).toBe(sourcePublishedAt)
+  expect(await exists(blobPath(sourceCollection, sourceFile))).toBe(false)
+  expect(await readFile(blobPath(destinationCollection, destinationFile), 'utf8')).toBe(body)
+  await expectPermanentPageRedirect(
+    api,
+    `/p/${sourceCollection}/${sourceFile}`,
+    `/p/${destinationCollection}/${destinationFile}`,
+  )
+  expect(
+    await expectServedOk(
+      await external.get(`/p/${destinationCollection}/${destinationFile}`, {
+        headers: { accept: 'text/html' },
+      }),
+    ),
+  ).toBe(body)
+
+  const sourceList = await api.get(`/api/collections/${sourceCollection}/pages`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect((await sourceList.json()).pages).toEqual([])
+  const destinationList = await api.get(`/api/collections/${destinationCollection}/pages`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(await destinationList.json()).toMatchObject({
+    pages: [expect.objectContaining({ collection: destinationCollection, file: destinationFile })],
+  })
+
+  const movedAgain = await api.post(`/api/pages/${destinationCollection}/${destinationFile}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: finalCollection, file: finalFile, redirect: 'permanent' },
+  })
+  expect(movedAgain.status()).toBe(200)
+  await expectPermanentPageRedirect(
+    api,
+    `/p/${sourceCollection}/${sourceFile}`,
+    `/p/${finalCollection}/${finalFile}`,
+  )
+  await expectPermanentPageRedirect(
+    api,
+    `/p/${destinationCollection}/${destinationFile}`,
+    `/p/${finalCollection}/${finalFile}`,
+  )
+
+  const movedBack = await api.post(`/api/pages/${finalCollection}/${finalFile}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: sourceCollection, file: sourceFile, redirect: 'none' },
+  })
+  expect(movedBack.status()).toBe(200)
+  expect(
+    await expectServedOk(
+      await external.get(`/p/${sourceCollection}/${sourceFile}`, {
+        headers: { accept: 'text/html' },
+      }),
+    ),
+  ).toBe(body)
+  expect((await api.get(`/p/${finalCollection}/${finalFile}`)).status()).toBe(404)
+  await expectPermanentPageRedirect(
+    api,
+    `/p/${destinationCollection}/${destinationFile}`,
+    `/p/${sourceCollection}/${sourceFile}`,
+  )
+
+  const unpublished = await api.delete(`/api/pages/${sourceCollection}/${sourceFile}`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(unpublished.status()).toBe(200)
+  expect((await api.get(`/p/${sourceCollection}/${sourceFile}`)).status()).toBe(404)
+  expect((await api.get(`/p/${destinationCollection}/${destinationFile}`)).status()).toBe(404)
+})
+
+test('page move rejects collisions and non-owners, reclaims archives, and rolls storage back', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-move-guards`
+  const sourceFile = 'source.html'
+  const liveDestination = 'occupied.html'
+  const sourceBody = '<!doctype html><title>Source</title><p>source stays safe</p>'
+  const destinationBody = '<!doctype html><title>Occupied</title><p>occupied stays safe</p>'
+
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    fileSlug: sourceFile,
+    body: sourceBody,
+    query: '?visibility=public',
+  })
+
+  for (const data of [
+    { collection: '../bad', file: 'new.html' },
+    { collection: collectionSlug, file: 'bad..name.html' },
+    { collection: collectionSlug, file: 'new.html', redirect: 'temporary' },
+    { collection: collectionSlug, file: sourceFile },
+  ]) {
+    // oxlint-disable-next-line no-await-in-loop -- Each invalid request must observe unchanged source state.
+    const invalid = await api.post(`/api/pages/${collectionSlug}/${sourceFile}/move`, {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+      data,
+    })
+    expect(invalid.status()).toBe(400)
+  }
+  expect(await readFile(blobPath(collectionSlug, sourceFile), 'utf8')).toBe(sourceBody)
+
+  const otherOwnerCollection = `${runSlug}-other-owner-destination`
+  await publishMoveFixture({
+    api,
+    token: actors.secondUser.token,
+    collectionSlug: otherOwnerCollection,
+    fileSlug: 'owned.html',
+    body: '<!doctype html><title>Other owner collection</title>',
+    query: '?visibility=public',
+  })
+  const crossOwnerDestination = await api.post(`/api/pages/${collectionSlug}/${sourceFile}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: otherOwnerCollection, file: 'new.html' },
+  })
+  expect(crossOwnerDestination.status()).toBe(403)
+  expect(await readFile(blobPath(collectionSlug, sourceFile), 'utf8')).toBe(sourceBody)
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    fileSlug: liveDestination,
+    body: destinationBody,
+    query: '?visibility=public',
+  })
+
+  const liveCollision = await api.post(`/api/pages/${collectionSlug}/${sourceFile}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: collectionSlug, file: liveDestination },
+  })
+  expect(liveCollision.status()).toBe(409)
+  expect(await readFile(blobPath(collectionSlug, sourceFile), 'utf8')).toBe(sourceBody)
+  expect(await readFile(blobPath(collectionSlug, liveDestination), 'utf8')).toBe(destinationBody)
+
+  for (const actor of [actors.secondUser, actors.admin]) {
+    // oxlint-disable-next-line no-await-in-loop -- Authorization actors are asserted independently.
+    const forbidden = await api.post(`/api/pages/${collectionSlug}/${sourceFile}/move`, {
+      headers: authHeaders(actor.token, { 'content-type': 'application/json' }),
+      data: { collection: `${runSlug}-forbidden-destination`, file: 'new.html' },
+    })
+    expect(forbidden.status()).toBe(403)
+  }
+
+  const aliasSource = 'alias-source.html'
+  const aliasTarget = 'alias-target.html'
+  const challenger = 'challenger.html'
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    fileSlug: aliasSource,
+    body: '<!doctype html><title>Alias owner</title>',
+    query: '?visibility=public',
+  })
+  expect(
+    (
+      await api.post(`/api/pages/${collectionSlug}/${aliasSource}/move`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+        data: { collection: collectionSlug, file: aliasTarget },
+      })
+    ).status(),
+  ).toBe(200)
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    fileSlug: challenger,
+    body: '<!doctype html><title>Challenger</title>',
+    query: '?visibility=public',
+  })
+  const redirectCollision = await api.post(`/api/pages/${collectionSlug}/${challenger}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: collectionSlug, file: aliasSource },
+  })
+  expect(redirectCollision.status()).toBe(409)
+  expect((await api.get(`/p/${collectionSlug}/${challenger}`)).status()).toBe(200)
+  const publishOverRedirect = await api.put(`/api/pages/${collectionSlug}/${aliasSource}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Must not shadow redirect</title>',
+  })
+  expect(publishOverRedirect.status()).toBe(409)
+  await expectPermanentPageRedirect(
+    api,
+    `/p/${collectionSlug}/${aliasSource}`,
+    `/p/${collectionSlug}/${aliasTarget}`,
+  )
+
+  const archivedDestination = 'archived.html'
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug,
+    fileSlug: archivedDestination,
+    body: '<!doctype html><title>Archived destination</title>',
+    query: '?visibility=public',
+  })
+  expect(
+    (
+      await api.delete(`/api/pages/${collectionSlug}/${archivedDestination}`, {
+        headers: authHeaders(actors.owner.token),
+      })
+    ).status(),
+  ).toBe(200)
+  const sourceBeforeReclaim = await findPage(db, collectionSlug, sourceFile)
+  const reclaimed = await api.post(`/api/pages/${collectionSlug}/${sourceFile}/move`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { collection: collectionSlug, file: archivedDestination, redirect: 'none' },
+  })
+  expect(reclaimed.status()).toBe(200)
+  expect((await findPage(db, collectionSlug, archivedDestination))?.id).toBe(
+    sourceBeforeReclaim?.id,
+  )
+  expect((await api.get(`/p/${collectionSlug}/${sourceFile}`)).status()).toBe(404)
+
+  const rollbackCollection = `${runSlug}-move-rollback`
+  const rollbackSource = 'rollback-source.html'
+  const rollbackDestination = 'rollback-destination.html'
+  const rollbackBody = '<!doctype html><title>Rollback</title><p>must survive</p>'
+  await publishMoveFixture({
+    api,
+    token: actors.owner.token,
+    collectionSlug: rollbackCollection,
+    fileSlug: rollbackSource,
+    body: rollbackBody,
+    query: '?visibility=public',
+  })
+  const trigger = await installFailingAuditTrigger(db, rollbackCollection)
+  try {
+    const failed = await api.post(`/api/pages/${rollbackCollection}/${rollbackSource}/move`, {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+      data: { collection: rollbackCollection, file: rollbackDestination },
+    })
+    expect(failed.status()).toBe(500)
+  } finally {
+    await removeFailingAuditTrigger(db, trigger)
+  }
+  expect(await readFile(blobPath(rollbackCollection, rollbackSource), 'utf8')).toBe(rollbackBody)
+  expect(await exists(blobPath(rollbackCollection, rollbackDestination))).toBe(false)
+  expect(await findPage(db, rollbackCollection, rollbackSource)).toMatchObject({
+    contentHash: hashBody(rollbackBody),
+    archivedAt: null,
+  })
+  expect(await findPage(db, rollbackCollection, rollbackDestination)).toBeUndefined()
 })

@@ -1,5 +1,45 @@
 # press — DELTA
 
+## 2026-07-09 — first-class page moves and permanent redirects
+
+`press move <source> <destination> [--redirect permanent|none]` changes a
+page's canonical `/p/` path without republishing it. The default permanent
+redirect stores the old path as an alias to the stable page identity, so later
+moves flatten every prior alias directly to the current canonical path rather
+than building redirect chains. `--redirect none` leaves the immediate source at 404. Moving back consumes the page's own alias; unpublishing the target makes
+all aliases return 404.
+
+Moves are Bearer-only and owner-only. Cross-collection moves may create a new
+owner collection or enter another collection owned by the same user, and they
+materialize the source page's effective visibility so a different collection
+default cannot widen or narrow access. Content bytes, title, password material,
+allowlist, content hash, publisher, and original publication time are
+preserved. Live destinations and other pages' redirect sources return 409;
+archived destinations are reclaimable. Redirect lookup is public but returns no
+report bytes; the destination still enforces the original ACL.
+
+The additive migration creates `pageRedirect`, adds the `move` audit action,
+and adds structured audit details for source, destination, and redirect mode.
+The move holds source/destination advisory locks in canonical order, renames the
+blob with fsync, and restores it if the database or audit transaction fails.
+Publishing cannot shadow an active redirect source.
+
+Harness evidence on the final pre-review state:
+
+- Observed red: targeted unit imports failed for the absent redirect model,
+  blob mover, response builder, and CLI parser; isolated localnet move tests
+  failed with CLI exit 1 and API 404 before implementation.
+- `nub run check`: pass (tsgo, oxlint, oxfmt; warning-only existing lint policy).
+- `nub run test`: 193 pass, 1 platform skip, 0 fail.
+- `nub run e2e`: 97/97 pass against a fresh migrated Postgres + production-built
+  server, including ACL preservation, collision/ownership validation, archive
+  reclamation, redirect lifecycle, and injected audit-failure blob rollback.
+- `nub run walkthrough`: pass through real seeded-provider `press login`, CLI
+  publish, permanent move/308, canonical read, list cleanup, no-redirect
+  move/404, prior-alias retargeting, logout, and isolated teardown.
+
+No production data, push, package/image publication, or deploy occurred.
+
 ## 2026-07-04 — blind-oracle judgment: web surface PASSES (incl. the F1/F5 gates)
 
 Ran the `apps/web/BRIEF.md` § Oracle — the blind screenshot quorum — against a fresh

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { buildDoctorReport, createLoopbackCallbackHandler } from './index'
+import { buildDoctorReport, createLoopbackCallbackHandler, parseMoveArguments } from './index'
 
 describe('createLoopbackCallbackHandler', () => {
   test('ignores mismatched state and waits for a matching callback', async () => {
@@ -79,5 +79,33 @@ describe('buildDoctorReport', () => {
     expect(report.tokenSource).toBe('keychain')
     expect(report.nextStep).toContain('token was rejected')
     expect(report.detail).toBe('request failed with HTTP 401')
+  })
+})
+
+describe('parseMoveArguments', () => {
+  test('defaults to a permanent redirect', () => {
+    expect(parseMoveArguments(['reports/old.html', 'archive/new.html'])).toEqual({
+      source: { collection: 'reports', file: 'old.html' },
+      destination: { collection: 'archive', file: 'new.html' },
+      redirect: 'permanent',
+    })
+  })
+
+  test('accepts an explicit no-redirect move', () => {
+    expect(
+      parseMoveArguments(['reports/old.html', 'archive/new.html', '--redirect', 'none']),
+    ).toMatchObject({ redirect: 'none' })
+  })
+
+  test('rejects unsupported modes and malformed targets', () => {
+    expect(() =>
+      parseMoveArguments(['reports/old.html', 'archive/new.html', '--redirect', 'temporary']),
+    ).toThrow('redirect must be one of permanent, none')
+    expect(() => parseMoveArguments(['reports/old.html'])).toThrow(
+      'move requires <source> <destination>',
+    )
+    expect(() => parseMoveArguments(['reports/old.html', 'bad-target'])).toThrow(
+      'target must be <collection>/<file>',
+    )
   })
 })

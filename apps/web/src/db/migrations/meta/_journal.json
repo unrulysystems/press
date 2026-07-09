@@ -15,6 +15,13 @@
       "when": 1783031108256,
       "tag": "0001_token_revoke_audit_scope",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783625516131,
+      "tag": "0002_cheerful_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

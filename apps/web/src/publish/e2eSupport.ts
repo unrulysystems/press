@@ -20,6 +20,7 @@ export type AuditLookup = {
     | 'visibility-change'
     | 'password-reroll'
     | 'token-revoke'
+    | 'move'
   readonly userId: string
   readonly contentHash?: string
 }

@@ -342,6 +342,52 @@ async function publishReport(
   return url.startsWith('http') ? url : `${env.PRESS_BASE_URL}${url}`
 }
 
+async function moveReport(
+  env: WalkthroughEnv,
+  sourceSlug: string,
+  destinationSlug: string,
+  redirect: 'permanent' | 'none',
+): Promise<{ readonly sourceUrl: string; readonly destinationUrl: string }> {
+  const result = await runCapture(
+    'bun',
+    [
+      pressCli,
+      'move',
+      `${collection}/${sourceSlug}`,
+      `${collection}/${destinationSlug}`,
+      '--redirect',
+      redirect,
+      '--json',
+    ],
+    env,
+  )
+  if (result.code !== 0) {
+    throw new Error(
+      `press move (${redirect}) exited with ${result.signal ?? result.code}: ${result.stdout.trim()}`,
+    )
+  }
+  const parsed = JSON.parse(result.stdout) as {
+    readonly ok?: boolean
+    readonly data?: {
+      readonly source?: { readonly url?: unknown }
+      readonly destination?: { readonly url?: unknown }
+      readonly redirect?: unknown
+    }
+  }
+  if (
+    !parsed.ok ||
+    typeof parsed.data?.source?.url !== 'string' ||
+    typeof parsed.data.destination?.url !== 'string' ||
+    parsed.data.redirect !== redirect
+  ) {
+    throw new Error(`press move (${redirect}) returned an invalid body: ${result.stdout.trim()}`)
+  }
+  return {
+    sourceUrl: parsed.data.source.url,
+    destinationUrl: parsed.data.destination.url,
+  }
+}
+
 async function assertStatus(url: string, expected: number, label: string): Promise<void> {
   const response = await fetchWithTimeout(url, 10_000)
   if (response.status !== expected) {
@@ -350,7 +396,31 @@ async function assertStatus(url: string, expected: number, label: string): Promi
   console.log(`  ok: ${label} → HTTP ${response.status}`)
 }
 
-async function assertListed(env: WalkthroughEnv, slugs: readonly string[]): Promise<void> {
+async function assertRedirect(
+  sourceUrl: string,
+  destinationUrl: string,
+  label: string,
+): Promise<void> {
+  const response = await fetchWithTimeout(sourceUrl, 10_000, { redirect: 'manual' })
+  const expectedLocation = new URL(destinationUrl).pathname
+  if (response.status !== 308 || response.headers.get('location') !== expectedLocation) {
+    throw new Error(
+      `${label}: expected HTTP 308 → ${expectedLocation}, got ${response.status} → ${String(
+        response.headers.get('location'),
+      )}`,
+    )
+  }
+  if ((await response.text()) !== '') {
+    throw new Error(`${label}: redirect response leaked a body`)
+  }
+  console.log(`  ok: ${label} → HTTP 308 ${expectedLocation}`)
+}
+
+async function assertListed(
+  env: WalkthroughEnv,
+  slugs: readonly string[],
+  absent: readonly string[] = [],
+): Promise<void> {
   const result = await runCapture('bun', [pressCli, 'list', collection, '--json'], env)
   if (result.code !== 0) {
     throw new Error(`press list exited with ${result.signal ?? result.code}`)
@@ -364,7 +434,14 @@ async function assertListed(env: WalkthroughEnv, slugs: readonly string[]): Prom
       throw new Error(`press list did not include ${collection}/${slug}`)
     }
   }
-  console.log(`  ok: press list shows ${slugs.join(', ')}`)
+  for (const slug of absent) {
+    if (listed.has(slug)) {
+      throw new Error(`press list unexpectedly included ${collection}/${slug}`)
+    }
+  }
+  console.log(
+    `  ok: press list shows ${slugs.join(', ')}${absent.length > 0 ? ` and hides ${absent.join(', ')}` : ''}`,
+  )
 }
 
 type SeededUser = { readonly email: string; readonly password: string }
@@ -656,6 +733,27 @@ async function main(): Promise<number> {
     await assertStatus(publicUrl, 200, 'public page read-back (unauthenticated)')
     await assertStatus(privateUrl, 401, 'private page denied to unauthenticated reader')
     await assertListed(cliEnv, [publicSlug, privateSlug])
+
+    console.log('moving the public report through permanent and no-redirect paths...')
+    const movedSlug = 'moved-report.html'
+    const moved = await moveReport(cliEnv, publicSlug, movedSlug, 'permanent')
+    if (moved.sourceUrl !== publicUrl) {
+      fail(`press move source URL changed unexpectedly: ${moved.sourceUrl} != ${publicUrl}`)
+    }
+    await assertRedirect(publicUrl, moved.destinationUrl, 'old public URL follows first move')
+    await assertStatus(moved.destinationUrl, 200, 'first canonical destination serves bytes')
+    await assertListed(cliEnv, [movedSlug, privateSlug], [publicSlug])
+
+    const finalSlug = 'final-report.html'
+    const finalMove = await moveReport(cliEnv, movedSlug, finalSlug, 'none')
+    await assertStatus(finalMove.sourceUrl, 404, 'no-redirect source is gone')
+    await assertStatus(finalMove.destinationUrl, 200, 'final canonical destination serves bytes')
+    await assertRedirect(
+      publicUrl,
+      finalMove.destinationUrl,
+      'prior permanent alias follows the stable page identity',
+    )
+    await assertListed(cliEnv, [finalSlug, privateSlug], [publicSlug, movedSlug])
 
     console.log('agent walkthrough passed')
     exitCode = 0

@@ -462,3 +462,71 @@ test('press publish human output: password guidance + private allowlist echo (F2
     data: { visibility: 'private', allow: [localnetUsers.secondUser.email] },
   })
 })
+
+test('press move reports canonical URLs and redirect mode in JSON and human output', async ({
+  baseURL,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const env = await makePressEnv(baseURL, 'move')
+  const collectionSlug = `${runSlug}-move`
+  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  await writeFile(reportPath, '<!doctype html><title>CLI Move</title><h1>stable bytes</h1>')
+  await loginViaLoopback(baseURL, env, 'owner')
+  const api = await newE2EAPIContext({ baseURL })
+
+  const published = await runPress(
+    ['publish', reportPath, '--to', collectionSlug, '--visibility', 'public', '--json'],
+    env,
+  )
+  expect(published.code).toBe(0)
+
+  const moved = await runPress(
+    ['move', `${collectionSlug}/report.html`, `${collectionSlug}/moved.html`, '--json'],
+    env,
+  )
+  expect(moved.code).toBe(0)
+  expect(moved.stderr).toBe('')
+  expect(jsonLine(moved.stdout)).toEqual({
+    ok: true,
+    data: {
+      source: {
+        url: `${baseURL}/p/${collectionSlug}/report.html`,
+        collection: collectionSlug,
+        file: 'report.html',
+      },
+      destination: {
+        url: `${baseURL}/p/${collectionSlug}/moved.html`,
+        collection: collectionSlug,
+        file: 'moved.html',
+      },
+      redirect: 'permanent',
+      title: 'CLI Move',
+      visibility: 'public',
+    },
+  })
+  const redirected = await api.get(`/p/${collectionSlug}/report.html`, { maxRedirects: 0 })
+  expect(redirected.status()).toBe(308)
+  expect(redirected.headers().location).toBe(`/p/${collectionSlug}/moved.html`)
+
+  const listed = jsonLine((await runPress(['list', collectionSlug, '--json'], env)).stdout) as {
+    readonly data: { readonly pages: readonly { readonly file: string }[] }
+  }
+  expect(listed.data.pages.map((entry) => entry.file)).toContain('moved.html')
+  expect(listed.data.pages.map((entry) => entry.file)).not.toContain('report.html')
+
+  const movedWithoutRedirect = await runPress(
+    ['move', `${collectionSlug}/moved.html`, `${collectionSlug}/final.html`, '--redirect', 'none'],
+    env,
+  )
+  expect(movedWithoutRedirect.code).toBe(0)
+  expect(movedWithoutRedirect.stdout).toContain(`${baseURL}/p/${collectionSlug}/moved.html`)
+  expect(movedWithoutRedirect.stdout).toContain(`${baseURL}/p/${collectionSlug}/final.html`)
+  expect(movedWithoutRedirect.stdout).toContain('redirect: none')
+  expect((await api.get(`/p/${collectionSlug}/moved.html`)).status()).toBe(404)
+  expect((await api.get(`/p/${collectionSlug}/final.html`)).status()).toBe(200)
+  const originalAlias = await api.get(`/p/${collectionSlug}/report.html`, { maxRedirects: 0 })
+  expect(originalAlias.status()).toBe(308)
+  expect(originalAlias.headers().location).toBe(`/p/${collectionSlug}/final.html`)
+})

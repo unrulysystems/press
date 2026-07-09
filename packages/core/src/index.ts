@@ -85,6 +85,10 @@ export type AclOperation =
   | { readonly kind: 'change-visibility' }
   | { readonly kind: 'change-allowlist' }
   | { readonly kind: 'change-password' }
+  | { readonly kind: 'move' }
+
+export const PAGE_REDIRECT_MODES = ['permanent', 'none'] as const
+export type PageRedirectMode = (typeof PAGE_REDIRECT_MODES)[number]
 
 export type CollectionAcl = {
   readonly slug: string

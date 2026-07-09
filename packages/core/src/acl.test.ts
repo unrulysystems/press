@@ -241,6 +241,7 @@ describe('decideAcl mutations', () => {
     'change-visibility',
     'change-allowlist',
     'change-password',
+    'move',
   ] satisfies readonly AclOperation['kind'][]
 
   test.each(mutationOperations)('owner may %s', (kind) => {

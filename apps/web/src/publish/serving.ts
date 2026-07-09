@@ -7,7 +7,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 
 import { auth } from '../auth/server'
 import { db, dbConfig } from '../db/client'
-import { collection, page, user } from '../db/schema'
+import { collection, page, pageRedirect, user } from '../db/schema'
 import { pageBlobPath } from './storage'
 import {
   acceptsHtml,
@@ -69,6 +69,39 @@ async function loadServedRow(
     )
     .limit(1)
   return rows[0] ?? null
+}
+
+async function redirectResponse(route: ServedRoute): Promise<Response | null> {
+  const rows = await db
+    .select({ page })
+    .from(pageRedirect)
+    .innerJoin(page, eq(pageRedirect.targetPageId, page.id))
+    .where(
+      and(
+        eq(pageRedirect.sourceCollectionSlug, route.collectionSlug),
+        eq(pageRedirect.sourceFileSlug, route.fileSlug),
+        isNull(page.archivedAt),
+      ),
+    )
+    .limit(1)
+  const target = rows[0]?.page
+  if (!target) {
+    return null
+  }
+  const destination = {
+    collectionSlug: parseCollectionSlug(target.collectionSlug),
+    fileSlug: parseFileSlug(target.fileSlug),
+  }
+  if (
+    destination.collectionSlug === route.collectionSlug &&
+    destination.fileSlug === route.fileSlug
+  ) {
+    return null
+  }
+  return servedPageResponse(null, {
+    status: 308,
+    headers: { location: servedPagePath(destination) },
+  })
 }
 
 function parseServedPath(request: Request): ServedRoute | null {
@@ -201,7 +234,7 @@ async function servedPageEndpointUnchecked(request: Request): Promise<Response> 
 
   const row = await loadServedRow(route)
   if (!row) {
-    return notFound()
+    return (await redirectResponse(route)) ?? notFound()
   }
 
   const viewer = await viewerForRequest(request, row.page)

@@ -49,9 +49,12 @@ Page        id, collectionSlug → Collection, fileSlug, title (extracted),
             passwordHash? (argon2), allowlist: email[], contentHash (sha256),
             sizeBytes, publishedBy → User, publishedAt, updatedAt,
             archivedAt?
+PageRedirect sourceCollectionSlug → Collection, sourceFileSlug,
+            targetPageId → Page, kind: 'permanent', createdBy → User,
+            createdAt; source path unique
 AuditEvent  id, userId, action: 'publish' | 'overwrite' | 'unpublish' |
-            'visibility-change' | 'password-reroll' | 'token-revoke',
-            collectionSlug, fileSlug?, contentHash?, createdAt
+            'visibility-change' | 'password-reroll' | 'token-revoke' | 'move',
+            collectionSlug, fileSlug?, contentHash?, details?, createdAt
 ```
 
 Slug grammar (both collection and file slugs):
@@ -118,10 +121,12 @@ realm="press"` and 401. Both channels resolve the same password-verified viewer
   collection's `defaultVisibility`, else `default`.
 - **REQ-ACL-004** Private allowlists are exact email matches and may include
   addresses outside `PRESS_ALLOWED_DOMAINS` (external sharing).
-- **REQ-ACL-005** Only the collection owner may publish into, overwrite,
-  unpublish from, or change visibility/allowlist/password within a collection.
+- **REQ-ACL-005** Only the collection owner may publish into, overwrite, move
+  from, unpublish from, or change visibility/allowlist/password within a
+  collection. A cross-collection move may enter only a collection owned by the
+  same user, or create its unknown destination collection for that user.
   Admins may additionally unpublish (moderation) but may not publish into
-  another user's collection.
+  or move another user's page.
 - **REQ-ACL-006** The ACL decision is implemented as a pure function
   `(viewer, page, collection, config) → allow | deny(reason)` with unit tests
   covering the full matrix; all read/mutation paths call it.
@@ -172,6 +177,22 @@ title, visibility, password?, allow? }` — `allow` is the page's resolved
   (REQ-ACL-001 applied with the token's user as viewer).
 - **REQ-PUB-009** Every mutation writes an AuditEvent row; admin moderation
   actions are audited with the admin's identity.
+- **REQ-PUB-010** `POST /api/pages/:collection/:file/move` with JSON
+  `{ collection, file, redirect?: 'permanent' | 'none' }` moves a live source
+  page to a different canonical path. `redirect` defaults to `permanent`.
+  Content bytes, title, content hash, size, password hash, allowlist, publisher,
+  and original publication time are preserved. A cross-collection move
+  materializes the source page's resolved visibility so the destination
+  collection default cannot widen or narrow its ACL. The destination appears
+  in indexes and lists; the source does not.
+- **REQ-PUB-011** A move validates both paths, authenticates per INV-1, locks
+  source and destination in deterministic order, moves the blob, updates the
+  page and optional redirect, and writes one attributed `move` AuditEvent with
+  source, destination, redirect mode, and content hash. Database/audit failure
+  restores the source row and blob. A live destination or redirect source owned
+  by another page returns 409 without changing the source. An archived
+  destination is reclaimable, matching republish behavior. Moving back to a
+  redirect source of the same page consumes that redirect.
 
 ### SRV — serving published pages
 
@@ -203,6 +224,14 @@ title, visibility, password?, allow? }` — `allow` is the page's resolved
 frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that sandbox
   omits `allow-forms` and would block the unlock form. Basic auth (REQ-ACL-002) remains
   the programmatic channel.
+- **REQ-SRV-005** When no live page exists at a valid `/p/:collection/:file`
+  path, `GET` checks for an active permanent redirect. A redirect resolves by
+  stable target page identity and returns 308 with `Location` set to that
+  page's current canonical `/p/` path and the REQ-SRV-002 headers, without
+  reading or returning report bytes. Redirect lookup is public; the destination
+  performs its normal ACL check. Repeated moves therefore flatten to the
+  current canonical path rather than forming chains. A missing or archived
+  target returns 404, and unpublishing a target makes all of its old paths 404.
 
 ### IDX — indexes / news surface
 
@@ -236,6 +265,11 @@ frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that 
   of REQ-SRV-004). For a `private` page it echoes the resolved allowlist so the
   publisher can confirm who was granted. `--json` output includes `allow` and
   stays machine-clean (no guidance prose).
+- **REQ-CLI-005** `press move <source-collection/source-file>
+<destination-collection/destination-file> [--redirect permanent|none]`
+  defaults to a permanent redirect. Human output prints the old URL, new URL,
+  and redirect mode. `--json` returns both paths/URLs, the redirect mode, title,
+  and resolved visibility in the standard machine-clean envelope.
 
 ### CFG — instance configuration
 
@@ -268,7 +302,8 @@ Native apps; realtime/Zero sync; S3/object-store blobs; page version history;
 multi-file/tarball uploads; identity providers beyond Google + localnet
 credentials; quotas/billing; full-text search; comments/reactions; npm
 distribution of the CLI (repo install / `bun link` for now); in-app HTML
-authoring or editing.
+authoring or editing; temporary redirects; standalone redirect creation,
+listing, or removal.
 
 ## Risk tags
 
@@ -276,7 +311,9 @@ authoring or editing.
   in design (Allen, 2026-07-02); implementation still gates on the e2e matrix.
 - **HIGH (public API contract):** the publish API and CLI verbs — agents and
   skills (gh-pulse rituals) will build against them.
-- Schema migrations: Drizzle-managed; additive in v1.
+- **HIGH (schema migration):** page redirects and structured move audit details
+  are Drizzle-managed and additive in v1; migration verification runs before
+  the feature is called done.
 
 ## Acceptance criteria
 
@@ -310,6 +347,20 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 - [ ] `visibility=password` publish returns a password exactly once; hash-only
       in DB
 - [ ] `press unpublish` archives; subsequent GET → 404; feed no longer lists it
+- [ ] `press move old new` preserves bytes, metadata, publication time, and ACL;
+      lists show only `new`; `old` → 308 with `Location: new`; the destination
+      applies its original read gate
+- [ ] `press move old new --redirect none` makes `old` → 404; a live page or
+      another page's redirect at `new` returns 409 without losing the source
+- [ ] Cross-collection move preserves effective visibility, rejects a
+      destination collection owned by someone else, and lets the owner create a
+      new destination collection
+- [ ] Repeated moves flatten all prior redirects to the current canonical path;
+      unpublishing the target makes every alias 404; moving back consumes the
+      same-page redirect at the destination
+- [ ] Move storage evidence shows the source blob absent, destination blob hash
+      equal to `page.contentHash`, and source restoration after injected
+      database/audit failure
 - [ ] Feed as anonymous shows only public entries; as domain user shows
       default+public+own-private; entries ordered newest-first
 - [ ] Publish with traversal-shaped file name (`../evil.html`, `a..b.html`,
@@ -336,7 +387,7 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-ACL-002                                   | `apps/web/src/publish/serveAcl.test.ts:23` deniedAclResponse; `e2e/publish.spec.ts:556`, `:589`, `:666`                                                                                                  |
 | REQ-ACL-003                                   | `packages/core/src/acl.test.ts:164` visibility fallback; `apps/web/src/db/schema.test.ts:36`; `e2e/publish.spec.ts:270`                                                                                  |
 | REQ-ACL-004                                   | `packages/core/src/acl.test.ts:192` private allowlists; `e2e/publish.spec.ts:635`                                                                                                                        |
-| REQ-ACL-005                                   | `packages/core/src/acl.test.ts:236` mutations; `e2e/publish.spec.ts:161`, `:270`, `:724`                                                                                                                 |
+| REQ-ACL-005                                   | `packages/core/src/acl.test.ts` mutation matrix (including move); `e2e/publish.spec.ts` page-move guard scenarios                                                                                        |
 | REQ-ACL-006                                   | `packages/core/src/acl.test.ts:142`; `apps/web/src/db/schema.test.ts:36`; `apps/web/src/publish/serveAcl.test.ts:67`; `e2e/publish.spec.ts:512`                                                          |
 | REQ-PUB-001                                   | `e2e/publish.spec.ts:161` publish endpoint enforces bearer auth, validation, storage, overwrite, and audit                                                                                               |
 | REQ-PUB-002                                   | `packages/core/src/slug.test.ts:10`, `:27` slug grammar; `e2e/publish.spec.ts:161` validation                                                                                                            |
@@ -347,9 +398,12 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-PUB-007                                   | `packages/core/src/acl.test.ts:236`; `e2e/publish.spec.ts:724`; `e2e/cli.spec.ts:227`                                                                                                                    |
 | REQ-PUB-008                                   | `e2e/publish.spec.ts:270`; `e2e/publish.spec.ts:724`; `e2e/cli.spec.ts:227`                                                                                                                              |
 | REQ-PUB-009                                   | `e2e/publish.spec.ts:119` expectAudit helper coverage; `e2e/publish.spec.ts:161`, `:270`, `:724`, `:817`; `e2e/cli.spec.ts:227`                                                                          |
+| REQ-PUB-010                                   | `apps/web/src/publish/responseShape.test.ts` move response; `e2e/publish.spec.ts` canonical-path/ACL move flow; `e2e/cli.spec.ts` real CLI move flow                                                     |
+| REQ-PUB-011                                   | `apps/web/src/publish/storage.test.ts` move/rollback/collision; `apps/web/src/db/schema.test.ts` redirect shape; `e2e/publish.spec.ts` guard, archive-reclaim, audit, and forced-failure rollback flow   |
 | REQ-SRV-001                                   | `e2e/publish.spec.ts:512`, `:589`, `:612`, `:635`, `:666`, `:724`; `scripts/smokeImage.ts` image-served public page                                                                                      |
 | REQ-SRV-002                                   | `apps/web/src/publish/serveAcl.test.ts:17` served headers; `e2e/publish.spec.ts:512`; `scripts/smokeImage.ts` image CSP byte-compare                                                                     |
 | REQ-SRV-003                                   | `apps/web/src/publish/serveAcl.test.ts:23` denied responses; `e2e/publish.spec.ts:724`                                                                                                                   |
+| REQ-SRV-005                                   | `e2e/publish.spec.ts` permanent redirect, flattening, move-back, and unpublish lifecycle; `scripts/agentWalkthrough.ts` real CLI redirect dogfood                                                        |
 | REQ-IDX-001                                   | `e2e/magazine.spec.ts:30`, `:47`, `:62`; `e2e/smoke.spec.ts:75`; `scripts/smokeImage.ts` image feed shell                                                                                                |
 | REQ-IDX-002                                   | `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:75`                                                                                                                                                        |
 | REQ-IDX-003                                   | `e2e/magazine.spec.ts:47`; `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:238`                                                                                                                            |
@@ -357,3 +411,4 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-CLI-002                                   | `e2e/cli.spec.ts:227` `--json` success/error output and exit codes                                                                                                                                       |
 | REQ-CLI-003                                   | `e2e/cli.spec.ts:227` host-scoped token storage and `PRESS_TOKEN` fallback                                                                                                                               |
 | REQ-CLI-004                                   | `e2e/cli.spec.ts:227` publish URL and one-time password output                                                                                                                                           |
+| REQ-CLI-005                                   | `packages/cli/src/index.test.ts` move parsing/defaults; `e2e/cli.spec.ts` JSON + human output; `scripts/agentWalkthrough.ts` real login/CLI move flow                                                    |

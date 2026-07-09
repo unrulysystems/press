@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 
-import { parseCollectionSlug, parseFileSlug } from '@press/core'
+import { PAGE_REDIRECT_MODES, parseCollectionSlug, parseFileSlug } from '@press/core'
+
+import type { PageRedirectMode } from '@press/core'
 
 import {
   KeychainUnavailableError,
@@ -226,6 +228,35 @@ function parseTarget(target: string): { readonly collection: string; readonly fi
   return {
     collection: parseCollectionSlug(collection),
     file: parseFileSlug(file),
+  }
+}
+
+export function parseMoveArguments(args: readonly string[]): {
+  readonly source: { readonly collection: string; readonly file: string }
+  readonly destination: { readonly collection: string; readonly file: string }
+  readonly redirect: PageRedirectMode
+} {
+  const positional = stripOptions(args, ['--redirect'])
+  if (positional.length !== 2) {
+    throw new CliError('move requires <source> <destination>')
+  }
+  const [rawSource, rawDestination] = positional
+  if (!rawSource || !rawDestination) {
+    throw new CliError('move requires <source> <destination>')
+  }
+  const rawRedirect = optionValue(args, '--redirect') ?? 'permanent'
+  if (!(PAGE_REDIRECT_MODES as readonly string[]).includes(rawRedirect)) {
+    throw new CliError(`redirect must be one of ${PAGE_REDIRECT_MODES.join(', ')}`)
+  }
+  const source = parseTarget(rawSource)
+  const destination = parseTarget(rawDestination)
+  if (source.collection === destination.collection && source.file === destination.file) {
+    throw new CliError('destination must differ from source')
+  }
+  return {
+    source,
+    destination,
+    redirect: rawRedirect as PageRedirectMode,
   }
 }
 
@@ -552,6 +583,41 @@ async function commandUnpublish(ctx: CliContext, args: readonly string[]): Promi
   printSuccess(ctx, { message: `${collection}/${file} unpublished` })
 }
 
+type MoveResponse = {
+  readonly source: { readonly url: string }
+  readonly destination: { readonly url: string }
+  readonly redirect: PageRedirectMode
+} & JsonRecord
+
+async function commandMove(ctx: CliContext, args: readonly string[]): Promise<void> {
+  const input = parseMoveArguments(args)
+  const source = await requireToken(ctx)
+  const body = (await apiFetch(
+    ctx,
+    `/api/pages/${input.source.collection}/${input.source.file}/move`,
+    {
+      method: 'POST',
+      token: source.token,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        collection: input.destination.collection,
+        file: input.destination.file,
+        redirect: input.redirect,
+      }),
+    },
+  )) as MoveResponse
+  if (ctx.json) {
+    printSuccess(ctx, body)
+    return
+  }
+  if (typeof body.source?.url !== 'string' || typeof body.destination?.url !== 'string') {
+    throw new CliError('move returned an invalid response')
+  }
+  console.log(`from:     ${body.source.url}`)
+  console.log(`to:       ${body.destination.url}`)
+  console.log(`redirect: ${body.redirect}`)
+}
+
 async function run(argv: readonly string[]): Promise<void> {
   const json = hasFlag(argv, '--json')
   const host = normalizeHost(optionValue(argv, '--host') ?? process.env.PRESS_HOST)
@@ -587,9 +653,12 @@ async function run(argv: readonly string[]): Promise<void> {
     case 'unpublish':
       await commandUnpublish(ctx, presentStrings([subcommand, ...rest]))
       return
+    case 'move':
+      await commandMove(ctx, presentStrings([subcommand, ...rest]))
+      return
     default:
       throw new CliError(
-        'usage: press <login|logout|whoami|doctor|publish|list|page set|unpublish>',
+        'usage: press <login|logout|whoami|doctor|publish|list|page set|unpublish|move>',
       )
   }
 }

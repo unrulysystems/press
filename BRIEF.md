@@ -103,6 +103,15 @@ published page to attack its readers.
 - Overwrite allowed, no version history in v1; unpublish = soft-delete;
   ~25 MiB upload cap; Better Auth rate limiting on; CI = GitHub Actions
   running check + unit + localnet e2e.
+- Page moves preserve the page's content, metadata, original publication time,
+  and effective ACL while changing its canonical `/p/` path. `press move`
+  defaults to a public permanent redirect from the old path; `--redirect none`
+  leaves 404. Redirects expose only the current canonical path, never content,
+  and always defer content authorization to the destination. Prior aliases
+  follow the stable page identity through repeated moves; live pages and other
+  pages' redirects are hard destination conflicts, archived destinations are
+  reclaimable, and moving back consumes the same-page alias. Temporary and
+  standalone redirect management are out of v1 (ratified 2026-07-09).
 - Reader-facing gates are magazine-grade, never dead-ends (ratified 2026-07-04,
   from the dogfood bug bash):
   - `password` pages serve a **branded HTML password-entry page** to browsers
