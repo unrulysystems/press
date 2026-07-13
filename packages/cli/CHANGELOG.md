@@ -1,5 +1,12 @@
 # @press/cli
 
+## 0.3.0
+
+### Minor Changes
+
+- 8c7e55d: Ship standalone macOS arm64 and Linux x64 executables with exact version output,
+  checksummed release archives, and compiled-binary acceptance coverage.
+
 ## 0.2.0
 
 ### Minor Changes
