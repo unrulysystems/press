@@ -1,5 +1,30 @@
 # press — DELTA
 
+## 2026-07-13 — first release attempt exposed missing workspace link
+
+The pushed `v0.3.0` tag passed source/version verification, `nub run check`, and
+all unit tests, then both native release builders failed before packaging with
+`Could not resolve: "@press/core"`. Their clean `nub ci` runs reported the
+workspace package installed but omitted the workspace symlink that the same
+installer had created in the ordinary main-branch CI job. No draft release or
+release asset was published.
+
+The standalone builder now resolves `@press/core` to canonical monorepo source
+through an explicit Bun build plugin, so release correctness no longer depends
+on installer link layout. A regression test builds an entrypoint from outside
+the checkout, where normal resolution cannot see this repo's `node_modules`,
+and requires that explicit source resolution to succeed. The failed remote tag
+remains immutable; the corrected package and release version is `0.3.1`.
+
+Post-fix evidence: the full 199-test suite passed with one platform skip;
+`nub run check`, `actionlint`, and `git diff --check` passed; and the compiled
+binary verifier passed exact version, archive, hermetic-runtime, and real macOS
+Keychain checks. A clean copy containing only `scripts/`, `packages/`, and the
+root `package.json`—with no `node_modules` at all—built a native Mach-O arm64
+binary that printed `0.3.1`. A fresh independent reviewer reproduced the
+missing-link control failure, ran the focused and full harnesses, and returned
+`APPROVE` with no High/Medium correctness or security findings.
+
 ## 2026-07-12 — standalone CLI binary release interior
 
 REQ-CLI-006 brings CLI distribution into scope. `press --version` now derives

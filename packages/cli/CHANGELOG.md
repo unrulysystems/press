@@ -1,5 +1,12 @@
 # @press/cli
 
+## 0.3.1
+
+### Patch Changes
+
+- Make standalone release builds resolve workspace source directly so native CI builders do not
+  depend on nondeterministic install-time workspace links.
+
 ## 0.3.0
 
 ### Minor Changes

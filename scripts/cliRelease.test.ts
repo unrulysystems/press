@@ -7,6 +7,7 @@ import {
   RELEASE_TARGETS,
   assertReleaseVersion,
   checksumFileContents,
+  cliWorkspaceSourcePlugin,
   isPrereleaseVersion,
   packageCliBinary,
   releaseArchiveName,
@@ -74,6 +75,32 @@ describe('CLI release contract', () => {
     expect(checksumFileContents('abc123', 'press-v0.2.0-linux-x64.tar.gz')).toBe(
       'abc123  press-v0.2.0-linux-x64.tar.gz\n',
     )
+  })
+
+  test('resolves workspace source without an installed workspace link', async () => {
+    const fixture = await mkdtemp(join(tmpdir(), 'press-cli-workspace-source-test-'))
+    try {
+      const entrypoint = join(fixture, 'entrypoint.ts')
+      await writeFile(
+        entrypoint,
+        "import { parseCollectionSlug } from '@press/core'\n" +
+          "console.log(parseCollectionSlug('release-proof'))\n",
+      )
+
+      // The entrypoint lives outside the checkout, so normal package
+      // resolution cannot walk into this repo's node_modules workspace links.
+      const result = await Bun.build({
+        entrypoints: [entrypoint],
+        target: 'bun',
+        packages: 'bundle',
+        plugins: [cliWorkspaceSourcePlugin()],
+      })
+      expect(result.success).toBe(true)
+      expect(result.logs).toEqual([])
+      expect(await result.outputs[0]?.text()).toContain('release-proof')
+    } finally {
+      await rm(fixture, { recursive: true, force: true })
+    }
   })
 
   test('normalizes archive metadata so a tag rerun is byte-stable', async () => {

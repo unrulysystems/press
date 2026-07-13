@@ -55,6 +55,20 @@ export const CLI_PACKAGE_VERSION = cliPackage.version
 export const defaultCliBinary = resolve(root, 'artifacts/cli/press')
 export const defaultReleaseDirectory = resolve(root, 'artifacts/release')
 
+export function cliWorkspaceSourcePlugin(): Bun.BunPlugin {
+  const coreSource = resolve(root, 'packages/core/src/index.ts')
+  return {
+    name: 'press-cli-workspace-sources',
+    setup(build) {
+      // A standalone release must not depend on an installer's workspace-link
+      // layout. Nub can validly install every external dependency while a
+      // concurrent clean CI install omits the @press/core symlink, so resolve
+      // the CLI's own package boundary to its canonical source explicitly.
+      build.onResolve({ filter: /^@press\/core$/ }, () => ({ path: coreSource }))
+    },
+  }
+}
+
 function fail(message: string): never {
   throw new Error(message)
 }
@@ -146,6 +160,7 @@ export async function buildCliBinary(
     },
     minify: true,
     packages: 'bundle',
+    plugins: [cliWorkspaceSourcePlugin()],
   })
   if (!result.success) {
     const detail = result.logs.map((entry) => entry.message).join('\n')
