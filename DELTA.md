@@ -1,5 +1,69 @@
 # press — DELTA
 
+## 2026-07-12 — standalone CLI binary release interior
+
+REQ-CLI-006 brings CLI distribution into scope. `press --version` now derives
+from `packages/cli/package.json`, and native Bun compilation bundles workspace
+dependencies while disabling runtime dotenv, bunfig, package, and tsconfig
+autoload. Release tooling supports the dotfiles fleet platforms only: macOS
+arm64 and Linux x64. Each rehearsal produces one root `press` executable in a
+platform-named tarball plus a matching SHA-256 file.
+
+The acceptance surfaces no longer execute `packages/cli/src/index.ts`.
+`e2e/cli.spec.ts`, the agent walkthrough, and dev-share smoke share the compiled
+executable resolver, and the CLI subprocess PATH used by e2e/walkthrough does
+not contain Bun. A `v*` GitHub Actions workflow verifies tag/package identity,
+runs check/unit and native packaged-binary gates, asserts architecture, and
+uploads both archives/checksums before creating the matching release. Pushing a
+tag and publishing the release remain Allen's boundary.
+
+Harness evidence on the final local state:
+
+- Observed red: the targeted test run failed because `CLI_VERSION` and
+  `scripts/cliRelease.ts` did not exist (2 failures, 0 passes).
+- `nub run check`: pass (tsgo, oxlint, oxfmt; warning-only existing lint policy).
+- `nub run test`: 213 pass, 1 platform skip, 0 fail.
+- `nub run test:cli:binary`: pass on a native Mach-O arm64 executable; exact
+  `0.2.0`, no-Bun/no-checkout `doctor --json`, hostile `.env`/bunfig rejection,
+  archive layout, checksum rehearsal, and real Security.framework
+  login/write-read/doctor/logout/delete all passed.
+- `nub run e2e`: 99/99 pass through the compiled executable.
+- `nub run walkthrough`: pass through compiled seeded login, doctor/whoami,
+  publish/list, ACL read-back, move/redirect lifecycle, logout, and teardown.
+- Local archive inspection listed only `press`; `shasum -a 256 -c` returned OK.
+
+The first real Security.framework smoke reached compiled `press login` but
+returned OSStatus -60006 because the no-checkout fixture's hermetic `HOME` hid
+the runner user's login Keychain. The real-Keychain subtest now restores only
+the runner's actual `HOME`; the rerun passed login/write-read/doctor/logout and
+post-logout deletion while the ordinary packaged smoke remains hermetic. The
+native macOS release job retains the same gate fail-closed. Three `rl` review
+attempts did not produce a verdict (two non-terminal for their bounded
+15-minute windows, one broker startup failure), so the loop substituted a
+fresh read-only reviewer rather than weakening the oracle.
+
+That reviewer rejected mutable publication, floating release inputs,
+non-reproducible tar metadata, and permissive SemVer parsing. The fix-up makes
+publication draft-first, refuses to mutate a published release, verifies the
+exact four assets after upload and download before publishing, pins every
+direct Action plus Bun/Nub, zeroes tar/gzip timestamps, and validates canonical
+SemVer. The red fix-up harness failed all three cited contracts before the
+changes and then passed 7/7 targeted tests plus `actionlint`.
+
+The review fix-up also maps accepted SemVer prereleases to GitHub prereleases
+without misclassifying stable versions whose build metadata contains a hyphen.
+Its red-first classification test failed before implementation, then the final
+8/8 targeted tests passed. The independent reviewer returned `APPROVE` after
+running 17 focused checks, all 198 tests, `nub run check`, `actionlint`, and
+`git diff --check`.
+
+Allen selected authenticated releases in the existing private
+`unrulysystems/press` repository by authorizing the release and subsequent
+dotfiles integration on 2026-07-13. The dotfiles side must bridge mise to the
+host's existing GitHub CLI credential without storing a token, generate both
+fleet lock sections, and prove a locked install before deployment. No public
+release-only repository is needed.
+
 ## 2026-07-09 — first-class page moves and permanent redirects
 
 `press move <source> <destination> [--redirect permanent|none]` changes a

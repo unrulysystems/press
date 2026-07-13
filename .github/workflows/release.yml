@@ -1,0 +1,173 @@
+name: Release CLI
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify source and release version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          nub-version: '0.4.11'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.3.13'
+      - name: Install dependencies
+        run: nub ci
+      - name: Require tag/package version identity
+        run: bun scripts/assertCliReleaseVersion.ts "$GITHUB_REF_NAME"
+      - name: Check
+        run: nub run check
+      - name: Unit tests
+        run: nub run test
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: verify
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-arm64
+            runner: macos-15
+            file_pattern: 'Mach-O 64-bit executable arm64'
+            verify_real_keychain: '1'
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            file_pattern: 'ELF 64-bit.*x86-64'
+            verify_real_keychain: '0'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          nub-version: '0.4.11'
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.3.13'
+      - name: Install dependencies
+        run: nub ci
+      - name: Build native standalone executable
+        run: bun scripts/buildCliBinary.ts --platform "${{ matrix.platform }}"
+      - name: Verify standalone behavior and release rehearsal
+        env:
+          PRESS_VERIFY_REAL_KEYCHAIN: ${{ matrix.verify_real_keychain }}
+        run: nub run test:cli:binary
+      - name: Verify advertised architecture
+        run: |
+          file artifacts/cli/press
+          file artifacts/cli/press | grep -E "${{ matrix.file_pattern }}"
+      - name: Package release archive and checksum
+        run: bun scripts/packageCliRelease.ts --platform "${{ matrix.platform }}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: press-${{ matrix.platform }}
+          path: |
+            artifacts/release/*.tar.gz
+            artifacts/release/*.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish matching GitHub Release
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: press-*
+          path: release-assets
+          merge-multiple: true
+      - name: Publish verified draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          version="${GITHUB_REF_NAME#v}"
+          release_core="${version%%+*}"
+          release_metadata=()
+          if [[ "$release_core" == *-* ]]; then
+            release_metadata+=(--prerelease --latest=false)
+          fi
+          expected_assets="$(printf '%s\n' \
+            "press-v${version}-linux-x64.tar.gz" \
+            "press-v${version}-linux-x64.tar.gz.sha256" \
+            "press-v${version}-macos-arm64.tar.gz" \
+            "press-v${version}-macos-arm64.tar.gz.sha256" | sort)"
+          local_assets="$(for asset in release-assets/*; do basename "$asset"; done | sort)"
+          if [[ "$local_assets" != "$expected_assets" ]]; then
+            echo "release job expected exactly four platform assets" >&2
+            diff <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$local_assets") || true
+            exit 1
+          fi
+
+          release_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || true)"
+          case "$release_is_draft" in
+            true)
+              ;;
+            false)
+              echo "refusing to mutate published release $GITHUB_REF_NAME" >&2
+              exit 1
+              ;;
+            '')
+              gh release create "$GITHUB_REF_NAME" --draft \
+                --verify-tag \
+                --generate-notes \
+                "${release_metadata[@]}" \
+                --title "press $GITHUB_REF_NAME"
+              ;;
+            *)
+              echo "unexpected release state: $release_is_draft" >&2
+              exit 1
+              ;;
+          esac
+
+          # Clobber is safe only while the release is a non-public draft. A
+          # failed upload leaves that draft invisible and rerunnable.
+          gh release upload "$GITHUB_REF_NAME" release-assets/* --clobber
+          remote_assets="$(gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' | sort)"
+          if [[ "$remote_assets" != "$expected_assets" ]]; then
+            echo "draft release assets differ from the expected complete set" >&2
+            diff <(printf '%s\n' "$expected_assets") <(printf '%s\n' "$remote_assets") || true
+            exit 1
+          fi
+
+          mkdir release-verify
+          gh release download "$GITHUB_REF_NAME" --dir release-verify
+          downloaded_assets="$(for asset in release-verify/*; do basename "$asset"; done | sort)"
+          if [[ "$downloaded_assets" != "$expected_assets" ]]; then
+            echo "downloaded draft assets differ from the expected complete set" >&2
+            exit 1
+          fi
+          cd release-verify
+          sha256sum -c ./*.sha256
+          cd ..
+
+          release_is_draft="$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)"
+          if [[ "$release_is_draft" != 'true' ]]; then
+            echo "release stopped being a draft before publication" >&2
+            exit 1
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false
+          if [[ "$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)" != 'false' ]]; then
+            echo "release publication did not converge" >&2
+            exit 1
+          fi

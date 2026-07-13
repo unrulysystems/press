@@ -1,5 +1,5 @@
-import { spawn, spawnSync } from 'node:child_process'
-import { mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -10,9 +10,10 @@ import { findUserIdByEmail } from '../apps/web/src/auth/apiTokens'
 import { db } from '../apps/web/src/db/client'
 import { findMatchingAuditEvent, findPage } from '../apps/web/src/publish/e2eSupport'
 import { newE2EAPIContext } from './api'
+import { pressCliExecutable } from '../scripts/pressCliExecutable'
 
 const root = resolve(import.meta.dirname, '..')
-const pressBin = resolve(root, 'packages/cli/src/index.ts')
+const pressBin = pressCliExecutable()
 const runSlug = `cli-${Date.now().toString(36)}`
 
 type PressResult = {
@@ -32,18 +33,6 @@ function baseProcessEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env }
   delete env.PRESS_TOKEN
   return env
-}
-
-function bunExecutable(): string {
-  const result = spawnSync('which', ['bun'], {
-    encoding: 'utf8',
-    env: process.env,
-  })
-  const path = result.stdout.trim()
-  if (result.status !== 0 || !path) {
-    throw new Error('bun executable not found')
-  }
-  return path
 }
 
 function jsonLine(stdout: string): unknown {
@@ -67,6 +56,7 @@ async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
   const keychainFile = join(dir, 'keychain.json')
   return {
     ...baseProcessEnv(),
+    PATH: dir,
     PRESS_HOST: baseURL,
     PRESS_E2E_KEYCHAIN_FILE: keychainFile,
   }
@@ -74,7 +64,6 @@ async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
 
 async function makePressTokenEnv(baseURL: string, label: string, token: string): Promise<PressEnv> {
   const dir = await mkdtemp(join(tmpdir(), `press-cli-${label}-`))
-  await symlink(bunExecutable(), join(dir, 'bun'))
   return {
     ...baseProcessEnv(),
     PATH: dir,

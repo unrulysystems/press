@@ -20,7 +20,8 @@
     }
   },
   "scripts": {
-    "build": "zshy"
+    "build": "zshy",
+    "build:binary": "bun ../../scripts/buildCliBinary.ts"
   },
   "dependencies": {
     "@press/core": "workspace:*"

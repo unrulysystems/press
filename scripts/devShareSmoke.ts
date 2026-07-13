@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { servedPageHeaders } from '../apps/web/src/publish/serveAcl'
+import { pressCliExecutable } from './pressCliExecutable'
 
 type CommandResult = {
   readonly code: number
@@ -13,7 +14,7 @@ type CommandResult = {
 }
 
 const root = resolve(import.meta.dirname, '..')
-const pressBin = resolve(root, 'packages/cli/src/index.ts')
+const pressBin = pressCliExecutable()
 const defaultAgentEnvPath = resolve(root, '.dev/agent.env')
 const smokeRun = Date.now().toString(36)
 const collectionSlug = `dev-share-${smokeRun}`

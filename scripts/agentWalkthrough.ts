@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
+import { pressCliExecutable } from './pressCliExecutable'
 
 // The agent walkthrough is the executable proof of BOTH plugin skills: it performs a real
 // `press login` via the localnet seeded credential provider (press-setup; NO real Google —
@@ -14,7 +15,7 @@ import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 const root = resolve(import.meta.dirname, '..')
 const siloEnvFile = resolve(root, '.silo.env')
 const composeFile = resolve(root, 'compose.yaml')
-const pressCli = resolve(root, 'packages/cli/src/index.ts')
+const pressCli = pressCliExecutable()
 const instanceName = 'walkthrough'
 const collection = 'walkthrough'
 const healthTimeoutMs = Number(process.env.PRESS_WALKTHROUGH_HEALTH_TIMEOUT_MS ?? `${4 * 60_000}`)
@@ -309,19 +310,8 @@ async function publishReport(
   visibility: 'public' | 'private',
 ): Promise<string> {
   const result = await runCapture(
-    'bun',
-    [
-      pressCli,
-      'publish',
-      file,
-      '--to',
-      collection,
-      '--as',
-      fileSlug,
-      '--visibility',
-      visibility,
-      '--json',
-    ],
+    pressCli,
+    ['publish', file, '--to', collection, '--as', fileSlug, '--visibility', visibility, '--json'],
     env,
   )
   if (result.code !== 0) {
@@ -347,9 +337,8 @@ async function moveReport(
   redirect: 'permanent' | 'none',
 ): Promise<{ readonly sourceUrl: string; readonly destinationUrl: string }> {
   const result = await runCapture(
-    'bun',
+    pressCli,
     [
-      pressCli,
       'move',
       `${collection}/${sourceSlug}`,
       `${collection}/${destinationSlug}`,
@@ -419,7 +408,7 @@ async function assertListed(
   slugs: readonly string[],
   absent: readonly string[] = [],
 ): Promise<void> {
-  const result = await runCapture('bun', [pressCli, 'list', collection, '--json'], env)
+  const result = await runCapture(pressCli, ['list', collection, '--json'], env)
   if (result.code !== 0) {
     throw new Error(`press list exited with ${result.signal ?? result.code}`)
   }
@@ -516,7 +505,7 @@ async function pressLogin(
   user: SeededUser,
   signIn: SignInStrategy,
 ): Promise<void> {
-  const child = spawn('bun', [pressCli, 'login', '--no-open'], {
+  const child = spawn(pressCli, ['login', '--no-open'], {
     cwd: root,
     env: cliEnv,
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -565,7 +554,7 @@ async function pressLogin(
 
 // press-setup done-when: doctor reports authenticated with the owner identity, and whoami agrees.
 async function confirmSetup(cliEnv: WalkthroughEnv, user: SeededUser): Promise<void> {
-  const doctor = await runCapture('bun', [pressCli, 'doctor', '--json'], cliEnv)
+  const doctor = await runCapture(pressCli, ['doctor', '--json'], cliEnv)
   if (doctor.code !== 0) {
     fail(`press doctor exited with ${doctor.signal ?? doctor.code}: ${doctor.stdout.trim()}`)
   }
@@ -580,7 +569,7 @@ async function confirmSetup(cliEnv: WalkthroughEnv, user: SeededUser): Promise<v
     fail(`press doctor reported ${String(doctorReport.data.email)}, expected ${user.email}`)
   }
 
-  const whoami = await runCapture('bun', [pressCli, 'whoami', '--json'], cliEnv)
+  const whoami = await runCapture(pressCli, ['whoami', '--json'], cliEnv)
   if (whoami.code !== 0) {
     fail(`press whoami exited with ${whoami.signal ?? whoami.code}: ${whoami.stdout.trim()}`)
   }
@@ -595,7 +584,7 @@ async function confirmSetup(cliEnv: WalkthroughEnv, user: SeededUser): Promise<v
 
 // Best-effort revocation of the login-acquired token (server-side + keychain) on teardown.
 async function pressLogout(cliEnv: WalkthroughEnv): Promise<void> {
-  const result = await runCapture('bun', [pressCli, 'logout', '--json'], cliEnv)
+  const result = await runCapture(pressCli, ['logout', '--json'], cliEnv)
   if (result.code !== 0) {
     throw new Error(
       `press logout exited with ${result.signal ?? result.code}: ${result.stdout.trim()}`,
@@ -698,6 +687,7 @@ async function main(): Promise<number> {
     keychainDir = await mkdtemp(join(tmpdir(), 'press-walkthrough-keychain-'))
     cliEnv = {
       ...walkthroughEnv,
+      PATH: keychainDir,
       PRESS_HOST: siloEnv.PRESS_BASE_URL,
       PRESS_E2E_KEYCHAIN_FILE: join(keychainDir, 'keychain.json'),
     }

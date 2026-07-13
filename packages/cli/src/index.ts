@@ -13,6 +13,9 @@ import {
 } from './keychain'
 import { readPagePassword } from './pagePassword'
 import { formatPublishOutput } from './publishOutput'
+import { CLI_VERSION } from './version'
+
+export { CLI_VERSION } from './version'
 
 type JsonRecord = Record<string, unknown>
 
@@ -619,6 +622,10 @@ async function commandMove(ctx: CliContext, args: readonly string[]): Promise<vo
 }
 
 async function run(argv: readonly string[]): Promise<void> {
+  if (argv.length === 1 && argv[0] === '--version') {
+    console.log(CLI_VERSION)
+    return
+  }
   const json = hasFlag(argv, '--json')
   const host = normalizeHost(optionValue(argv, '--host') ?? process.env.PRESS_HOST)
   const withoutGlobals = stripFlags(stripOptions(argv, ['--host']), ['--json'])
@@ -658,7 +665,7 @@ async function run(argv: readonly string[]): Promise<void> {
       return
     default:
       throw new CliError(
-        'usage: press <login|logout|whoami|doctor|publish|list|page set|unpublish|move>',
+        'usage: press [--version] <login|logout|whoami|doctor|publish|list|page set|unpublish|move>',
       )
   }
 }

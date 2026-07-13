@@ -1,6 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 
-import { buildDoctorReport, createLoopbackCallbackHandler, parseMoveArguments } from './index'
+import cliPackage from '../package.json' with { type: 'json' }
+
+import {
+  buildDoctorReport,
+  CLI_VERSION,
+  createLoopbackCallbackHandler,
+  parseMoveArguments,
+} from './index'
+
+describe('CLI_VERSION', () => {
+  test('matches the package version used for releases', () => {
+    expect(CLI_VERSION).toBe(cliPackage.version)
+  })
+})
 
 describe('createLoopbackCallbackHandler', () => {
   test('ignores mismatched state and waits for a matching callback', async () => {

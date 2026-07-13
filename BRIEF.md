@@ -25,17 +25,21 @@ published page to attack its readers.
 - **Auditability** — every mutation is attributable after the fact.
 - **Reproducibility** — localnet and the harness are deterministic; no network
   or human dependency inside the loop.
+- **Distribution integrity** — supported release artifacts are self-contained,
+  version-identifiable, checksummed, and exercised as the real CLI surface.
 
 ## Floors (gate, not ceiling)
 
-| Floor                                                    | Measured by                                                                                                                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Types/lint/format green                                  | `nub run check` (tsgo -b, oxlint, oxfmt --check)                                                                                                                               |
-| ACL matrix + slug grammar + password hashing unit-tested | `nub run test` — includes exhaustive table test over REQ-ACL-001 via the pure ACL function                                                                                     |
-| Full e2e acceptance list green                           | `nub run e2e` against localnet (`nub run localnet` boots Postgres + server + seeded users; suite = SPEC.md acceptance criteria, Playwright + real CLI binary)                  |
-| Sandbox CSP on served report pages                       | e2e asserts REQ-SRV-002 headers on every `/p/` 200 serving report content; the REQ-SRV-004 entry page instead carries its strict form-capable CSP (no scripts, no report body) |
-| Publish path exercised end-to-end                        | e2e drives the actual `press` binary (spawned process), not raw HTTP shortcuts                                                                                                 |
-| Boot fail-closed                                         | e2e asserts prod+credential-auth boot refusal (INV-5) and missing-config abort (REQ-CFG-002)                                                                                   |
+| Floor                                                    | Measured by                                                                                                                                                                                    |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Types/lint/format green                                  | `nub run check` (tsgo -b, oxlint, oxfmt --check)                                                                                                                                               |
+| ACL matrix + slug grammar + password hashing unit-tested | `nub run test` — includes exhaustive table test over REQ-ACL-001 via the pure ACL function                                                                                                     |
+| Full e2e acceptance list green                           | `nub run e2e` against localnet (`nub run localnet` boots Postgres + server + seeded users; suite = SPEC.md acceptance criteria, Playwright + real CLI binary)                                  |
+| Sandbox CSP on served report pages                       | e2e asserts REQ-SRV-002 headers on every `/p/` 200 serving report content; the REQ-SRV-004 entry page instead carries its strict form-capable CSP (no scripts, no report body)                 |
+| Publish path exercised end-to-end                        | e2e drives the actual `press` binary (spawned process), not raw HTTP shortcuts                                                                                                                 |
+| Packaged CLI is self-contained                           | binary smoke runs `--version` and `doctor --json` from outside the checkout with Bun absent from `PATH`; archive rehearsal asserts one root `press` executable plus matching SHA-256 checksums |
+| Fleet release platforms are truthful                     | native macOS arm64 and Linux x64 release jobs assert the executable architecture and run the packaged-binary smoke before upload                                                               |
+| Boot fail-closed                                         | e2e asserts prod+credential-auth boot refusal (INV-5) and missing-config abort (REQ-CFG-002)                                                                                                   |
 
 ## Oracle
 
@@ -65,6 +69,7 @@ published page to attack its readers.
 - Weakening a floor or assertion to make a loop pass — infeasible items get the
   nearest-feasible alternative plus a `DEVIATIONS.md` entry.
 - Pushing, publishing packages/images, or deploying from inside a loop.
+- Publishing tags or GitHub Release assets from inside a loop.
 
 ## Decisions (ratified by Allen, 2026-07-02 — do not re-ask)
 
@@ -112,6 +117,17 @@ published page to attack its readers.
   pages' redirects are hard destination conflicts, archived destinations are
   reclaimable, and moving back consumes the same-page alias. Temporary and
   standalone redirect management are out of v1 (ratified 2026-07-09).
+- The CLI ships as standalone GitHub Release binaries for macOS arm64 and Linux
+  x64, with one root `press` executable per archive, SHA-256 checksums, and
+  `press --version` equal to the semver release. Dotfiles/mise is the sole fleet
+  owner; no Homebrew, npm-global, bun-global, checkout shim, or ad-hoc
+  `~/.local/bin` owner runs in parallel. Source-package release capability
+  remains available (ratified 2026-07-12).
+- The release channel is authenticated GitHub Releases in the existing private
+  `unrulysystems/press` repository, with no public release-only mirror.
+  Dotfiles/mise may obtain download authorization from each host's existing
+  GitHub CLI session without storing a token in either repository (ratified
+  2026-07-13).
 - Reader-facing gates are magazine-grade, never dead-ends (ratified 2026-07-04,
   from the dogfood bug bash):
   - `password` pages serve a **branded HTML password-entry page** to browsers
@@ -127,7 +143,9 @@ published page to attack its readers.
 
 ## Boundary (Allen's alone)
 
-- Creating the GitHub repo / pushing anywhere; publishing images or packages.
+- Creating or changing visibility of a GitHub repo; pushing anywhere; creating
+  tags or GitHub Releases; publishing images, packages, or release assets.
+- Deploying the resulting dotfiles/mise configuration to fleet hosts.
 - Creating the Google OAuth client; DNS; any deploy; any live secret.
 - The attended real-Google final-gate walkthrough.
 - Amending SPEC requirements, this brief's Decisions/Boundary, or the design
