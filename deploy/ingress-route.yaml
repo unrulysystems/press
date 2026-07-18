@@ -1,0 +1,44 @@
+# Traefik IngressRoutes for press.onyx.unrulysystems.com.
+# Public traffic reaches onyx directly (wildcard A record *.onyx.unrulysystems.com -> the node's
+# public IP, DNS-only) and Traefik terminates TLS with the cert-manager press-tls Secret.
+#
+# These bind the ISOLATED public entrypoints onyxweb/onyxwebsecure (infra: traefik HelmChartConfig +
+# traefik-onyx Service), NOT the shared web/websecure — so this route is internet-reachable while the
+# default entrypoints stay Cloudflare-Tunnel-only. Public reachability is intended: press gates
+# private pages behind its own auth, and public collections are meant to be shareable by link.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: press
+  namespace: press
+spec:
+  entryPoints:
+    - onyxwebsecure
+  routes:
+    - match: Host(`press.onyx.unrulysystems.com`)
+      kind: Rule
+      services:
+        - name: press
+          port: 80
+  tls:
+    secretName: press-tls
+---
+# Bare http:// hits get bounced to https so shared links work however they're typed.
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: press-redirect
+  namespace: press
+spec:
+  entryPoints:
+    - onyxweb
+  routes:
+    - match: Host(`press.onyx.unrulysystems.com`)
+      kind: Rule
+      middlewares:
+        - name: press-redirect-https
+      services:
+        # Traefik requires a service on every route even when the middleware short-circuits with a
+        # redirect; it is never actually reached.
+        - name: press
+          port: 80

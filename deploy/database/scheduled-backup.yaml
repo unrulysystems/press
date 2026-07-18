@@ -1,0 +1,16 @@
+# Daily base backup to R2 at 02:00 UTC. WAL archiving is continuous via the Cluster CR's backup
+# config; base backups just provide faster PITR recovery points.
+#
+# CNPG's schedule is a SIX-field cron (leading seconds field), not the five-field crontab format —
+# a five-field value is rejected by the operator. "0 0 2 * * *" is 02:00:00 daily.
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: press-daily
+  namespace: press
+spec:
+  schedule: "0 0 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: press-db
+  method: barmanObjectStore

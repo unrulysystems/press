@@ -1,0 +1,15 @@
+# TLS certificate via cert-manager + Cloudflare DNS01 (letsencrypt-prod). Creates the press-tls
+# Secret the IngressRoute references. DNS-01 issues this sub-subdomain fine, unlike Cloudflare's
+# edge Universal SSL — which is why the direct-DNS path gets TLS for free.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: press-tls
+  namespace: press
+spec:
+  secretName: press-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - press.onyx.unrulysystems.com

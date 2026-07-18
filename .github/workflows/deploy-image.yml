@@ -1,0 +1,62 @@
+name: deploy-image
+
+# Builds the server image and publishes it as a private container image to GHCR, for the onyx k3s
+# deploy (infra repo cluster/apps/press points Flux at this repo's deploy/ manifests, which pull
+# ghcr.io/unrulysystems/press). Manual by default so image pushes stay intentional; also fires when
+# the server surface changes on main.
+#
+# Unlike sortessori's equivalent, no build runs on the runner: press's Dockerfile is self-contained
+# (toolchain -> build -> runtime-deps -> runtime), and .npmrc needs no registry auth, so the image
+# builds straight from a clean checkout.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'packages/**'
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'package.json'
+      - 'lock.yaml'
+      - '.npmrc'
+      - '.github/workflows/deploy-image.yml'
+
+concurrency:
+  group: deploy-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/unrulysystems/press
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          # :latest is what the cluster Deployment tracks; :<sha> gives an immutable tag to pin to
+          # if the deploy is ever moved off :latest.
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

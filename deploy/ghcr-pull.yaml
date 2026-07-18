@@ -1,0 +1,39 @@
+# docker-registry pull secret for ghcr.io — lets the deployment pull the PRIVATE
+# ghcr.io/unrulysystems/press image. Reuses the classic PAT in 1Password item
+# "GitHub PAT GHCR Read" (Infrastructure vault), same as sortessori and echo-metis.
+#
+# NOTE: that PAT authenticates as user 0xbigboss. It must have read:packages access to the
+# unrulysystems org's packages (the image lives under ghcr.io/unrulysystems, not 0xbigboss). Since
+# 0xbigboss owns the org, a classic read:packages PAT covers it; verify after first image push.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: press-ghcr-pull
+  namespace: press
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: onepassword
+  target:
+    name: press-ghcr-pull
+    creationPolicy: Owner
+    template:
+      engineVersion: v2
+      type: kubernetes.io/dockerconfigjson
+      data:
+        .dockerconfigjson: |
+          {
+            "auths": {
+              "ghcr.io": {
+                "username": "0xbigboss",
+                "password": "{{ .password }}",
+                "auth": "{{ printf "0xbigboss:%s" .password | b64enc }}"
+              }
+            }
+          }
+  data:
+    - secretKey: password
+      remoteRef:
+        key: GitHub PAT GHCR Read
+        property: credential
