@@ -1,0 +1,48 @@
+# CNPG Postgres — the source of truth for page existence, ACL, audit history, users, sessions, and
+# API tokens (docs/ops.md). The operator publishes connection details as the `press-db-app` Secret;
+# deployment.yaml reads its `uri` key as DATABASE_URL.
+#
+# initdb database/owner are both `press`, so the generated uri points at the app database directly.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: press-db
+  namespace: press
+spec:
+  instances: 1
+
+  # Data on nvme0 (default local-path).
+  storage:
+    size: 10Gi
+    storageClass: local-path
+
+  # WAL on nvme1 (/mnt/backups) — separates WAL I/O from data I/O. barman-cloud archives WAL
+  # directly to R2; this split is for I/O isolation only, not durability.
+  walStorage:
+    size: 5Gi
+    storageClass: backup-storage
+
+  bootstrap:
+    initdb:
+      database: press
+      owner: press
+
+  backup:
+    barmanObjectStore:
+      destinationPath: "s3://press-backups/"
+      # TODO(allen): replace REPLACE_R2_ACCOUNT_ID with the Cloudflare R2 account ID, and create the
+      # `press-backups` bucket, before merge. A wrong endpoint fails WAL archiving, which CNPG
+      # surfaces as a degraded cluster rather than a hard boot failure.
+      endpointURL: https://REPLACE_R2_ACCOUNT_ID.r2.cloudflarestorage.com
+      s3Credentials:
+        accessKeyId:
+          name: press-r2-credentials
+          key: access-key-id
+        secretAccessKey:
+          name: press-r2-credentials
+          key: secret-access-key
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+    retentionPolicy: "30d"

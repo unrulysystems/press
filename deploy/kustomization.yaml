@@ -1,0 +1,21 @@
+# App-owned Kubernetes manifests for the onyx deploy. The infra repo only wires this path in via a
+# Flux GitRepository + Kustomization (cluster/apps/press); Flux reconciles these resources onto the
+# cluster from this repo's main branch.
+#
+# Order matters only for readability — kustomize applies as one set and Flux retries until the
+# dependencies (CNPG cluster ready -> press-db-app secret exists) settle.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - ghcr-pull.yaml
+  - secrets.yaml
+  - config.yaml
+  - storage.yaml
+  - database/cluster.yaml
+  - database/scheduled-backup.yaml
+  - deployment.yaml
+  - service.yaml
+  - certificate.yaml
+  - middleware.yaml
+  - ingress-route.yaml

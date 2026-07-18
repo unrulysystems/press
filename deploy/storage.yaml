@@ -1,0 +1,21 @@
+# Blob storage for published HTML ($PRESS_STORAGE_DIR/<collection>/<file>, plus the .archive/ tree
+# that unpublish soft-deletes into).
+#
+# ReadWriteOnce on local-path: a single node-local volume, which is why deployment.yaml pins
+# replicas: 1 with a Recreate strategy — two pods must never mount this concurrently.
+#
+# NOTE: CNPG backs the Postgres side up to R2, but this PVC is NOT covered by that. Blob backup is
+# the rsync half of docs/ops.md and remains a follow-up; today the durable source of truth for
+# published content is whatever repo the HTML was published from.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: press-storage
+  namespace: press
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 10Gi

@@ -1,0 +1,14 @@
+# Redirect http -> https (used by the onyxweb-entrypoint route in ingress-route.yaml).
+#
+# No basic-auth middleware here, unlike the sortessori demo: press ships its own identity gate
+# (Google OAuth + per-page ACL), and fronting it with basic auth would break the OAuth redirect
+# round-trip and the CLI's token-authenticated publish path.
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: press-redirect-https
+  namespace: press
+spec:
+  redirectScheme:
+    scheme: https
+    permanent: true

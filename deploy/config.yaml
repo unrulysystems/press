@@ -1,0 +1,35 @@
+# Non-secret server config. Mounted via envFrom alongside press-secrets, so each key IS the env var
+# name parsed by @press/core parseConfig.
+#
+# Deliberately ABSENT: PRESS_ENABLE_CREDENTIAL_AUTH. Setting it truthy here would make the server
+# refuse to boot (production + credential auth is rejected in server/config.ts). Google OAuth is the
+# only sign-in provider in this deployment.
+#
+# PRESS_PORT is not set — the image already defaults it to 4174, which deployment.yaml's containerPort
+# and the Service targetPort both bind to.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: press-config
+  namespace: press
+data:
+  NODE_ENV: production
+
+  # Must match the Google OAuth client's authorized origin and the public IngressRoute host, or the
+  # OAuth redirect round-trip breaks.
+  PRESS_BASE_URL: https://press.onyx.unrulysystems.com
+
+  # Blob root for published HTML. Backed by the press-storage PVC (storage.yaml) and mounted at this
+  # exact path in deployment.yaml. Rows in Postgres are the source of truth for whether a page
+  # exists; these files are the bytes served — both are required for a working restore.
+  PRESS_STORAGE_DIR: /data/storage
+
+  # 25 MiB, matching the documented default in .env.example.
+  PRESS_MAX_UPLOAD_BYTES: "26214400"
+
+  # TODO(allen): set before merge — comma-separated email domains permitted to sign in.
+  # Anyone with a Google account on these domains can reach the identity gate.
+  PRESS_ALLOWED_DOMAINS: REPLACE_ME
+
+  # TODO(allen): set before merge — comma-separated admin emails (full owner rights).
+  PRESS_ADMIN_EMAILS: REPLACE_ME

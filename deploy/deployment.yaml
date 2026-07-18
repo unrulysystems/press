@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: press
+  namespace: press
+spec:
+  replicas: 1
+  # Recreate, not RollingUpdate: press-storage is a ReadWriteOnce PVC, so the outgoing pod must
+  # release it before the incoming pod can mount it. A rolling update would deadlock on the volume.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: press
+  template:
+    metadata:
+      labels:
+        app: press
+    spec:
+      imagePullSecrets:
+        - name: press-ghcr-pull
+      containers:
+        - name: press
+          image: ghcr.io/unrulysystems/press:latest
+          # :latest + Always keeps iteration simple: re-run the deploy-image workflow, then
+          # `kubectl rollout restart deployment/press -n press` to pull the new build.
+          # Switch to an immutable :<sha> tag here for a GitOps-pinned deploy once this settles.
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 4174
+              name: http
+          # Boot is fail-closed: the image validates this config, applies DB migrations, then serves.
+          # Any missing/invalid var or unreachable database exits the container instead of serving
+          # against a bad config or stale schema — so a CrashLoopBackOff here is the expected signal
+          # that config is incomplete, not a mystery.
+          envFrom:
+            - configMapRef:
+                name: press-config
+            - secretRef:
+                name: press-secrets
+          env:
+            # CNPG publishes connection details as the <cluster>-app Secret.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: press-db-app
+                  key: uri
+          volumeMounts:
+            - name: storage
+              mountPath: /data/storage
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+          # initialDelaySeconds covers first-boot migrations before the server listens.
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 45
+            periodSeconds: 30
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: press-storage
