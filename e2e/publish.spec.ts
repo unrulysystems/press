@@ -1170,6 +1170,7 @@ test('malformed percent-encoding in mutation paths returns 400, not 500 (M-2)', 
           : { headers: authHeaders(actors.owner.token) }),
       ...(bodies[index].data !== undefined ? { data: bodies[index].data } : {}),
     })
+    // oxlint-disable-next-line no-await-in-loop -- each path's status/text is a distinct request
     expect(response.status(), await response.text()).toBe(400)
   }
 })
