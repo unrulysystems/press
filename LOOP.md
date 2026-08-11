@@ -23,6 +23,19 @@ the ladder; the verifier — not confidence — decides when work is done.
   the unit contract, incl. losing non-owner → 403 not 500). Decision 1 ratified
   at the gate (final ratification: Allen at boundary).
 - **Next: Unit 2 — unlock cookie bound to password (F-15/19).**
+  _Superseded — unit 2 & 3 completed below._
+- **Unit 2 DONE (iteration 2).** Commit `2bd38bd` unlock cookie bound to
+  sha256(passwordHash) — reroll/republish invalidates outstanding cookies, no
+  migration. TDD red (cookie still opened after reroll) → green. e2e
+  publish.spec.ts 19/19; check green; test 201 pass / 0 fail. **Review gate 2
+  APPROVE** (`review-1786462442671-4cxskk`).
+- **Unit 3 DONE (iteration 3).** Commits `f4b88a7` keychain seam compiled out
+  of release binaries (F-16), `d551339` verifier never clobbers `artifacts/cli/press`,
+  `4a626ed` fail-closed fingerprint. 2 review fix-up rounds: reviewer caught the
+  release.yml ordering clobber (reproduced: artifact SHA changed seam-free→seam-on)
+  and the silent-read flaw. **Review gate 3 APPROVE** (`review-1786464829729-ra88p9`).
+  test:cli:binary green; e2e/cli.spec.ts 4/4.
+- **Next: Unit 4 — localnet Postgres loopback (F-20).**
 - Open verified findings targeted by this loop: F-15/F-19 (unlock cookie
   survives password reroll), F-16 (keychain test seam honored by packaged CLI),
   F-18 (republish resurrects stale visibility/allowlist/passwordHash), F-20
@@ -67,10 +80,14 @@ the ladder; the verifier — not confidence — decides when work is done.
    byte caps far below `PRESS_MAX_UPLOAD_BYTES` (codes/passwords are tiny),
    rejecting oversized bodies with 413 before buffering. The publish upload cap
    is unchanged. Provisional.
-4. 2026-08-11 — **Keychain test seam is test-build-only** (F-16). Gate
-   `PRESS_E2E_KEYCHAIN_FILE` behind a build-time define that only
-   `buildCliBinary.ts` in test/e2e builds sets; release binaries never compile
-   the file backend in. Hermetic e2e keeps its seam. Provisional.
+4. 2026-08-11 — **Keychain test seam is test-build-only** (F-16).
+   `buildCliBinary` injects `process.env.PRESS_TEST_BUILD` at compile time —
+   "1" for hermetic test/e2e binaries, "0" for release (`--release` in
+   release.yml); `keychain.ts` honors `PRESS_E2E_KEYCHAIN_FILE` only when the
+   compiled switch is on, and the verifier never writes to `artifacts/cli/press`
+   (release workflow order: build --release → verify → package). Source runs
+   keep the seam enabled. **Ratified at review gate 3 (2026-08-11, rl review
+   APPROVE); final ratification: Allen at boundary.**
 5. 2026-08-11 — **Boundary batch (Allen) carries proposed answers, not stuck
    work** (F-12/17, F-13, F-14, see Work plan unit 6). The loop fixes only
    ratified-boundary-adjacent effects after answers land; nothing here is
