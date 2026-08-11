@@ -17,7 +17,7 @@ const releaseBuild = args.includes('--release')
 
 const binary = await buildCliBinary({
   platform: requestedPlatform,
-  testBuild: releaseBuild ? false : true,
+  testBuild: !releaseBuild,
   ...(optionValue(args, '--outfile') ? { outfile: optionValue(args, '--outfile') } : {}),
 })
 console.log(binary)

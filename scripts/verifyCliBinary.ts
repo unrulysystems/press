@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import {
   CLI_PACKAGE_VERSION,
   buildCliBinary,
+  defaultCliBinary,
   hostReleasePlatform,
   packageCliBinary,
   sha256File,
@@ -214,21 +215,29 @@ async function verifyMacKeychainRoundTrip(
 }
 
 const platform = hostReleasePlatform()
-const builtBinary = await buildCliBinary({ platform })
+// Capture the release artifact's bytes before any verifier build runs; the
+// harness must leave artifacts/cli/press untouched (F-16, review round 2).
+const releaseArtifactBefore = await sha256File(defaultCliBinary).catch(() => undefined)
 const isolated = await mkdtemp(join(tmpdir(), 'press-cli-standalone-'))
 const isolatedPath = join(isolated, 'path')
 const binary = join(isolated, 'press')
 const keychainFile = join(isolated, 'keychain.json')
 const preloadMarker = join(isolated, 'bunfig-preload-ran')
 await mkdir(isolatedPath)
-// Copy the hermetic test build to its own path BEFORE building the seam-free
-// release binary, which must never clobber the artifact under test.
-await copyFile(builtBinary, binary)
+// Build both variants to private outfiles: the verifier must never write to
+// artifacts/cli/press (the release artifact), or the packaging step that
+// follows in release.yml could consume a seam-enabled binary (F-16, review
+// round 2).
+const builtBinary = await buildCliBinary({
+  platform,
+  outfile: join(isolated, 'test-build.bin'),
+})
 const releaseBinary = await buildCliBinary({
   platform,
   testBuild: false,
   outfile: join(isolated, 'release-press.bin'),
 })
+await copyFile(builtBinary, binary)
 await chmod(binary, 0o755)
 
 const env = {
@@ -318,6 +327,13 @@ const seamlessReport = JSON.parse(seamlessDoctor.stdout) as {
 }
 if (seamlessReport.ok !== true || seamlessReport.data?.tokenSource !== 'none') {
   fail(`release CLI honored the keychain seam (F-16): ${seamlessDoctor.stdout}`)
+}
+
+// The release workflow builds its seam-free artifact at artifacts/cli/press
+// BEFORE this harness runs and packages it AFTER, so any clobber ships a
+// seam-enabled binary (F-16, review round 2). Fail loudly instead.
+if (releaseArtifactBefore !== (await sha256File(defaultCliBinary).catch(() => undefined))) {
+  fail('verifier must not modify the release artifact at artifacts/cli/press (F-16)')
 }
 
 const packaged = await packageCliBinary({ binary, platform, outdir: join(isolated, 'release') })
