@@ -36,6 +36,23 @@ the ladder; the verifier — not confidence — decides when work is done.
   and the silent-read flaw. **Review gate 3 APPROVE** (`review-1786464829729-ra88p9`).
   test:cli:binary green; e2e/cli.spec.ts 4/4.
 - **Next: Unit 4 — localnet Postgres loopback (F-20).**
+  _Superseded — units 4-6 completed below._
+- **Unit 4 DONE (iteration 4).** Commit `ded3ee3` compose loopback + e2e
+  fail-closed floor (F-20), `49cfb57`/`4c8d364`/`6e03add` review fixes (docker
+  exit-status fail-closed, positive loopback-host predicate, bounded probe).
+  **Review gate 4 APPROVE** (`review-1786467084558-yhpvtw`). Container binding
+  now `127.0.0.1:54329->5432/tcp`.
+- **Unit 5 DONE (iteration 5).** Commit `ef77e60` cap anonymous bodies (8 KiB
+  CLI exchange / 16 KiB password gate, 413 before buffering, stream cancel) +
+  malformed-path 400s (M-2/M-3), `12ce41c`, `91e4bd8`. **Review gate 5 APPROVE**
+  (`review-1786468790723-qxq128`).
+- **Unit 6 DONE (iteration 6) — interior green.** Floors: `nub run check` green;
+  `nub run test` 205 pass / 0 fail (incl. new reader suite); suite surface green
+  (publish 21/21, cli 4/4, remaining specs 79/79 — the silo→Tilt orchestrator
+  needs a PTY that the harness env lacks, so the suite ran against the manually
+  booted localnet, same compose+one stack; CI runs the `nub run e2e` path with a
+  TTY). test:cli:binary green incl. seam-gate floor.
+- **Terminal state: interior-green achieved; branch ready for Allen's batch    (below) and the publish steps (push / merge proposal). Nothing pushed.**
 - Open verified findings targeted by this loop: F-15/F-19 (unlock cookie
   survives password reroll), F-16 (keychain test seam honored by packaged CLI),
   F-18 (republish resurrects stale visibility/allowlist/passwordHash), F-20
@@ -74,12 +91,13 @@ the ladder; the verifier — not confidence — decides when work is done.
    verify against the current row's hash, so reroll/overwrite-publish of a
    password page invalidates outstanding unlock cookies immediately. No new
    column, no migration (schema changes stay out of this loop's interior).
-   Provisional.
+   **Ratified at review gate 2 (2026-08-11, APPROVE); final ratification: Allen**
+   **at boundary.**
 3. 2026-08-11 — **Small dedicated caps for anonymous bodies** (M-3).
    `/api/cli/exchange` JSON and `/p/:c/:f` password-unlock text get streaming
-   byte caps far below `PRESS_MAX_UPLOAD_BYTES` (codes/passwords are tiny),
-   rejecting oversized bodies with 413 before buffering. The publish upload cap
-   is unchanged. Provisional.
+   byte caps far below `PRESS_MAX_UPLOAD_BYTES` (codes/passwords are tiny), rejecting oversized bodies with 413 before buffering. The publish upload cap
+   is unchanged. **Ratified at review gate 5 (2026-08-11, APPROVE); final
+   ratification: Allen at boundary.**
 4. 2026-08-11 — **Keychain test seam is test-build-only** (F-16).
    `buildCliBinary` injects `process.env.PRESS_TEST_BUILD` at compile time —
    "1" for hermetic test/e2e binaries, "0" for release (`--release` in
@@ -91,7 +109,7 @@ the ladder; the verifier — not confidence — decides when work is done.
 5. 2026-08-11 — **Boundary batch (Allen) carries proposed answers, not stuck
    work** (F-12/17, F-13, F-14, see Work plan unit 6). The loop fixes only
    ratified-boundary-adjacent effects after answers land; nothing here is
-   interior.
+   interior. **Emitted at done — see `## Boundary batch for Allen` below.**
 
 ## Work plan (ADF per unit)
 
@@ -180,6 +198,42 @@ in-session edits with an in-flight worker on the same files.
 
 - None cited on this branch. (Prior `resolved` findings are closed by
   `uaudit-2026-08-11-7a71f5`, not chased.)
+
+## Boundary batch for Allen (decision batch at done — 2026-08-11)
+
+The interior is green; these three are Allen-only (auth/security boundary +
+SPEC amendments). Each carries evidence and a proposed answer; answering turns
+them into ratified Decisions the loop can apply on a follow-up pass.
+
+**B-1 — F-12/F-17 (high): CLI authorize has no consent step.**
+Evidence: `cliFlow.ts` mints a code from any authenticated GET with caller-chosen
+loopback port/challenge/state (server never binds state); exchange mints a
+no-expiry token; there is no approval UI at all — REQ-AUTH-004's "after the user
+authenticates" is satisfied by the login page, not the authorize page. Proposed
+answer (recommended, matches the advisory): server-owned pending-login record
+(state+port+challenge bound server-side), same-origin approval page, loopback
+redirect only after CSRF-protected POST; amends REQ-AUTH-004. Alternative:
+accept the documented risk (local process / any webpage with an ambient session)
+and reduce severity in DEVIATIONS/README. Needs a SPEC amendment either way.
+
+**B-2 — F-13 (high): admin role is sticky after PRESS_ADMIN_EMAILS removal.**
+Evidence: session-create hook only promotes; verifyApiToken/ACL read persisted
+`user.role`; REQ-AUTH-007 defines admins by configured email. Proposed answer
+(recommended): config is the source of truth — derive role at every sign-in
+(demote too) AND resolve token role from `PRESS_ADMIN_EMAILS` at use-time
+(fail-closed when unlisted); the `role` column becomes a cache. Simple, no
+migration; test removes an email and asserts the next session/token loses admin.
+
+**B-3 — F-14 (high): unconfigured Better Auth admin plugin surface.**
+Evidence: `admin()` mounted with defaults; the auth catch-all forwards GET/POST,
+so admin-role sessions reach set-role/create-user/ban/impersonate/list-users —
+far beyond the SPEC's admin scope (read-all + unpublish). Proposed answer
+(recommended): drop the `admin()` plugin; press moderation is ACL-only and
+impersonation support can be added deliberately if ever wanted. Alternative:
+restrict `admin({ access })` to ban/unban/impersonate only.
+
+Answer format: B-1 A|B, B-2 A, B-3 A|B — ratified entries get appended to
+Decisions and a follow-up packet lands the chosen fixes.
 
 ## Terminal states & budget
 
