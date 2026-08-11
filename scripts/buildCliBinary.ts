@@ -11,8 +11,13 @@ if (!isReleasePlatform(requestedPlatform)) {
   throw new Error(`unsupported release platform ${requestedPlatform}`)
 }
 
+// --release builds a seam-free binary (F-16): PRESS_E2E_KEYCHAIN_FILE has no
+// effect in the shipped artifact. The default is the hermetic test/e2e build.
+const releaseBuild = args.includes('--release')
+
 const binary = await buildCliBinary({
   platform: requestedPlatform,
+  testBuild: releaseBuild ? false : true,
   ...(optionValue(args, '--outfile') ? { outfile: optionValue(args, '--outfile') } : {}),
 })
 console.log(binary)

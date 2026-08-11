@@ -293,10 +293,19 @@ function createFfiBackend(): Backend {
   }
 }
 
-// Resolve the active backend: the file seam wins when PRESS_E2E_KEYCHAIN_FILE is set (tests), else
-// the macOS FFI backend, else nothing (non-mac / load failure) -> callers fall back to PRESS_TOKEN.
+// Compile-time build gate (F-16): buildCliBinary defines
+// process.env.PRESS_TEST_BUILD as the literal "1" (hermetic test/e2e binaries)
+// or "0" (release binaries). Running from source (unit tests) leaves it unset,
+// which keeps the seam enabled. A runtime environment value can never change
+// the compiled decision.
+function testBuildKeychainSeamEnabled(): boolean {
+  return !process.env.PRESS_TEST_BUILD || process.env.PRESS_TEST_BUILD !== '0'
+}
+
+// Resolve the active backend: the file seam wins when PRESS_E2E_KEYCHAIN_FILE is set (test builds only),
+// else the macOS FFI backend, else nothing (non-mac / load failure) -> callers fall back to PRESS_TOKEN.
 function backend(): Backend {
-  const file = process.env.PRESS_E2E_KEYCHAIN_FILE
+  const file = testBuildKeychainSeamEnabled() ? process.env.PRESS_E2E_KEYCHAIN_FILE : undefined
   if (file) {
     return fileBackend(file)
   }

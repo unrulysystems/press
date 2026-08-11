@@ -62,7 +62,7 @@ jobs:
       - name: Install dependencies
         run: nub ci
       - name: Build native standalone executable
-        run: bun scripts/buildCliBinary.ts --platform "${{ matrix.platform }}"
+        run: bun scripts/buildCliBinary.ts --platform "${{ matrix.platform }}" --release
       - name: Verify standalone behavior and release rehearsal
         env:
           PRESS_VERIFY_REAL_KEYCHAIN: ${{ matrix.verify_real_keychain }}
