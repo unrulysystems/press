@@ -200,7 +200,15 @@ async function resolvePagePasswordChannel(
   row: PageRow,
 ): Promise<BasicPasswordVerification | undefined> {
   const cookie = readCookieValue(request.headers.get('cookie'), pagePasswordCookieName(row.id))
-  if (verifyPagePasswordCookie(dbConfig.betterAuthSecret, row.id, cookie, Date.now())) {
+  if (
+    verifyPagePasswordCookie(
+      dbConfig.betterAuthSecret,
+      row.id,
+      cookie,
+      Date.now(),
+      row.passwordHash,
+    )
+  ) {
     return { verified: true }
   }
   return await verifyBasicPassword(request, row.passwordHash)
@@ -325,7 +333,12 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
     })
   }
   const expiryMs = Date.now() + PAGE_PASSWORD_COOKIE_TTL_MS
-  const value = signPagePasswordCookie(dbConfig.betterAuthSecret, row.page.id, expiryMs)
+  const value = signPagePasswordCookie(
+    dbConfig.betterAuthSecret,
+    row.page.id,
+    expiryMs,
+    row.page.passwordHash,
+  )
   // The 303 is a `/p/` response that is not the entry page, so it carries the sandbox
   // CSP + security headers of REQ-SRV-002 / INV-2 (via servedPageResponse), plus the
   // redirect Location and the page-scoped unlock cookie.

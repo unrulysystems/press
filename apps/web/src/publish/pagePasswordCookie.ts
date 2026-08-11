@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
 // A short-lived, page-scoped unlock cookie proves a viewer entered the correct
 // password on the branded gate (REQ-SRV-004 / F1). It is HMAC-signed with the
@@ -42,9 +42,24 @@ function sign(secret: string, payload: string): string {
   return createHmac('sha256', secret).update(payload).digest('base64url')
 }
 
-// value = `${expiryMs}.${signature}`, signature = HMAC(secret, `${pageId}.${expiryMs}`).
-export function signPagePasswordCookie(secret: string, pageId: string, expiryMs: number): string {
-  return `${expiryMs}.${sign(secret, `${pageId}.${expiryMs}`)}`
+// Stable digest of the page's current password hash (null-marker when the page has
+// no hash). Binding the cookie signature to this digest means a password reroll — or
+// any publish that replaces the hash — invalidates already-issued unlock cookies
+// immediately, without a schema change or a per-page rotation secret (F-15/19).
+function passwordDigest(passwordHash: string | null): string {
+  return createHash('sha256')
+    .update(passwordHash ?? '')
+    .digest('base64url')
+}
+
+// value = `${expiryMs}.${signature}`, signature = HMAC(secret, `${pageId}.${expiryMs}.${passwordDigest}`).
+export function signPagePasswordCookie(
+  secret: string,
+  pageId: string,
+  expiryMs: number,
+  passwordHash: string | null,
+): string {
+  return `${expiryMs}.${sign(secret, `${pageId}.${expiryMs}.${passwordDigest(passwordHash)}`)}`
 }
 
 export function verifyPagePasswordCookie(
@@ -52,6 +67,7 @@ export function verifyPagePasswordCookie(
   pageId: string,
   value: string | undefined,
   nowMs: number,
+  passwordHash: string | null,
 ): boolean {
   if (!value) {
     return false
@@ -65,7 +81,7 @@ export function verifyPagePasswordCookie(
   if (!Number.isSafeInteger(expiryMs) || expiryMs <= nowMs) {
     return false
   }
-  const expected = sign(secret, `${pageId}.${expiryMs}`)
+  const expected = sign(secret, `${pageId}.${expiryMs}.${passwordDigest(passwordHash)}`)
   const provided = Buffer.from(signature)
   const wanted = Buffer.from(expected)
   return provided.length === wanted.length && timingSafeEqual(provided, wanted)

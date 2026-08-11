@@ -1139,6 +1139,55 @@ test('password gate: branded HTML entry, form+cookie unlock, Basic for programma
   await expect(page.locator('body')).toContainText(bodyMarker)
 })
 
+test('password reroll invalidates a previously issued unlock cookie (F-15/19)', async ({
+  baseURL,
+  page,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-gate-reroll`
+  const file = 'locked.html'
+  const firstSecret = 'first-secret-1234'
+  const bodyMarker = 'REPORT-BODY-AFTER-REROLL'
+
+  const published = await api.put(`/api/pages/${collectionSlug}/${file}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, {
+      'content-type': 'text/html',
+      'x-press-page-password': firstSecret,
+    }),
+    data: `<!doctype html><title>Reroll</title><article>${bodyMarker}</article>`,
+  })
+  expect(published.status()).toBe(200)
+  const path = `/p/${collectionSlug}/${file}`
+
+  // Unlock in a real browser: the gate posts the password, the 303 sets the
+  // page-scoped unlock cookie, and the report renders.
+  await page.goto(path)
+  await page.fill('input[name="password"]', firstSecret)
+  await page.click('button[type="submit"]')
+  await expect(page.locator('body')).toContainText(bodyMarker)
+
+  // Owner rerolls the password; the plaintext hash changes but the page id stays.
+  const reroll = await api.post(`/api/pages/${collectionSlug}/${file}/password`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(reroll.status()).toBe(200)
+  const rerollBody = (await reroll.json()) as { password: string }
+
+  // The same browser still holds the old unlock cookie. It must no longer open
+  // the page: the gate reappears and the report body is not served.
+  await page.goto(path)
+  await expect(page.locator('input[name="password"]')).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(bodyMarker)
+
+  // The new password unlocks normally.
+  await page.fill('input[name="password"]', rerollBody.password)
+  await page.click('button[type="submit"]')
+  await expect(page.locator('body')).toContainText(bodyMarker)
+})
+
 test('page move preserves identity and ACL while permanent redirects track the canonical path', async ({
   baseURL,
 }) => {
