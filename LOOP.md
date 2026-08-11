@@ -75,6 +75,24 @@ the ladder; the verifier — not confidence — decides when work is done.
 <!-- dated entries; mark each "ratified (human)" or "provisional (driver)".
      provisional entries carry rationale + consult verdict if one ran -->
 
+6. 2026-08-11 — **B-1 A (Allen, ratified): CLI authorize gains a consent
+   step.** Server-owned pending-login record (state/port/challenge bound
+   server-side), same-origin approval page, loopback redirect only after a
+   CSRF-protected POST; code still minted only at approval. Amends REQ-AUTH-004.
+7. 2026-08-11 — **B-2 A (Allen, ratified): config is the admin source of
+   truth.** Role derived at every sign-in (promote AND demote) and resolved
+   from PRESS_ADMIN_EMAILS at every authorization use (tokens, session reads,
+   whoami); the role column is a cache. Amends REQ-AUTH-007.
+8. 2026-08-11 — **B-3 A (Allen, ratified): drop the Better Auth admin()
+   plugin.** press moderation is read-all + unpublish via decideAcl; the plugin
+   surface is removed at the source.
+
+## Follow-up pass (B-1..B-3, ratified 2026-08-11)
+
+- Unit B-3 (drop admin plugin) → Unit B-2 (config-derived role) → Unit B-1
+  (consent screen + SPEC amendments). Same TDD + review-gate discipline; one
+  review per unit.
+
 1. 2026-08-11 — **Republish-after-unpublish is a fresh publish** (F-18). When a
    PUT lands on an `archivedAt` row and the request carries no explicit
    visibility/allow/password options, the page starts from neutral state exactly
