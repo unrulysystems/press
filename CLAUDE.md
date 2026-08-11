@@ -12,9 +12,9 @@ unrulysystems (Allen / 0xbigboss). Built from typescript-template.
   Decisions (do not re-ask them), Boundary.
 - `apps/web/BRIEF.md` — design/taste law for the web surface (magazine bar,
   blind screenshot oracle).
-- `DELTA.md` — dated wrap notes, known gaps, proposed next steps, and Boundary
-  handoff.
-- `DEVIATIONS.md` — accepted implementation deviations and blocked floors.
+- `AUDIT.md` — the security audit ledger (tooling-owned).
+- `docs/ops.md` — backup/restore and archive-purge runbook.
+- `README.md` — development session and deployment (boundary) steps.
 
 ## Commands
 

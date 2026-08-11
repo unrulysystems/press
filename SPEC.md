@@ -1,8 +1,8 @@
 # press — SPEC
 
 The contract for press v1. See `VISION.md` for why, `BRIEF.md` for the quality
-bar, `apps/web/BRIEF.md` for the design bar, `DELTA.md` for dated wrap notes,
-and `DEVIATIONS.md` for accepted implementation deviations.
+bar, `apps/web/BRIEF.md` for the design bar, `docs/ops.md` for the backup/
+restore runbook, and `README.md` for development and deployment steps.
 
 Status: ratified by Allen 2026-07-02 (design chat). Amendments require Allen.
 
