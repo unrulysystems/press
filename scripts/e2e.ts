@@ -120,8 +120,24 @@ async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEn
     throw new Error(`localnet postgres container ${composeProjectName}-postgres-1 not found`)
   }
   const joined = ports.join(' ')
-  if (/(^|[,\s])(0\.0\.0\.0|\[::\])?:/.test(joined)) {
-    throw new Error(`localnet postgres must publish loopback only (F-20): ${joined}`)
+  // Fail closed on the host address: anything that is not explicitly loopback
+  // (127.0.0.0/8 or ::1) — including a concrete LAN IP — violates F-20.
+  const loopbackHost = (host: string): boolean =>
+    host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  const nonLoopback = joined
+    .split(',')
+    .map((token) => /^\s*(\[[^\]]+\]|[^:]+):\d+->/.exec(token)?.[1])
+    .filter((host) => {
+      if (!host) {
+        return true // unparseable published port -> fail closed
+      }
+      const normalized = host.startsWith('[') ? host.slice(1, -1) : host
+      return !loopbackHost(normalized)
+    })
+  if (nonLoopback.length > 0) {
+    throw new Error(
+      `localnet postgres must publish loopback only (F-20): ${joined} (bad: ${nonLoopback.join(', ')})`,
+    )
   }
 }
 
