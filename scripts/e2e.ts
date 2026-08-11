@@ -102,7 +102,7 @@ async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEn
   const docker = spawnSync(
     'docker',
     ['ps', '--filter', `name=${composeProjectName}-postgres-1`, '--format', '{{.Ports}}'],
-    { cwd: root, env, encoding: 'utf8' },
+    { cwd: root, env, encoding: 'utf8', timeout: 10_000 },
   )
   if (docker.error) {
     throw new Error(`localnet postgres port check: docker ps failed: ${docker.error.message}`)
