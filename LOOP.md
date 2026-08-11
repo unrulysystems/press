@@ -10,10 +10,19 @@ the ladder; the verifier — not confidence — decides when work is done.
 
 ## State (updated 2026-08-11 — rewrite each iteration; newest facts first)
 
-- Branch `fix/security-audit-fixes`, HEAD `aa3c495`, tree dirty-only-by-design.
-  Nothing pushed. Base: `ca8af24`.
-- Basis commits: `aa3c495` (AUDIT.md amendment, F-12..F-20 verified open,
-  F-01..F-11 resolved), `f7ea31d` (gitignore `AUDIT/` machinery output).
+- Branch `fix/security-audit-fixes`, HEAD `23de6ee`, tree clean. Nothing pushed.
+  Base: `ca8af24`.
+- **Unit 1 DONE (iteration 1).** Commit `23de6ee` fix(publish): republish
+  neutral + first-publish collection race (F-18, M-1); basis `aa3c495` AUDIT
+  amendment, `f7ea31d` gitignore `AUDIT/`, `3e356d9` charter. TDD: two new e2e
+  floors observed red (F-18 resurrection + M-1 500 reproduced) then green;
+  e2e/publish.spec.ts 18/18; `nub run check` green; `nub run test` 200 pass / 0
+  fail.
+- **Review gate 1: APPROVE** (rl review job `review-1786461611081-rdmmgt`,
+  structured, range `ca8af24..HEAD`; reviewer verified the floors and ratified
+  the unit contract, incl. losing non-owner → 403 not 500). Decision 1 ratified
+  at the gate (final ratification: Allen at boundary).
+- **Next: Unit 2 — unlock cookie bound to password (F-15/19).**
 - Open verified findings targeted by this loop: F-15/F-19 (unlock cookie
   survives password reroll), F-16 (keychain test seam honored by packaged CLI),
   F-18 (republish resurrects stale visibility/allowlist/passwordHash), F-20
@@ -44,8 +53,8 @@ the ladder; the verifier — not confidence — decides when work is done.
    `visibility=password`. Overwrite of a LIVE page keeps prior settings (status
    quo). Why: silent resurrection of a stale password/allowlist is the defect —
    "resume last ACL" is neither documented nor least-surprise, and the old
-   password would never be returned to the publisher. Provisional (ratified at
-   review gate / by Allen at boundary).
+   password would never be returned to the publisher. **Ratified at review gate
+   1 (2026-08-11, rl review APPROVE); final ratification: Allen at boundary.**
 2. 2026-08-11 — **Unlock-cookie invalidation without a schema change** (F-15/19).
    Bind the cookie signature to a digest of the page's current `passwordHash`
    (null-marker when no hash): sign `HMAC(secret, pageId.expiry.passwordDigest)`;
