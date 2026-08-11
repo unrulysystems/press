@@ -114,6 +114,13 @@ proposed fixes; they remain `open` in `AUDIT.md` pointing at this entry.
   approval screen (amends REQ-AUTH-004) or accept the local-attacker risk
   for an org-internal tool.
 
+  **Resolved 2026-08-11 — the approval screen is adopted (B-1 A, Allen,
+  ratified).** The follow-up pass on `fix/security-audit-fixes` lands the
+  recommended fix: server-owned pending-login records, a same-origin approval
+  page, and the loopback code minted only after a CSRF-protected POST to
+  `/cli/approve` from the same session (REQ-AUTH-004 amended; the current audit
+  ledger re-names this finding F-12/F-17).
+
 - **F-04 (medium) — session and OAuth tokens stored plaintext in Postgres.**
   `apps/web/src/db/schema.ts:43-76` models `session.token`,
   `account.accessToken`, `account.refreshToken`, and `account.idToken` as

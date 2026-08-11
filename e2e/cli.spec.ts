@@ -152,8 +152,32 @@ async function loginViaLoopback(
   })
   expect(signIn.status()).toBe(200)
 
-  const redirected = await browserSession.get(authorizeUrl)
-  expect(redirected.status()).toBe(200)
+  // B-1 consent flow: the authorize URL renders a same-origin approval page,
+  // and the loopback code is minted only after the user approves.
+  const page = await browserSession.get(authorizeUrl)
+  expect(page.status()).toBe(200)
+  const pageHtml = await page.text()
+  expect(pageHtml).toContain('Approve CLI sign-in?')
+  expect(pageHtml).toContain('action="/cli/approve"')
+  const authorizeState = new URL(authorizeUrl).searchParams.get('state')
+  expect(authorizeState).toBeTruthy()
+  expect(pageHtml).toContain(`name="state" value="${authorizeState}"`)
+
+  const approved = await browserSession.post('/cli/approve', {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: `state=${encodeURIComponent(authorizeState)}`,
+    maxRedirects: 0,
+  })
+  expect(approved.status()).toBe(302)
+  const callback = new URL(approved.headers().location ?? '', 'http://127.0.0.1')
+  expect(callback.hostname).toBe('127.0.0.1')
+  expect(callback.searchParams.get('code')).toBeTruthy()
+  expect(callback.searchParams.get('state')).toBe(authorizeState)
+
+  // A real browser follows the loopback redirect; delivering the callback lets
+  // the CLI's local listener resolve the code and finish `press login`.
+  const callbackDelivery = await browserSession.get(callback.toString())
+  expect(callbackDelivery.status()).toBe(200)
 
   const result = await exitResult
   expect(result.code).toBe(0)
