@@ -217,7 +217,19 @@ async function verifyMacKeychainRoundTrip(
 const platform = hostReleasePlatform()
 // Capture the release artifact's bytes before any verifier build runs; the
 // harness must leave artifacts/cli/press untouched (F-16, review round 2).
-const releaseArtifactBefore = await sha256File(defaultCliBinary).catch(() => undefined)
+// Only a genuinely absent artifact is accepted as undefined; any read failure
+// must fail loudly so the no-clobber check stays fail-closed.
+async function artifactFingerprint(file: string): Promise<string | undefined> {
+  try {
+    return await sha256File(file)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return undefined
+    }
+    throw error
+  }
+}
+const releaseArtifactBefore = await artifactFingerprint(defaultCliBinary)
 const isolated = await mkdtemp(join(tmpdir(), 'press-cli-standalone-'))
 const isolatedPath = join(isolated, 'path')
 const binary = join(isolated, 'press')
@@ -332,7 +344,7 @@ if (seamlessReport.ok !== true || seamlessReport.data?.tokenSource !== 'none') {
 // The release workflow builds its seam-free artifact at artifacts/cli/press
 // BEFORE this harness runs and packages it AFTER, so any clobber ships a
 // seam-enabled binary (F-16, review round 2). Fail loudly instead.
-if (releaseArtifactBefore !== (await sha256File(defaultCliBinary).catch(() => undefined))) {
+if (releaseArtifactBefore !== (await artifactFingerprint(defaultCliBinary))) {
   fail('verifier must not modify the release artifact at artifacts/cli/press (F-16)')
 }
 
