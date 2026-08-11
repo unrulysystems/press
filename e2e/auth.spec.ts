@@ -91,20 +91,31 @@ test('localnet identity gate shows the seeded account hint and reader guidance (
 test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-14)', async ({
   page,
 }) => {
+  const probes = [
+    { method: 'GET', path: '/api/auth/admin/list-users' },
+    { method: 'POST', path: '/api/auth/admin/set-role' },
+  ] as const
+
+  // Anonymous sessions must 404 too — the route no longer exists at all.
+  for (const probe of probes) {
+    await page.goto('/login?next=/')
+    const anonymous = await page.evaluate(async (probe) => {
+      const result = await fetch(probe.path, { method: probe.method })
+      return { status: result.status }
+    }, probe)
+    expect(anonymous.status, `anonymous ${probe.method} ${probe.path}`).toBe(404)
+  }
+
+  // An admin session — which previously reached these routes (200) — also 404s.
   await page.goto('/login?next=/')
   await page.getByLabel('Email').fill(localnetUsers.admin.email)
   await page.getByLabel('Password').fill(localnetUsers.admin.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
   await expect(page).toHaveURL('/')
 
-  // The ratified decision removes the Better Auth admin() plugin surface, so the
-  // role-management routes must 404 for everyone — including an admin session.
-  for (const probe of [
-    { method: 'GET', path: '/api/auth/admin/list-users' },
-    { method: 'POST', path: '/api/auth/admin/set-role' },
-  ]) {
-    const response = await page.evaluate(async ({ method, path }) => {
-      const result = await fetch(path, { method })
+  for (const probe of probes) {
+    const response = await page.evaluate(async (probe) => {
+      const result = await fetch(probe.path, { method: probe.method })
       return { status: result.status }
     }, probe)
     expect(response.status, `${probe.method} ${probe.path}`).toBe(404)
