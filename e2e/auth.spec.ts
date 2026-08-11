@@ -87,3 +87,26 @@ test('localnet identity gate shows the seeded account hint and reader guidance (
   // Reader guidance for someone who cannot sign in — the gate is never a dead-end.
   await expect(page.getByText(/access follows your organization account/i)).toBeVisible()
 })
+
+test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-14)', async ({
+  page,
+}) => {
+  await page.goto('/login?next=/')
+  await page.getByLabel('Email').fill(localnetUsers.admin.email)
+  await page.getByLabel('Password').fill(localnetUsers.admin.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
+
+  // The ratified decision removes the Better Auth admin() plugin surface, so the
+  // role-management routes must 404 for everyone — including an admin session.
+  for (const probe of [
+    { method: 'GET', path: '/api/auth/admin/list-users' },
+    { method: 'POST', path: '/api/auth/admin/set-role' },
+  ]) {
+    const response = await page.evaluate(async ({ method, path }) => {
+      const result = await fetch(path, { method })
+      return { status: result.status }
+    }, probe)
+    expect(response.status, `${probe.method} ${probe.path}`).toBe(404)
+  }
+})

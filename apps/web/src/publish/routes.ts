@@ -379,7 +379,7 @@ function pageResponse(input: {
 }
 
 async function authenticatedViewer(request: Request) {
-  const verified = await verifyApiToken(db, request.headers)
+  const verified = await verifyApiToken(db, request.headers, dbConfig.adminEmails)
   if (!verified) {
     throw new HttpError(401, 'valid bearer token required')
   }

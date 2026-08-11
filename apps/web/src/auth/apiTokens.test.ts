@@ -1,6 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
 import { isUserActivelyBanned, mintApiTokenForUser, verifyApiToken } from './apiTokens'
+import { roleForEmail } from './role'
+
+const ADMIN: readonly string[] = ['admin@send.it']
 
 type PressDb = Parameters<typeof mintApiTokenForUser>[0]
 
@@ -101,7 +104,7 @@ describe('verifyApiToken ban handling', () => {
     const fake = createFakeTokenDb(user)
     const token = await mintApiTokenForUser(fake.db, { userId: user.id, name: 'test-token' })
 
-    await expect(verifyApiToken(fake.db, bearer(token))).resolves.toBeNull()
+    await expect(verifyApiToken(fake.db, bearer(token), ADMIN)).resolves.toBeNull()
     expect(fake.updates).toHaveLength(0)
   })
 
@@ -116,16 +119,41 @@ describe('verifyApiToken ban handling', () => {
     const fake = createFakeTokenDb(user)
     const token = await mintApiTokenForUser(fake.db, { userId: user.id, name: 'test-token' })
 
-    await expect(verifyApiToken(fake.db, bearer(token))).resolves.toEqual({
+    await expect(verifyApiToken(fake.db, bearer(token), ADMIN)).resolves.toEqual({
       tokenId: expect.any(String),
       user: {
         id: user.id,
         email: user.email,
-        role: user.role,
+        role: roleForEmail(user.email, ADMIN),
       },
     })
     expect(fake.updates).toHaveLength(1)
     expect(fake.updates[0]?.lastUsedAt).toBeInstanceOf(Date)
+  })
+
+  test('token role derives from PRESS_ADMIN_EMAILS, never the stored row (B-2 / F-13)', async () => {
+    // The stored row claims 'admin' but the email is unlisted: effective role
+    // must be 'user' — a config removal demotes tokens immediately.
+    const staleAdmin = {
+      id: 'row-admin-removed',
+      email: 'sticky-admin-removed@example.invalid',
+      role: 'admin' as const,
+      banned: false,
+      banExpires: null,
+    }
+    const fake = createFakeTokenDb(staleAdmin)
+    const token = await mintApiTokenForUser(fake.db, {
+      userId: staleAdmin.id,
+      name: 'test-token',
+    })
+    await expect(verifyApiToken(fake.db, bearer(token), [])).resolves.toEqual({
+      tokenId: expect.any(String),
+      user: {
+        id: staleAdmin.id,
+        email: staleAdmin.email,
+        role: 'user',
+      },
+    })
   })
 
   test('classifies ban windows explicitly', () => {

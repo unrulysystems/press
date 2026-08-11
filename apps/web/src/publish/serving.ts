@@ -9,6 +9,7 @@ import { auth } from '../auth/server'
 import { db, dbConfig } from '../db/client'
 import { collection, page, pageRedirect, user } from '../db/schema'
 import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
+import { roleForEmail } from '../auth/role'
 import { pageBlobPath } from './storage'
 import {
   acceptsHtml,
@@ -224,7 +225,14 @@ async function viewerForRequest(request: Request, row: PageRow): Promise<AclView
       where: eq(user.id, session.user.id),
     })
     if (dbUser) {
-      return viewerFromChannels({ authenticated: authenticatedViewer(dbUser), basicPassword })
+      return viewerFromChannels({
+        authenticated: authenticatedViewer({
+          id: dbUser.id,
+          email: dbUser.email,
+          role: roleForEmail(dbUser.email, dbConfig.adminEmails),
+        }),
+        basicPassword,
+      })
     }
   }
 

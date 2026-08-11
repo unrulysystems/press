@@ -201,7 +201,10 @@ export async function cliAuthorizeEndpoint(request: Request): Promise<Response> 
   try {
     return await authorizeCliRequest(request, {
       baseUrl: dbConfig.baseUrl,
-      getSession: async (headers) => await auth.api.getSession({ headers }),
+      // The admin plugin used to type session.impersonatedBy; the column is still
+      // written by Better Auth at runtime, so the read-site contract stands.
+      getSession: async (headers) =>
+        (await auth.api.getSession({ headers })) as CliAuthorizeSession | null,
       insertVerification: async (row) => {
         await db.insert(verification).values(row)
       },
@@ -264,7 +267,7 @@ export async function cliWhoamiEndpoint(request: Request): Promise<Response> {
     if (request.method !== 'GET') {
       return json({ error: 'method not allowed' }, 405)
     }
-    const verified = await verifyApiToken(db, request.headers)
+    const verified = await verifyApiToken(db, request.headers, dbConfig.adminEmails)
     if (!verified) {
       throw new HttpError(401, 'valid bearer token required')
     }
@@ -279,7 +282,7 @@ export async function cliLogoutEndpoint(request: Request): Promise<Response> {
     if (request.method !== 'POST') {
       return json({ error: 'method not allowed' }, 405)
     }
-    const verified = await verifyApiToken(db, request.headers)
+    const verified = await verifyApiToken(db, request.headers, dbConfig.adminEmails)
     if (!verified) {
       throw new HttpError(401, 'valid bearer token required')
     }

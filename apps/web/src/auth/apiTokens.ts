@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 
 import { apiToken, user } from '../db/schema'
+import { roleForEmail } from './role'
 
 import type { db as dbClient } from '../db/client'
 
@@ -70,6 +71,7 @@ export function readBearerToken(headers: Headers): string | null {
 export async function verifyApiToken(
   db: PressDb,
   headers: Headers,
+  adminEmails: readonly string[],
 ): Promise<VerifiedApiToken | null> {
   const plaintext = readBearerToken(headers)
   if (!plaintext) {
@@ -82,7 +84,6 @@ export async function verifyApiToken(
       revokedAt: apiToken.revokedAt,
       userId: user.id,
       email: user.email,
-      role: user.role,
       banned: user.banned,
       banExpires: user.banExpires,
     })
@@ -109,7 +110,9 @@ export async function verifyApiToken(
     user: {
       id: token.userId,
       email: token.email,
-      role: token.role,
+      // Effective role derives from PRESS_ADMIN_EMAILS at use-time (B-2): the
+      // stored role is a cache and must never outlive a config change.
+      role: roleForEmail(token.email, adminEmails),
     },
   }
 }

@@ -52,7 +52,7 @@ the ladder; the verifier — not confidence — decides when work is done.
   needs a PTY that the harness env lacks, so the suite ran against the manually
   booted localnet, same compose+one stack; CI runs the `nub run e2e` path with a
   TTY). test:cli:binary green incl. seam-gate floor.
-- **Terminal state: interior-green achieved; branch ready for Allen's batch    (below) and the publish steps (push / merge proposal). Nothing pushed.**
+- **Terminal state: interior-green achieved; branch ready for Allen's batch (below) and the publish steps (push / merge proposal). Nothing pushed.**
 - Open verified findings targeted by this loop: F-15/F-19 (unlock cookie
   survives password reroll), F-16 (keychain test seam honored by packaged CLI),
   F-18 (republish resurrects stale visibility/allowlist/passwordHash), F-20

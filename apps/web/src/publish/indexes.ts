@@ -2,6 +2,7 @@ import { decideAcl, parseCollectionSlug } from '@press/core'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 
 import { auth } from '../auth/server'
+import { roleForEmail } from '../auth/role'
 import { db, dbConfig } from '../db/client'
 import { collection, page, user } from '../db/schema'
 
@@ -81,7 +82,13 @@ async function viewerForRequest(request: Request | undefined): Promise<AclViewer
   const dbUser = await db.query.user.findFirst({
     where: eq(user.id, session.user.id),
   })
-  return dbUser ? authenticatedViewer(dbUser) : { kind: 'anonymous' }
+  return dbUser
+    ? authenticatedViewer({
+        id: dbUser.id,
+        email: dbUser.email,
+        role: roleForEmail(dbUser.email, dbConfig.adminEmails),
+      })
+    : { kind: 'anonymous' }
 }
 
 function pageAcl(row: PageRow): PageAcl {

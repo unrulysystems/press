@@ -91,7 +91,9 @@ login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with a
   secret manager). The CLI never writes the token to disk in plaintext and never
   accepts it as a command argument.
 - **REQ-AUTH-007** Instance admins are the users whose emails appear in
-  `PRESS_ADMIN_EMAILS` (role assigned at sign-in).
+  `PRESS_ADMIN_EMAILS`. The config list is authoritative and enforced at every
+  authorization use (sign-in assigns, tokens/sessions/whoami re-derive); removing
+  an email demotes immediately — the stored role column is only a cache.
 - **REQ-AUTH-008** The `/login` identity gate always renders the sign-in
   affordance for every enabled provider — the credential form when
   `PRESS_ENABLE_CREDENTIAL_AUTH=1` (localnet), the "Continue with Google" button
