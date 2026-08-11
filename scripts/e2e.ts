@@ -107,6 +107,11 @@ async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEn
   if (docker.error) {
     throw new Error(`localnet postgres port check: docker ps failed: ${docker.error.message}`)
   }
+  if (docker.status !== 0 || docker.signal) {
+    throw new Error(
+      `localnet postgres port check: docker ps exited ${docker.signal ?? docker.status}`,
+    )
+  }
   const ports = (docker.stdout ?? '')
     .split('\n')
     .map((line) => line.trim())
