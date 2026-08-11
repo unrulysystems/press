@@ -80,10 +80,20 @@ function viewerFromToken(user: {
   }
 }
 
+function decodePathSegments(raw: string): string[] {
+  try {
+    return raw.split('/').map((segment) => decodeURIComponent(segment))
+  } catch {
+    // A syntactically valid but non-decodable percent-sequence (e.g. a truncated
+    // UTF-8 escape) is client input, not a server fault: answer 400, never 500 (M-2).
+    throw new HttpError(400, 'malformed percent-encoding in path')
+  }
+}
+
 function parsePagePath(request: Request): PageRoute {
   const path = new URL(request.url).pathname
   const raw = path.slice('/api/pages/'.length)
-  const segments = raw.split('/').map((segment) => decodeURIComponent(segment))
+  const segments = decodePathSegments(raw)
   const suffix = segments[2]
   if (
     segments.length !== 2 &&
@@ -104,7 +114,7 @@ function parseCollectionPath(request: Request): {
 } {
   const path = new URL(request.url).pathname
   const raw = path.slice('/api/collections/'.length)
-  const segments = raw.split('/').map((segment) => decodeURIComponent(segment))
+  const segments = decodePathSegments(raw)
   if (segments.length !== 1 && !(segments.length === 2 && segments[1] === 'pages')) {
     throw new HttpError(404, 'collection endpoint not found')
   }

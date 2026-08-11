@@ -4,6 +4,7 @@ import { eq } from 'drizzle-orm'
 
 import { db, dbConfig } from '../db/client'
 import { apiToken, auditEvent, user, verification } from '../db/schema'
+import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
 import { auth } from './server'
 import { mintApiTokenForUser, verifyApiToken } from './apiTokens'
 
@@ -53,6 +54,9 @@ function json(body: unknown, status = 200): Response {
 }
 
 function errorResponse(error: unknown): Response {
+  if (error instanceof BodyTooLargeError) {
+    return json({ error: error.message }, error.status)
+  }
   if (error instanceof HttpError) {
     return json({ error: error.message }, error.status)
   }
@@ -95,10 +99,18 @@ function parseState(value: string | null): string | null {
   return value
 }
 
+const CLI_EXCHANGE_BODY_LIMIT_BYTES = 8 * 1024 // code + verifier are tiny (M-3)
+
 async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const body = await request.json().catch(() => {
+  // Bounded read before parse: an anonymous caller must never make the server
+  // buffer an unbounded body (M-3).
+  const text = await readCappedBodyText(request, CLI_EXCHANGE_BODY_LIMIT_BYTES)
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
     throw new HttpError(400, 'request body must be JSON')
-  })
+  }
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new HttpError(400, 'request body must be a JSON object')
   }

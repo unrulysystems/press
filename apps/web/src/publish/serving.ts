@@ -8,6 +8,7 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { auth } from '../auth/server'
 import { db, dbConfig } from '../db/client'
 import { collection, page, pageRedirect, user } from '../db/schema'
+import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
 import { pageBlobPath } from './storage'
 import {
   acceptsHtml,
@@ -318,7 +319,9 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
   // The branded gate posts application/x-www-form-urlencoded; parse without FormData.
   // A genuine body-read failure propagates to the endpoint's 500 handler rather than
   // being masked as a wrong password — an empty body still parses to no password (401).
-  const bodyText = await request.text()
+  // The body is capped so a public POST can never make the server buffer unboundedly (M-3).
+  const PASSWORD_UNLOCK_BODY_LIMIT_BYTES = 16 * 1024
+  const bodyText = await readCappedBodyText(request, PASSWORD_UNLOCK_BODY_LIMIT_BYTES)
   const password = new URLSearchParams(bodyText).get('password') ?? ''
   const actionPath = servedPagePath(route)
   const verified = row.page.passwordHash
@@ -361,7 +364,10 @@ export async function servedPagePasswordEndpoint(request: Request): Promise<Resp
       return notFound()
     }
     return await servedPagePasswordUnlock(request, route)
-  } catch {
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return servedPageResponse(error.message, { status: 413 })
+    }
     return servedPageResponse('internal server error', { status: 500 })
   }
 }

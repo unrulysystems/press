@@ -1139,6 +1139,68 @@ test('password gate: branded HTML entry, form+cookie unlock, Basic for programma
   await expect(page.locator('body')).toContainText(bodyMarker)
 })
 
+test('malformed percent-encoding in mutation paths returns 400, not 500 (M-2)', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  // %E0%A4%A is a truncated UTF-8 sequence: it is syntactically valid
+  // percent-encoding (so it survives URL parsing) but decodeURIComponent rejects
+  // it. The mutation API must answer 400, never a 500.
+  const paths = [
+    `/api/pages/%E0%A4%A/thing.html`,
+    `/api/collections/%E0%A4%A`,
+    `/api/collections/%E0%A4%A/pages`,
+    `/api/pages/coll/%E0%A4%A`,
+  ]
+  const bodies = [
+    { method: 'PUT', data: '<!doctype html><title>x</title>' },
+    { method: 'PATCH', data: { visibility: 'public' } },
+    { method: 'GET' },
+    { method: 'PATCH', data: { title: 'x' } },
+  ]
+  for (let index = 0; index < paths.length; index += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each path is a distinct request
+    const response = await (
+      api as unknown as Record<string, (url: string, init: object) => Promise<APIResponse>>
+    )[bodies[index].method.toLowerCase()](paths[index], {
+      ...(bodies[index].method === 'PUT'
+        ? { headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }) }
+        : bodies[index].method === 'PATCH'
+          ? { headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }) }
+          : { headers: authHeaders(actors.owner.token) }),
+      ...(bodies[index].data !== undefined ? { data: bodies[index].data } : {}),
+    })
+    expect(response.status(), await response.text()).toBe(400)
+  }
+})
+
+test('anonymous endpoint bodies are byte-capped (M-3)', async ({ baseURL }) => {
+  const api = await newE2EAPIContext({ baseURL })
+  // /api/cli/exchange is unauthenticated: an oversized JSON body must 413 before
+  // any buffering or code/verifier validation (no memory-exhaustion vector).
+  const exchange = await api.post('/api/cli/exchange', {
+    headers: { 'content-type': 'application/json' },
+    data: '{"padding":"' + 'a'.repeat(9_000) + '"}',
+  })
+  expect(exchange.status()).toBe(413)
+
+  // The password-gate form target is public; its POST body must also be capped.
+  const collectionSlug = `${runSlug}-body-caps`
+  const file = 'locked.html'
+  await api.put(`/api/pages/${collectionSlug}/${file}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, {
+      'content-type': 'text/html',
+      'x-press-page-password': 'cap-secret-1234',
+    }),
+    data: '<!doctype html><title>Cap</title>',
+  })
+  const unlock = await api.post(`/p/${collectionSlug}/${file}`, {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: 'password=' + 'a'.repeat(20_000),
+  })
+  expect(unlock.status()).toBe(413)
+})
+
 test('password reroll invalidates a previously issued unlock cookie (F-15/19)', async ({
   baseURL,
   page,
