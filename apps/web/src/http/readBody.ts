@@ -26,8 +26,7 @@ export async function readCappedBodyText(request: Request, byteLimit: number): P
     }
     total += value.byteLength
     if (total > byteLimit) {
-      // Cancel the stream so a hostile client cannot stall the keep-alive
-      // connection while the server rejects the oversized body.
+      // oxlint-disable-next-line no-await-in-loop -- Cancel happens only at the bounded rejection point.
       await reader.cancel('request body too large').catch(() => undefined)
       throw new BodyTooLargeError(byteLimit)
     }
