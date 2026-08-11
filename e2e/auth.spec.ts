@@ -100,6 +100,7 @@ test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-1
   for (const probe of probes) {
     // oxlint-disable-next-line no-await-in-loop -- each anonymous probe is its own navigation
     await page.goto('/login?next=/')
+    // oxlint-disable-next-line no-await-in-loop -- probe result asserted per iteration
     const anonymous = await page.evaluate(async (entry) => {
       const result = await fetch(entry.path, { method: entry.method })
       return { status: result.status }
