@@ -182,6 +182,10 @@ async function loginViaLoopback(
   const callbackDelivery = await browserSession.get(callback.toString())
   expect(callbackDelivery.status()).toBe(200)
 
+  // Non-POST methods reach the endpoint's 405 branch through the real route.
+  const wrongMethod = await browserSession.get('/cli/approve')
+  expect(wrongMethod.status()).toBe(405)
+
   const result = await exitResult
   expect(result.code).toBe(0)
   expect(result.stdout).toContain(`logged in as ${localnetUsers[userKey].email}`)
