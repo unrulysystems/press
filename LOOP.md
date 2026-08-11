@@ -10,56 +10,45 @@ the ladder; the verifier — not confidence — decides when work is done.
 
 ## State (updated 2026-08-11 — rewrite each iteration; newest facts first)
 
-- Branch `fix/security-audit-fixes`, HEAD `23de6ee`, tree clean. Nothing pushed.
+- Branch `fix/security-audit-fixes`, HEAD `69e08e0`, tree clean. Nothing pushed.
   Base: `ca8af24`.
-- **Unit 1 DONE (iteration 1).** Commit `23de6ee` fix(publish): republish
-  neutral + first-publish collection race (F-18, M-1); basis `aa3c495` AUDIT
-  amendment, `f7ea31d` gitignore `AUDIT/`, `3e356d9` charter. TDD: two new e2e
-  floors observed red (F-18 resurrection + M-1 500 reproduced) then green;
-  e2e/publish.spec.ts 18/18; `nub run check` green; `nub run test` 200 pass / 0
-  fail.
-- **Review gate 1: APPROVE** (rl review job `review-1786461611081-rdmmgt`,
-  structured, range `ca8af24..HEAD`; reviewer verified the floors and ratified
-  the unit contract, incl. losing non-owner → 403 not 500). Decision 1 ratified
-  at the gate (final ratification: Allen at boundary).
-- **Next: Unit 2 — unlock cookie bound to password (F-15/19).**
-  _Superseded — unit 2 & 3 completed below._
-- **Unit 2 DONE (iteration 2).** Commit `2bd38bd` unlock cookie bound to
-  sha256(passwordHash) — reroll/republish invalidates outstanding cookies, no
-  migration. TDD red (cookie still opened after reroll) → green. e2e
-  publish.spec.ts 19/19; check green; test 201 pass / 0 fail. **Review gate 2
-  APPROVE** (`review-1786462442671-4cxskk`).
-- **Unit 3 DONE (iteration 3).** Commits `f4b88a7` keychain seam compiled out
-  of release binaries (F-16), `d551339` verifier never clobbers `artifacts/cli/press`,
-  `4a626ed` fail-closed fingerprint. 2 review fix-up rounds: reviewer caught the
-  release.yml ordering clobber (reproduced: artifact SHA changed seam-free→seam-on)
-  and the silent-read flaw. **Review gate 3 APPROVE** (`review-1786464829729-ra88p9`).
-  test:cli:binary green; e2e/cli.spec.ts 4/4.
-- **Next: Unit 4 — localnet Postgres loopback (F-20).**
-  _Superseded — units 4-6 completed below._
-- **Unit 4 DONE (iteration 4).** Commit `ded3ee3` compose loopback + e2e
-  fail-closed floor (F-20), `49cfb57`/`4c8d364`/`6e03add` review fixes (docker
-  exit-status fail-closed, positive loopback-host predicate, bounded probe).
-  **Review gate 4 APPROVE** (`review-1786467084558-yhpvtw`). Container binding
-  now `127.0.0.1:54329->5432/tcp`.
-- **Unit 5 DONE (iteration 5).** Commit `ef77e60` cap anonymous bodies (8 KiB
-  CLI exchange / 16 KiB password gate, 413 before buffering, stream cancel) +
-  malformed-path 400s (M-2/M-3), `12ce41c`, `91e4bd8`. **Review gate 5 APPROVE**
-  (`review-1786468790723-qxq128`).
-- **Unit 6 DONE (iteration 6) — interior green.** Floors: `nub run check` green;
-  `nub run test` 205 pass / 0 fail (incl. new reader suite); suite surface green
-  (publish 21/21, cli 4/4, remaining specs 79/79 — the silo→Tilt orchestrator
-  needs a PTY that the harness env lacks, so the suite ran against the manually
-  booted localnet, same compose+one stack; CI runs the `nub run e2e` path with a
-  TTY). test:cli:binary green incl. seam-gate floor.
-- **Terminal state: interior-green achieved; branch ready for Allen's batch (below) and the publish steps (push / merge proposal). Nothing pushed.**
-- Open verified findings targeted by this loop: F-15/F-19 (unlock cookie
-  survives password reroll), F-16 (keychain test seam honored by packaged CLI),
-  F-18 (republish resurrects stale visibility/allowlist/passwordHash), F-20
-  (localnet Postgres 0.0.0.0 + static creds). Boundary-batch (Allen only):
-  F-12/F-17 (CLI authorize has no consent step → long-lived token theft),
-  F-13 (admin role sticky after PRESS_ADMIN_EMAILS removal), F-14 (unconfigured
-  Better Auth admin plugin exposes role-management APIs).
+- **Follow-up pass B-1..B-3 CLOSED — the whole branch is interior-green.**
+  - **B-3 + B-2 (F-14, F-13) landed** in `b03005a` (drop the admin plugin; config
+    is the admin authority — role derived at every sign-in and resolved from
+    `PRESS_ADMIN_EMAILS` at every use), with review rounds 2-4 in `f8be0ad`,
+    `4de1718`, `3d505db` (admin-route 404 floor covers anonymous + admin
+    sessions; lint silence).
+  - **B-1 (F-12/F-17) landed** in `7693346` (same-origin consent step: pending
+    record + approval page; loopback code minted only after POST `/cli/approve`)
+    with review fix-up rounds 2-4: `444b27c` (server-generated consent token is
+    the CSRF secret, not the client state — a same-site page can choose its own
+    state), `e5cf175` (all methods dispatched to `/cli/approve` so the 405
+    branch is reachable; One falls through to 404 on a missing export),
+    `69e08e0` (form-action permits `http://127.0.0.1:*` — Chromium enforces
+    form-action on form-submission redirects and `'self'` blocked the loopback;
+    reviewer probe: approveHits=1 / callbackHits=0 under the old policy).
+  - **B-1 review gate: APPROVE** (`review-1786489168307-dzan3b`, structured,
+    range `3d505db..HEAD`; shape-change verdicts pass on the unchanged CLI
+    callback contract).
+  - Floors at closure: `nub run check` green; `nub run test` 218 pass / 0 fail;
+    `nub run e2e` 106/106 (twice) incl. the new real-browser consent-click CSP
+    floor and the GET `/cli/approve` → 405 probe; `nub run walkthrough` passed
+    (real `press login` through the consent POST).
+- **Terminal state: interior-green achieved; every ratified fix has landed.**
+  The only remaining steps are Allen's boundary steps: push / merge proposal,
+  and the boundary re-audit to flip the `AUDIT.md` ledger (`F-12..F-20` still
+  show `open` — audit tooling's job, not this loop's). Nothing pushed.
+- Earlier units (recorded below): Unit 1 (`23de6ee`, gate 1 APPROVE
+  `review-1786461611081-rdmmgt`), Unit 2 (`2bd38bd`, gate 2 APPROVE
+  `review-1786462442671-4cxskk`), Unit 3 (`f4b88a7`/`d551339`/`4a626ed`, gate 3
+  APPROVE `review-1786464829729-ra88p9`), Unit 4 (`ded3ee3`/`49cfb57`/`4c8d364`/
+  `6e03add`, gate 4 APPROVE `review-1786467084558-yhpvtw`), Unit 5
+  (`ef77e60`/`12ce41c`/`91e4bd8`, gate 5 APPROVE
+  `review-1786468790723-qxq128`), Unit 6 interior-green (`935a485`).
+- Open verified findings targeted by this loop: all implemented by the units
+  above — F-15/F-19 (unit 2), F-16 (unit 3), F-18 + M-1 (unit 1), F-20 (unit
+  4), M-2/M-3 (unit 5), F-12/F-17 (B-1), F-13 (B-2), F-14 (B-3). `AUDIT.md`
+  ledger flips await the boundary re-audit.
 - Own audit adds interior items the ultra-audit did not adopt: M-1 (publish
   collection-insert race → spurious 500; `movePage` already uses
   `onConflictDoNothing`, `publishPage` does not), M-2 (malformed %-encoding on
@@ -218,6 +207,11 @@ in-session edits with an in-flight worker on the same files.
   `uaudit-2026-08-11-7a71f5`, not chased.)
 
 ## Boundary batch for Allen (decision batch at done — 2026-08-11)
+
+**Status: all three ratified and implemented on this branch (B-1 A, B-2 A, B-3
+A — see Decisions 6-8 and the State block above); nothing pushed.** The batch
+below is kept for the record; the remaining boundary steps are the push / merge
+proposal and the `AUDIT.md` ledger re-audit.
 
 The interior is green; these three are Allen-only (auth/security boundary +
 SPEC amendments). Each carries evidence and a proposed answer; answering turns

@@ -1,5 +1,56 @@
 # press — DELTA
 
+## 2026-08-11 — security ultra-audit loop closed: all ratified fixes landed (B-1..B-3 follow-up pass)
+
+Branch `fix/security-audit-fixes` is fully interior-green. The three boundary
+findings Allen ratified on 2026-08-11 (B-1 A, B-2 A, B-3 A — Decisions 6-8 in
+`LOOP.md`) are implemented and reviewed; the earlier units 1-6 covered
+F-15/16/18/20 + M-1/2/3. Nothing was pushed.
+
+**B-3 + B-2 (F-14, F-13) — `b03005a`.** The Better Auth `admin()` plugin is
+removed; press moderation is read-all + unpublish via `decideAcl`. Config is the
+admin source of truth: the role is derived at every sign-in (promote and demote)
+and resolved from `PRESS_ADMIN_EMAILS` at every authorization use (tokens,
+session reads, whoami); the role column is a cache. An admin-route 404 floor
+covers anonymous + admin sessions; review rounds 2-4 (`f8be0ad`, `4de1718`,
+`3d505db`).
+
+**B-1 (F-12/F-17) — `7693346` + `444b27c` + `e5cf175` + `69e08e0`.** CLI
+authorize now has a same-origin consent step: `GET /cli/authorize` stores a
+server-owned pending record (userId/port/challenge/client-state bound
+server-side) and renders a standalone approval page; the one-time loopback code
+is minted only after a CSRF-protected `POST /cli/approve` from the same session,
+which then 302s to `127.0.0.1:<port>/callback?code=…&state=…`. Three review
+rounds hardened it: (2) the CSRF secret is a **server-generated consent token**
+rendered as the form's hidden field — the client-chosen state is not a CSRF
+defense because a same-site page can choose its own state (`SameSite=Lax`
+cookies are sent same-site cross-origin); (3) the route exports every method so
+One dispatches non-POST to the endpoint's 405 branch (a missing export falls
+through to 404); (4) the approval page CSP `form-action` permits
+`http://127.0.0.1:*` — Chromium enforces form-action on form-submission
+redirects, so `'self'` blocked the loopback (reviewer probe: approveHits=1,
+callbackHits=0) and the CLI never received its code through a real browser.
+**Review gate APPROVE** (`review-1786489168307-dzan3b`). REQ-AUTH-004 amended;
+`DEVIATIONS.md` F-03/F-05 deferral entry marked resolved by the ratification.
+
+**Harness floors added:** unit floors in `apps/web/src/auth/cliFlow.test.ts`
+(forged consent token fails closed, wrong-session 403, expired/unknown pending
+400, callback echoes the bound state, CSP header contract); an e2e floor that
+drives a **real Chromium page** through sign-in → approval page → Approve click
+and proves the loopback callback survives CSP enforcement; a GET
+`/cli/approve` → 405 route probe; the walkthrough (`credentialSignIn`) now
+completes the consent POST. The CLI's own loopback contract is byte-unchanged
+(shape-change verdicts pass).
+
+**Proofs at closure:** `nub run check` green; `nub run test` 218 pass / 0 fail;
+`nub run e2e` 106/106 (twice); `nub run walkthrough` passed (real `press login`
+via the consent POST).
+
+**Boundary handoff (Allen):** push the branch / open the merge proposal (publish
+is the human's), and run the boundary re-audit to flip the `AUDIT.md` ledger
+(`F-12..F-20` still show `open` — audit tooling's job). The ratified decisions
+are recorded in `LOOP.md` Decisions 6-8.
+
 ## 2026-07-13 — first release attempt exposed missing workspace link
 
 The pushed `v0.3.0` tag passed source/version verification, `nub run check`, and
