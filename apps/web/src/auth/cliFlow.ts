@@ -39,6 +39,10 @@ type CliPendingValue = {
   readonly userId: string
   readonly port: number
   readonly challenge: string
+  // Client-chosen state, bound server-side in the pending record: it is echoed
+  // in the loopback callback so the CLI's own state check passes, but it never
+  // serves as the CSRF secret (that is the server-generated consent token).
+  readonly state: string
 }
 
 type VerificationInsert = {
@@ -54,6 +58,7 @@ type CliAuthorizeDependencies = {
   readonly insertPending: (row: VerificationInsert) => Promise<void>
   readonly now?: () => number
   readonly randomId?: () => string
+  readonly randomConsent?: () => string
 }
 
 type CliApproveDependencies = {
@@ -136,11 +141,11 @@ button {
 `.trim()
 
 export function renderCliApprovalPage(input: {
-  readonly state: string
+  readonly consent: string
   readonly port: number
   readonly email: string | null | undefined
 }): string {
-  const state = escapeHtml(input.state)
+  const consent = escapeHtml(input.consent)
   const port = String(input.port)
   const email = escapeHtml(input.email ?? '')
   return `<!doctype html>
@@ -160,7 +165,7 @@ this computer requested a token that can publish to your collections. The token
 will be issued only after you approve.</p>
 <p class="meta">Loopback port: <code>${port}</code></p>
 <form method="post" action="/cli/approve">
-<input type="hidden" name="state" value="${state}">
+<input type="hidden" name="consent" value="${consent}">
 <button type="submit">Approve</button>
 <a class="cancel" href="/">Cancel</a>
 </form>
@@ -179,7 +184,7 @@ export const cliApprovalPageHeaders = {
 } as const
 
 function cliApprovalPageResponse(input: {
-  readonly state: string
+  readonly consent: string
   readonly port: number
   readonly email: string | null | undefined
 }): Response {
@@ -214,8 +219,17 @@ function parseState(value: string | null): string {
   return value
 }
 
-function pendingIdentifier(state: string): string {
-  return `cli:pending:${hash(state)}`
+function parseConsent(value: string | null): string {
+  if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
+    throw new HttpError(400, 'consent is required')
+  }
+  return value
+}
+
+// The pending record is keyed by the server-generated consent token (the CSRF
+// secret the approval page posts), never by the client-chosen state.
+function pendingIdentifier(consent: string): string {
+  return `cli:pending:${hash(consent)}`
 }
 
 function parsePendingValue(value: string): CliPendingValue {
@@ -228,7 +242,8 @@ function parsePendingValue(value: string): CliPendingValue {
     record.kind !== 'cli-pending' ||
     typeof record.userId !== 'string' ||
     typeof record.port !== 'number' ||
-    typeof record.challenge !== 'string'
+    typeof record.challenge !== 'string' ||
+    typeof record.state !== 'string'
   ) {
     throw new HttpError(400, 'authorization request is invalid')
   }
@@ -237,6 +252,7 @@ function parsePendingValue(value: string): CliPendingValue {
     userId: record.userId,
     port: record.port,
     challenge: record.challenge,
+    state: record.state,
   }
 }
 
@@ -265,12 +281,12 @@ async function readJsonObject(request: Request): Promise<Record<string, unknown>
   return body as Record<string, unknown>
 }
 
-async function readFormState(request: Request): Promise<string> {
+async function readFormConsent(request: Request): Promise<string> {
   // Same bounded read as the exchange: the approval POST is small and
   // session-bearing, but an oversized body must still fail before buffering.
   const text = await readCappedBodyText(request, CLI_SMALL_BODY_LIMIT_BYTES)
   const params = new URLSearchParams(text)
-  return parseState(params.get('state'))
+  return parseConsent(params.get('consent'))
 }
 
 function readString(input: Record<string, unknown>, field: string): string {
@@ -331,31 +347,36 @@ export async function authorizeCliRequest(
 
     // B-1 consent step: the server binds state/port/challenge to this session
     // as a pending record and renders a same-origin approval page; the loopback
-    // code is minted only after the CSRF-protected POST below. A bare GET can
-    // no longer convert an ambient session into a long-lived token.
+    // code is minted only after the CSRF-protected POST below. The CSRF secret
+    // is a server-generated consent token (never the client-chosen state), so
+    // a bare GET — or a forged same-site POST without the token — can never
+    // convert an ambient session into a long-lived token.
+    const consent = dependencies.randomConsent?.() ?? randomBytes(32).toString('base64url')
     await dependencies.insertPending({
       id: dependencies.randomId?.() ?? randomUUID(),
-      identifier: pendingIdentifier(state),
+      identifier: pendingIdentifier(consent),
       value: JSON.stringify({
         kind: 'cli-pending',
         userId: session.user.id,
         port,
         challenge,
+        state,
       } satisfies CliPendingValue),
       expiresAt: new Date(now + CLI_PENDING_TTL_MS),
     })
 
-    return cliApprovalPageResponse({ state, port, email: session.user.email })
+    return cliApprovalPageResponse({ consent, port, email: session.user.email })
   } catch (error) {
     return errorResponse(error)
   }
 }
 
 // B-1 consent POST: consumes the server-owned pending record and mints the
-// one-time loopback code. CSRF is defeated by the unguessable state nonce
-// (required, 32-128 chars), the same-origin approval page (strict CSP,
-// no-store), and the requirement that the approving session be the one that
-// started the request.
+// one-time loopback code. CSRF is defeated by the server-generated consent
+// token: the approving page is same-origin (strict CSP, no-store), the token
+// is unguessable and never exposed to other origins, and the approving session
+// must be the one that started the request — so a hostile same-site page that
+// knows the client state but not the consent token cannot forge the POST.
 export async function approveCliRequest(
   request: Request,
   dependencies: CliApproveDependencies,
@@ -373,8 +394,8 @@ export async function approveCliRequest(
       throw new HttpError(403, 'cli authorization unavailable while impersonating')
     }
 
-    const state = await readFormState(request)
-    const pending = await dependencies.consumePending(state)
+    const consent = await readFormConsent(request)
+    const pending = await dependencies.consumePending(consent)
     if (!pending) {
       throw new HttpError(400, 'authorization request is invalid or expired')
     }
@@ -395,9 +416,11 @@ export async function approveCliRequest(
       expiresAt: new Date(now + CLI_CODE_TTL_MS),
     })
 
+    // Echo the server-bound client state (not the consent token) so the CLI's
+    // own callback state check passes unchanged.
     const redirectUrl = new URL(`http://127.0.0.1:${pending.port}/callback`)
     redirectUrl.searchParams.set('code', code)
-    redirectUrl.searchParams.set('state', state)
+    redirectUrl.searchParams.set('state', pending.state)
     return Response.redirect(redirectUrl.toString(), 302)
   } catch (error) {
     return errorResponse(error)

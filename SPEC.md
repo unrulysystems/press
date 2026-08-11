@@ -81,11 +81,12 @@ Slug grammar (both collection and file slugs):
 login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with
   a loopback port + PKCE-style one-time challenge + state nonce; the server
   records a pending login bound to the session, port, challenge, and state, and
-  renders a same-origin approval page; only a CSRF-protected POST to
-  `/cli/approve` from the same session mints the one-time code, then the server
-  redirects to `127.0.0.1:<port>` with the code; the CLI exchanges the code for
-  a long-lived API token). The exchange endpoint is testable without a real
-  browser. (Consent step ratified 2026-08-11, B-1.)
+  renders a same-origin approval page whose form carries a server-generated
+  consent token; only a CSRF-protected POST to `/cli/approve` presenting that
+  token from the same session mints the one-time code, then the server
+  redirects to `127.0.0.1:<port>` with the code and the bound state; the CLI
+  exchanges the code for a long-lived API token). The exchange endpoint is
+  testable without a real browser. (Consent step ratified 2026-08-11, B-1.)
 - **REQ-AUTH-005** API tokens are stored hashed server-side, are revocable
   (`press logout` revokes; users can revoke any of their tokens), and record
   lastUsedAt.

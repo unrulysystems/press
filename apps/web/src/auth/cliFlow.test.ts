@@ -20,11 +20,11 @@ function authorizeUrl(extra = ''): string {
   return `http://press.test/cli/authorize?port=4567&challenge=${'a'.repeat(32)}${extra}`
 }
 
-function approveRequest(state: string): Request {
+function approveRequest(consent: string): Request {
   return new Request('http://press.test/cli/approve', {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: `state=${encodeURIComponent(state)}`,
+    body: `consent=${encodeURIComponent(consent)}`,
   })
 }
 
@@ -38,6 +38,7 @@ const pendingForOwner = {
   userId: 'owner-user',
   port: 4567,
   challenge: 'a'.repeat(32),
+  state: 's'.repeat(32),
 } as const
 
 describe('authorizeCliRequest (B-1 consent step)', () => {
@@ -65,7 +66,7 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
     expect(pendingInserts).toEqual([])
   })
 
-  test('renders a same-origin approval page and stores a pending record, never a code', async () => {
+  test('renders a same-origin approval page with a server-generated consent token, never a code', async () => {
     const state = 's'.repeat(32)
     const pendingInserts: Array<Record<string, unknown>> = []
     const response = await cliFlow.authorizeCliRequest(
@@ -79,6 +80,7 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
           pendingInserts.push(row)
         },
         randomId: () => 'pending-id',
+        randomConsent: () => 'server-consent-token',
         now: () => 0,
       },
     )
@@ -88,7 +90,10 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
     const html = await response.text()
     expect(html).toContain('Approve CLI sign-in?')
     expect(html).toContain('action="/cli/approve"')
-    expect(html).toContain(`name="state" value="${state}"`)
+    expect(html).toContain('name="consent" value="server-consent-token"')
+    // The CSRF secret is server-generated: the page must not expose the
+    // client-chosen state as a form value (it is bound server-side instead).
+    expect(html).not.toContain(`name="state"`)
     expect(html).toContain('4567')
     expect(html).toContain('owner@send.it')
 
@@ -104,6 +109,7 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
       userId: 'owner-user',
       port: 4567,
       challenge: 'a'.repeat(32),
+      state,
     })
     expect(pending.expiresAt.getTime()).toBe(10 * 60 * 1000)
   })
@@ -175,7 +181,7 @@ describe('approveCliRequest (B-1 consent POST)', () => {
   })
 
   test('requires an authenticated session', async () => {
-    const response = await cliFlow.approveCliRequest(approveRequest('s'.repeat(32)), {
+    const response = await cliFlow.approveCliRequest(approveRequest('c'.repeat(32)), {
       async getSession() {
         return null
       },
@@ -190,7 +196,7 @@ describe('approveCliRequest (B-1 consent POST)', () => {
   })
 
   test('rejects impersonated sessions', async () => {
-    const response = await cliFlow.approveCliRequest(approveRequest('s'.repeat(32)), {
+    const response = await cliFlow.approveCliRequest(approveRequest('c'.repeat(32)), {
       async getSession() {
         return {
           user: { id: 'target-user' },
@@ -209,8 +215,14 @@ describe('approveCliRequest (B-1 consent POST)', () => {
     })
   })
 
-  test('rejects a pending record that is unknown or expired', async () => {
-    const response = await cliFlow.approveCliRequest(approveRequest('s'.repeat(32)), {
+  // The reviewer-found gap (B-1 round 1, major): a hostile same-site page can
+  // choose its own state and forge the approve POST with the session cookie.
+  // The CSRF secret is the server-generated consent token, so a forged POST
+  // (valid session, consent the server never issued) must fail closed.
+  test('rejects a forged POST whose consent token the server never issued', async () => {
+    // Well-formed shape, but the server never issued it: consumePending finds
+    // no record, so the code must never be minted.
+    const response = await cliFlow.approveCliRequest(approveRequest('f'.repeat(32)), {
       async getSession() {
         return ownerSession
       },
@@ -226,8 +238,23 @@ describe('approveCliRequest (B-1 consent POST)', () => {
     })
   })
 
+  test('requires a well-formed consent token', async () => {
+    const response = await cliFlow.approveCliRequest(approveRequest('bad'), {
+      async getSession() {
+        return ownerSession
+      },
+      async consumePending() {
+        return pendingForOwner
+      },
+      async insertVerification() {},
+    })
+
+    expect(response.status).toBe(400)
+    await expect(response.json()).resolves.toEqual({ error: 'consent is required' })
+  })
+
   test('rejects approval from a different session than the pending record', async () => {
-    const response = await cliFlow.approveCliRequest(approveRequest('s'.repeat(32)), {
+    const response = await cliFlow.approveCliRequest(approveRequest('c'.repeat(32)), {
       async getSession() {
         return { user: { id: 'other-user' }, session: {} }
       },
@@ -243,31 +270,16 @@ describe('approveCliRequest (B-1 consent POST)', () => {
     })
   })
 
-  test('requires a well-formed state value', async () => {
-    const response = await cliFlow.approveCliRequest(approveRequest('bad'), {
-      async getSession() {
-        return ownerSession
-      },
-      async consumePending() {
-        return pendingForOwner
-      },
-      async insertVerification() {},
-    })
-
-    expect(response.status).toBe(400)
-    await expect(response.json()).resolves.toEqual({ error: 'state is required' })
-  })
-
-  test('consumes the pending record, mints the one-time code, and redirects to the loopback', async () => {
-    const state = 's'.repeat(32)
+  test('consumes the pending record, mints the code, and redirects to the loopback echoing the bound state', async () => {
+    const consent = 'c'.repeat(32)
     const consumed: string[] = []
     const insertedCodes: Array<Record<string, unknown>> = []
-    const response = await cliFlow.approveCliRequest(approveRequest(state), {
+    const response = await cliFlow.approveCliRequest(approveRequest(consent), {
       async getSession() {
         return ownerSession
       },
-      async consumePending(requestedState) {
-        consumed.push(requestedState)
+      async consumePending(requestedConsent) {
+        consumed.push(requestedConsent)
         return pendingForOwner
       },
       async insertVerification(row) {
@@ -279,10 +291,12 @@ describe('approveCliRequest (B-1 consent POST)', () => {
     })
 
     expect(response.status).toBe(302)
+    // The loopback callback echoes the server-bound client state, never the
+    // consent token, so the CLI's own callback state check still passes.
     expect(response.headers.get('location')).toBe(
-      `http://127.0.0.1:4567/callback?code=fixed-code&state=${state}`,
+      `http://127.0.0.1:4567/callback?code=fixed-code&state=${'s'.repeat(32)}`,
     )
-    expect(consumed).toEqual([state])
+    expect(consumed).toEqual([consent])
     expect(insertedCodes).toHaveLength(1)
     const code = insertedCodes[0] as {
       readonly identifier: string

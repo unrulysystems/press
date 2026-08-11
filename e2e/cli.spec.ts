@@ -153,7 +153,8 @@ async function loginViaLoopback(
   expect(signIn.status()).toBe(200)
 
   // B-1 consent flow: the authorize URL renders a same-origin approval page,
-  // and the loopback code is minted only after the user approves.
+  // and the loopback code is minted only after the user approves. The form's
+  // CSRF secret is a server-generated consent token, never the client state.
   const page = await browserSession.get(authorizeUrl)
   expect(page.status()).toBe(200)
   const pageHtml = await page.text()
@@ -161,11 +162,13 @@ async function loginViaLoopback(
   expect(pageHtml).toContain('action="/cli/approve"')
   const authorizeState = new URL(authorizeUrl).searchParams.get('state')
   expect(authorizeState).toBeTruthy()
-  expect(pageHtml).toContain(`name="state" value="${authorizeState}"`)
+  expect(pageHtml).not.toContain('name="state"')
+  const consentMatch = /name="consent" value="([A-Za-z0-9_-]{32,128})"/.exec(pageHtml)
+  expect(consentMatch?.[1]).toBeTruthy()
 
   const approved = await browserSession.post('/cli/approve', {
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    data: `state=${encodeURIComponent(authorizeState)}`,
+    data: `consent=${encodeURIComponent(consentMatch![1])}`,
     maxRedirects: 0,
   })
   expect(approved.status()).toBe(302)
