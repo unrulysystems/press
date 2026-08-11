@@ -4,3 +4,4 @@ build
 coverage
 *.d.ts
 lock.yaml
+AUDIT.md

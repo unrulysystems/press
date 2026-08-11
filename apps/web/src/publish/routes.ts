@@ -497,20 +497,21 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
         const lockedDb = drizzle(connection, { schema })
         try {
           const result = await lockedDb.transaction(async (tx) => {
-            const txCollection =
-              (await tx.query.collection.findFirst({
+            let txCollection = await tx.query.collection.findFirst({
+              where: eq(collection.slug, route.collectionSlug),
+            })
+            if (!txCollection) {
+              // Two concurrent first publishes to separate files of a brand-new
+              // collection must not race on the insert (M-1): the loser no-ops
+              // and re-reads the winner's row instead of surfacing a 500.
+              await tx
+                .insert(collection)
+                .values({ slug: route.collectionSlug, ownerId: viewer.userId })
+                .onConflictDoNothing({ target: collection.slug })
+              txCollection = await tx.query.collection.findFirst({
                 where: eq(collection.slug, route.collectionSlug),
-              })) ??
-              (
-                await tx
-                  .insert(collection)
-                  .values({
-                    slug: route.collectionSlug,
-                    ownerId: viewer.userId,
-                  })
-                  .returning()
-              )[0]
-
+              })
+            }
             if (!txCollection) {
               throw new HttpError(500, 'collection write failed')
             }
@@ -549,8 +550,15 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
               operation: { kind: action },
             })
 
-            const visibility = requestedVisibility ?? txPage?.visibility ?? null
-            const allowlist = requestedAllowlist ?? txPage?.allowlist ?? []
+            // A live overwrite keeps the page's current settings (status quo). A
+            // publish — first publish or republish of an archived path — starts
+            // neutral, so stale visibility/allowlist/passwordHash can never
+            // silently resurrect (F-18).
+            const keepsCurrentSettings = action === 'overwrite'
+            const visibility =
+              requestedVisibility ?? (keepsCurrentSettings ? (txPage?.visibility ?? null) : null)
+            const allowlist =
+              requestedAllowlist ?? (keepsCurrentSettings ? (txPage?.allowlist ?? []) : [])
             // Publisher-supplied password when provided (validated above), else a strong
             // server-generated one; only when the publish sets visibility=password.
             const effectivePassword =
@@ -559,7 +567,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
                 : undefined
             const passwordHash = effectivePassword
               ? await hashPagePassword(effectivePassword)
-              : visibility === 'password'
+              : visibility === 'password' && keepsCurrentSettings
                 ? (txPage?.passwordHash ?? null)
                 : null
 

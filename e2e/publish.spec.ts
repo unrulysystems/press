@@ -1549,3 +1549,127 @@ test('localnet seeding restores a moved demo page without stale redirects or blo
   expect(await exists(blobPath(destinationCollection, destinationFile))).toBe(false)
   expect(await findPageRedirect(db, demoPage.collectionSlug, demoPage.fileSlug)).toBeUndefined()
 })
+test('republish after unpublish starts neutral — stale ACL and password never resurrect (F-18)', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const owner = await signIn(baseURL, 'owner')
+  const collectionSlug = `${runSlug}-republish-neutral`
+  const lockedFile = 'locked.html'
+  const body = '<!doctype html><title>Locked</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${lockedFile}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  const publishBody = (await publish.json()) as { password: string; visibility: string }
+  expect(publishBody.visibility).toBe('password')
+  expect(
+    await expectServedOk(
+      await api.get(`/p/${collectionSlug}/${lockedFile}`, {
+        headers: { authorization: basicAuth(publishBody.password) },
+      }),
+    ),
+  ).toBe(body)
+
+  expect(
+    (
+      await api.delete(`/api/pages/${collectionSlug}/${lockedFile}`, {
+        headers: authHeaders(actors.owner.token),
+      })
+    ).status(),
+  ).toBe(200)
+
+  const republishedBody = '<!doctype html><title>Replaced content</title>'
+  const republish = await api.put(`/api/pages/${collectionSlug}/${lockedFile}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: republishedBody,
+  })
+  expect(republish.status(), await republish.text()).toBe(200)
+  const republishBody = (await republish.json()) as {
+    readonly visibility: string
+    readonly password?: string
+    readonly allow?: readonly string[]
+  }
+  // A fresh publish: neutral page state, resolved through the collection default.
+  expect(republishBody.visibility).toBe('default')
+  expect(republishBody.password).toBeUndefined()
+  expect(republishBody.allow).toBeUndefined()
+
+  const row = await findPage(db, collectionSlug, lockedFile)
+  expect(row).toMatchObject({ visibility: null, passwordHash: null, allowlist: [] })
+  expect(row?.archivedAt).toBeNull()
+
+  // The stale password channel is gone: no hash, so the old password must not unlock.
+  const oldPasswordAttempt = await api.get(`/p/${collectionSlug}/${lockedFile}`, {
+    headers: { authorization: basicAuth(publishBody.password) },
+  })
+  expect(oldPasswordAttempt.status()).toBe(401)
+  expect(await expectServedOk(await owner.get(`/p/${collectionSlug}/${lockedFile}`))).toBe(
+    republishedBody,
+  )
+
+  // Same neutrality for a private page: the archived allowlist must not resurrect.
+  const privateFile = 'private-allow.html'
+  const privatePublish = await api.put(
+    `/api/pages/${collectionSlug}/${privateFile}?visibility=private&allow=bob%40example.test`,
+    {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+      data: '<!doctype html><title>Private</title>',
+    },
+  )
+  expect(privatePublish.status()).toBe(200)
+  expect((await findPage(db, collectionSlug, privateFile))?.allowlist).toEqual(['bob@example.test'])
+  expect(
+    (
+      await api.delete(`/api/pages/${collectionSlug}/${privateFile}`, {
+        headers: authHeaders(actors.owner.token),
+      })
+    ).status(),
+  ).toBe(200)
+  const privateRepublish = await api.put(`/api/pages/${collectionSlug}/${privateFile}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Private replaced</title>',
+  })
+  expect(privateRepublish.status(), await privateRepublish.text()).toBe(200)
+  const privateBody = (await privateRepublish.json()) as {
+    readonly visibility: string
+    readonly allow?: readonly string[]
+  }
+  expect(privateBody.visibility).toBe('default')
+  expect(privateBody.allow).toBeUndefined()
+  expect(await findPage(db, collectionSlug, privateFile)).toMatchObject({
+    visibility: null,
+    passwordHash: null,
+    allowlist: [],
+  })
+})
+
+test('concurrent first publishes to a brand-new collection never 500 (M-1)', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  // The race window is between each transaction's collection findFirst and its
+  // insert. Firing both PUTs concurrently across several brand-new collections
+  // forces the interleave often enough to make the pre-fix unique-violation 500
+  // observable; the hard invariant this guards is "never 500", which the fixed
+  // onConflictDoNothing + re-read makes deterministic for any interleave.
+  for (let round = 0; round < 4; round += 1) {
+    const collectionSlug = `${runSlug}-first-publish-race-${round}`
+    const [first, second] = await Promise.all([
+      api.put(`/api/pages/${collectionSlug}/a.html`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+        data: '<!doctype html><title>A</title>',
+      }),
+      api.put(`/api/pages/${collectionSlug}/b.html`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+        data: '<!doctype html><title>B</title>',
+      }),
+    ])
+    expect(first.status(), await first.text()).not.toBe(500)
+    expect(second.status(), await second.text()).not.toBe(500)
+    expect(await findPage(db, collectionSlug, 'a.html')).toBeDefined()
+    expect(await findPage(db, collectionSlug, 'b.html')).toBeDefined()
+    expect(await findCollection(db, collectionSlug)).toBeDefined()
+  }
+})
