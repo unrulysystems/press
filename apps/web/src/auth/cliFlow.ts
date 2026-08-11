@@ -175,8 +175,13 @@ will be issued only after you approve.</p>
 }
 
 export const cliApprovalPageHeaders = {
+  // form-action must permit the loopback: Chromium enforces form-action on the
+  // redirect that follows a form submission, so a 'self'-only policy would
+  // block the server's loopback redirect and the CLI would never receive its
+  // code. The redirect target is server-controlled (from the pending record);
+  // the page's only form is server-authored with a fixed action.
   'Content-Security-Policy':
-    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' http://127.0.0.1:*; base-uri 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store',

@@ -191,6 +191,73 @@ async function loginViaLoopback(
   expect(result.stdout).toContain(`logged in as ${localnetUsers[userKey].email}`)
 }
 
+// Real-browser B-1 floor: the consent POST and its loopback redirect must
+// survive actual Chromium CSP enforcement (form-action governs the redirect
+// that follows a form submission), or the CLI never receives its code. The
+// API-context helpers above bypass CSP, so this test drives a real page.
+test('press CLI login completes through a real-browser consent click (B-1 CSP floor)', async ({
+  baseURL,
+  page,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+
+  const env = await makePressEnv(baseURL, 'owner')
+  const child = spawn(pressBin, ['login', '--no-open'], {
+    cwd: root,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  const exitResult = new Promise<PressResult>((resolveRun, reject) => {
+    child.on('error', reject)
+    child.on('exit', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
+  })
+  const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk)
+      const match = /(http:\/\/127\.0\.0\.1:\d+\/cli\/authorize\?[^\s]+)/.exec(stdout)
+      if (match?.[1]) {
+        resolveUrl(match[1])
+      }
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk)
+    })
+    child.on('error', reject)
+    child.on('exit', (code) => {
+      if (code !== 0) {
+        reject(new Error(`press login exited ${code}: ${stderr || stdout}`))
+      }
+    })
+    setTimeout(() => reject(new Error('press login did not print authorize URL')), 10_000).unref()
+  })
+
+  await page.goto('/login?next=/')
+  await page.getByLabel('Email').fill(localnetUsers.owner.email)
+  await page.getByLabel('Password').fill(localnetUsers.owner.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
+
+  const approvalResponse = await page.goto(authorizeUrl)
+  expect(approvalResponse?.status()).toBe(200)
+  await expect(page.getByRole('heading', { name: 'Approve CLI sign-in?' })).toBeVisible()
+
+  // The browser POSTs the consent form and must follow the server's loopback
+  // redirect to the CLI's local listener.
+  await page.getByRole('button', { name: 'Approve' }).click()
+
+  const result = await exitResult
+  expect(result.code).toBe(0)
+  expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
+
+  // Revoke the minted token so the localnet token table stays clean.
+  const logout = await runPress(['logout'], env)
+  expect(logout.code).toBe(0)
+})
+
 test('press CLI loopback login, publish, list, page set, unpublish, and logout', async ({
   baseURL,
 }) => {

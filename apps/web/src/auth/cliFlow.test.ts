@@ -87,6 +87,12 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('content-type')).toContain('text/html')
+    // The form-action policy must permit the server's loopback redirect or a
+    // real browser blocks the post-approval navigation and the CLI never
+    // receives its code (B-1 review round 4 floor).
+    expect(response.headers.get('content-security-policy')).toContain(
+      "form-action 'self' http://127.0.0.1:*",
+    )
     const html = await response.text()
     expect(html).toContain('Approve CLI sign-in?')
     expect(html).toContain('action="/cli/approve"')
