@@ -98,9 +98,10 @@ test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-1
 
   // Anonymous sessions must 404 too — the route no longer exists at all.
   for (const probe of probes) {
+    // oxlint-disable-next-line no-await-in-loop -- each anonymous probe is its own navigation
     await page.goto('/login?next=/')
-    const anonymous = await page.evaluate(async (probe) => {
-      const result = await fetch(probe.path, { method: probe.method })
+    const anonymous = await page.evaluate(async (entry) => {
+      const result = await fetch(entry.path, { method: entry.method })
       return { status: result.status }
     }, probe)
     expect(anonymous.status, `anonymous ${probe.method} ${probe.path}`).toBe(404)
@@ -114,8 +115,9 @@ test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-1
   await expect(page).toHaveURL('/')
 
   for (const probe of probes) {
-    const response = await page.evaluate(async (probe) => {
-      const result = await fetch(probe.path, { method: probe.method })
+    // oxlint-disable-next-line no-await-in-loop -- each admin probe is its own request
+    const response = await page.evaluate(async (entry) => {
+      const result = await fetch(entry.path, { method: entry.method })
       return { status: result.status }
     }, probe)
     expect(response.status, `${probe.method} ${probe.path}`).toBe(404)
