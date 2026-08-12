@@ -1,8 +1,8 @@
 # press — SPEC
 
 The contract for press v1. See `VISION.md` for why, `BRIEF.md` for the quality
-bar, `apps/web/BRIEF.md` for the design bar, `DELTA.md` for dated wrap notes,
-and `DEVIATIONS.md` for accepted implementation deviations.
+bar, `apps/web/BRIEF.md` for the design bar, `docs/ops.md` for the backup/
+restore runbook, and `README.md` for development and deployment steps.
 
 Status: ratified by Allen 2026-07-02 (design chat). Amendments require Allen.
 
@@ -78,11 +78,15 @@ Slug grammar (both collection and file slugs):
 - **REQ-AUTH-003** Browser sessions are HttpOnly, Secure (in prod), SameSite=Lax
   cookies via Better Auth.
 - **REQ-AUTH-004** The CLI authenticates with a press-issued API token: `press
-login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with a
-  loopback port + PKCE-style one-time challenge; after the user authenticates,
-  the server redirects to `127.0.0.1:<port>` with a one-time code; the CLI
+login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with
+  a loopback port + PKCE-style one-time challenge + state nonce; the server
+  records a pending login bound to the session, port, challenge, and state, and
+  renders a same-origin approval page whose form carries a server-generated
+  consent token; only a CSRF-protected POST to `/cli/approve` presenting that
+  token from the same session mints the one-time code, then the server
+  redirects to `127.0.0.1:<port>` with the code and the bound state; the CLI
   exchanges the code for a long-lived API token). The exchange endpoint is
-  testable without a real browser.
+  testable without a real browser. (Consent step ratified 2026-08-11, B-1.)
 - **REQ-AUTH-005** API tokens are stored hashed server-side, are revocable
   (`press logout` revokes; users can revoke any of their tokens), and record
   lastUsedAt.
@@ -91,7 +95,9 @@ login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with a
   secret manager). The CLI never writes the token to disk in plaintext and never
   accepts it as a command argument.
 - **REQ-AUTH-007** Instance admins are the users whose emails appear in
-  `PRESS_ADMIN_EMAILS` (role assigned at sign-in).
+  `PRESS_ADMIN_EMAILS`. The config list is authoritative and enforced at every
+  authorization use (sign-in assigns, tokens/sessions/whoami re-derive); removing
+  an email demotes immediately — the stored role column is only a cache.
 - **REQ-AUTH-008** The `/login` identity gate always renders the sign-in
   affordance for every enabled provider — the credential form when
   `PRESS_ENABLE_CREDENTIAL_AUTH=1` (localnet), the "Continue with Google" button

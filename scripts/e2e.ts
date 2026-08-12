@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '..')
 const siloEnvFile = resolve(root, '.silo.env')
@@ -92,6 +92,52 @@ async function runRequired(command: string, args: readonly string[], env: E2EEnv
   const result = await run(command, args, env)
   if (result.code !== 0) {
     throw new Error(`${commandText(command, args)} exited with ${result.signal ?? result.code}`)
+  }
+}
+
+// F-20 floor: the localnet Postgres host port must be reachable only on
+// loopback. A 0.0.0.0/:: binding would expose a known-credential dev database
+// (press/press) to the LAN on every machine that boots localnet.
+async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEnv): Promise<void> {
+  const docker = spawnSync(
+    'docker',
+    ['ps', '--filter', `name=${composeProjectName}-postgres-1`, '--format', '{{.Ports}}'],
+    { cwd: root, env, encoding: 'utf8', timeout: 10_000 },
+  )
+  if (docker.error) {
+    throw new Error(`localnet postgres port check: docker ps failed: ${docker.error.message}`)
+  }
+  if (docker.status !== 0 || docker.signal) {
+    throw new Error(
+      `localnet postgres port check: docker ps exited ${docker.signal ?? docker.status}`,
+    )
+  }
+  const ports = (docker.stdout ?? '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+  if (ports.length === 0) {
+    throw new Error(`localnet postgres container ${composeProjectName}-postgres-1 not found`)
+  }
+  const joined = ports.join(' ')
+  // Fail closed on the host address: anything that is not explicitly loopback
+  // (127.0.0.0/8 or ::1) — including a concrete LAN IP — violates F-20.
+  const loopbackHost = (host: string): boolean =>
+    host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  const nonLoopback = joined
+    .split(',')
+    .map((token) => /^\s*(\[[^\]]+\]|[^:]+):\d+->/.exec(token)?.[1])
+    .filter((host) => {
+      if (!host) {
+        return true // unparseable published port -> fail closed
+      }
+      const normalized = host.startsWith('[') ? host.slice(1, -1) : host
+      return !loopbackHost(normalized)
+    })
+  if (nonLoopback.length > 0) {
+    throw new Error(
+      `localnet postgres must publish loopback only (F-20): ${joined} (bad: ${nonLoopback.join(', ')})`,
+    )
   }
 }
 
@@ -319,6 +365,8 @@ async function main(): Promise<number> {
 
     siloUp = startSiloUp(e2eEnv)
     await waitForHealth(siloEnv.PRESS_BASE_URL, waitForExit(siloUp), healthTimeoutMs)
+
+    await assertPostgresLoopbackOnly(composeProjectName, e2eEnv)
 
     await runRequired('playwright', ['install', 'chromium'], e2eEnv)
     const result = await run(

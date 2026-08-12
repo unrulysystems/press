@@ -8,6 +8,7 @@ import { join } from 'node:path'
 import {
   CLI_PACKAGE_VERSION,
   buildCliBinary,
+  defaultCliBinary,
   hostReleasePlatform,
   packageCliBinary,
   sha256File,
@@ -214,13 +215,40 @@ async function verifyMacKeychainRoundTrip(
 }
 
 const platform = hostReleasePlatform()
-const builtBinary = await buildCliBinary({ platform })
+// Capture the release artifact's bytes before any verifier build runs; the
+// harness must leave artifacts/cli/press untouched (F-16, review round 2).
+// Only a genuinely absent artifact is accepted as undefined; any read failure
+// must fail loudly so the no-clobber check stays fail-closed.
+async function artifactFingerprint(file: string): Promise<string | undefined> {
+  try {
+    return await sha256File(file)
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return undefined
+    }
+    throw error
+  }
+}
+const releaseArtifactBefore = await artifactFingerprint(defaultCliBinary)
 const isolated = await mkdtemp(join(tmpdir(), 'press-cli-standalone-'))
 const isolatedPath = join(isolated, 'path')
 const binary = join(isolated, 'press')
 const keychainFile = join(isolated, 'keychain.json')
 const preloadMarker = join(isolated, 'bunfig-preload-ran')
 await mkdir(isolatedPath)
+// Build both variants to private outfiles: the verifier must never write to
+// artifacts/cli/press (the release artifact), or the packaging step that
+// follows in release.yml could consume a seam-enabled binary (F-16, review
+// round 2).
+const builtBinary = await buildCliBinary({
+  platform,
+  outfile: join(isolated, 'test-build.bin'),
+})
+const releaseBinary = await buildCliBinary({
+  platform,
+  testBuild: false,
+  outfile: join(isolated, 'release-press.bin'),
+})
 await copyFile(builtBinary, binary)
 await chmod(binary, 0o755)
 
@@ -278,6 +306,46 @@ if (await Bun.file(preloadMarker).exists()) {
 
 if (process.env.PRESS_VERIFY_REAL_KEYCHAIN === '1') {
   await verifyMacKeychainRoundTrip(binary, isolated, env)
+}
+
+// F-16: only the hermetic test/e2e build may honor PRESS_E2E_KEYCHAIN_FILE. A
+// release binary must never let that variable reroute token storage to a
+// plaintext file: seed the seam with a probe token and assert doctor reports
+// it for the test build and ignores it for the release build.
+const seamHost = 'https://press-seam.invalid'
+const seamFile = join(isolated, 'seam-keychain.json')
+await writeFile(
+  seamFile,
+  JSON.stringify({ [`press:${seamHost}:press-cli-token`]: 'press_seam_probe_token' }),
+)
+const seamEnv = { ...env, PRESS_E2E_KEYCHAIN_FILE: seamFile }
+const seamfulDoctor = run(builtBinary, ['--host', seamHost, 'doctor', '--json'], isolated, seamEnv)
+const seamfulReport = JSON.parse(seamfulDoctor.stdout) as {
+  readonly ok?: boolean
+  readonly data?: { readonly tokenSource?: string }
+}
+if (seamfulReport.ok !== true || seamfulReport.data?.tokenSource !== 'keychain') {
+  fail(`test-build CLI did not honor the keychain seam: ${seamfulDoctor.stdout}`)
+}
+const seamlessDoctor = run(
+  releaseBinary,
+  ['--host', seamHost, 'doctor', '--json'],
+  isolated,
+  seamEnv,
+)
+const seamlessReport = JSON.parse(seamlessDoctor.stdout) as {
+  readonly ok?: boolean
+  readonly data?: { readonly tokenSource?: string }
+}
+if (seamlessReport.ok !== true || seamlessReport.data?.tokenSource !== 'none') {
+  fail(`release CLI honored the keychain seam (F-16): ${seamlessDoctor.stdout}`)
+}
+
+// The release workflow builds its seam-free artifact at artifacts/cli/press
+// BEFORE this harness runs and packages it AFTER, so any clobber ships a
+// seam-enabled binary (F-16, review round 2). Fail loudly instead.
+if (releaseArtifactBefore !== (await artifactFingerprint(defaultCliBinary))) {
+  fail('verifier must not modify the release artifact at artifacts/cli/press (F-16)')
 }
 
 const packaged = await packageCliBinary({ binary, platform, outdir: join(isolated, 'release') })

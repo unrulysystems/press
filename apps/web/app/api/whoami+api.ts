@@ -1,4 +1,6 @@
 import { auth } from '@press/web/auth/server'
+import { roleForEmail } from '@press/web/auth/role'
+import { dbConfig } from '@press/web/db/client'
 
 import type { Endpoint } from 'one'
 
@@ -10,14 +12,14 @@ export const GET: Endpoint = async (request) => {
   if (!session) {
     return Response.json({ authenticated: false }, { status: 401 })
   }
-  const user = session.user as typeof session.user & { readonly role?: string }
 
   return Response.json({
     authenticated: true,
     user: {
       id: session.user.id,
       email: session.user.email,
-      role: user.role ?? 'user',
+      // Effective admin role derives from PRESS_ADMIN_EMAILS, not the cached row (B-2).
+      role: roleForEmail(session.user.email, dbConfig.adminEmails),
     },
   })
 }

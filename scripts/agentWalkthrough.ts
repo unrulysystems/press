@@ -464,12 +464,35 @@ const credentialSignIn: SignInFactory = (baseUrl, user) => async (authorizeUrl) 
   if (!cookie) {
     fail('credential sign-in returned no session cookie')
   }
+  // B-1 consent step: the authorize URL renders a same-origin approval page
+  // (a bare GET never mints a code); approve the pending request with the
+  // session cookie and the page's server-generated consent token, then follow
+  // the loopback redirect so the CLI's local listener receives the code and
+  // `press login` completes.
   const authorized = await fetchWithTimeout(authorizeUrl, 10_000, {
     headers: { cookie },
-    redirect: 'follow',
   })
   if (!authorized.ok) {
     fail(`cli authorize handshake failed: HTTP ${authorized.status}`)
+  }
+  const state = new URL(authorizeUrl).searchParams.get('state')
+  if (!state) {
+    fail('cli authorize URL carried no state nonce')
+  }
+  const consent = /name="consent" value="([A-Za-z0-9_-]{32,128})"/.exec(
+    await authorized.text(),
+  )?.[1]
+  if (!consent) {
+    fail('approval page carried no server-generated consent token')
+  }
+  const approved = await fetchWithTimeout(`${baseUrl}/cli/approve`, 10_000, {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' },
+    body: `consent=${encodeURIComponent(consent)}`,
+    redirect: 'follow',
+  })
+  if (!approved.ok) {
+    fail(`cli approve handshake failed: HTTP ${approved.status}`)
   }
 }
 

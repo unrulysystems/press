@@ -140,6 +140,7 @@ export async function buildCliBinary(
   input: {
     readonly platform?: ReleasePlatform
     readonly outfile?: string
+    readonly testBuild?: boolean
   } = {},
 ): Promise<string> {
   const platform = input.platform ?? hostReleasePlatform()
@@ -158,6 +159,9 @@ export async function buildCliBinary(
       autoloadPackageJson: false,
       autoloadTsconfig: false,
     },
+    // Hermetic test/e2e binaries keep the file-backed keychain seam (F-16);
+    // release binaries compile it out so PRESS_E2E_KEYCHAIN_FILE has no effect.
+    define: { 'process.env.PRESS_TEST_BUILD': input.testBuild === false ? '"0"' : '"1"' },
     minify: true,
     packages: 'bundle',
     plugins: [cliWorkspaceSourcePlugin()],

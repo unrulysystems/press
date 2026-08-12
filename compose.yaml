@@ -4,7 +4,9 @@ services:
   postgres:
     image: postgres:17
     ports:
-      - '${PRESS_POSTGRES_PORT}:5432'
+      # Loopback-only (F-20): a 0.0.0.0 binding would expose the
+      # known-credential dev database to the LAN on every developer machine.
+      - '127.0.0.1:${PRESS_POSTGRES_PORT}:5432'
     environment:
       POSTGRES_DB: press
       POSTGRES_USER: press

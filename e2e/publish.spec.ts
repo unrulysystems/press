@@ -1139,6 +1139,118 @@ test('password gate: branded HTML entry, form+cookie unlock, Basic for programma
   await expect(page.locator('body')).toContainText(bodyMarker)
 })
 
+test('malformed percent-encoding in mutation paths returns 400, not 500 (M-2)', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  // %E0%A4%A is a truncated UTF-8 sequence: it is syntactically valid
+  // percent-encoding (so it survives URL parsing) but decodeURIComponent rejects
+  // it. The mutation API must answer 400, never a 500.
+  const paths = [
+    `/api/pages/%E0%A4%A/thing.html`,
+    `/api/collections/%E0%A4%A`,
+    `/api/collections/%E0%A4%A/pages`,
+    `/api/pages/coll/%E0%A4%A`,
+  ]
+  const bodies = [
+    { method: 'PUT', data: '<!doctype html><title>x</title>' },
+    { method: 'PATCH', data: { visibility: 'public' } },
+    { method: 'GET' },
+    { method: 'PATCH', data: { title: 'x' } },
+  ]
+  for (let index = 0; index < paths.length; index += 1) {
+    // oxlint-disable-next-line no-await-in-loop -- each path is a distinct request
+    const response = await (
+      api as unknown as Record<string, (url: string, init: object) => Promise<APIResponse>>
+    )[bodies[index].method.toLowerCase()](paths[index], {
+      ...(bodies[index].method === 'PUT'
+        ? { headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }) }
+        : bodies[index].method === 'PATCH'
+          ? { headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }) }
+          : { headers: authHeaders(actors.owner.token) }),
+      ...(bodies[index].data !== undefined ? { data: bodies[index].data } : {}),
+    })
+    // oxlint-disable-next-line no-await-in-loop -- each path's status/text is a distinct request
+    expect(response.status(), await response.text()).toBe(400)
+  }
+})
+
+test('anonymous endpoint bodies are byte-capped (M-3)', async ({ baseURL }) => {
+  const api = await newE2EAPIContext({ baseURL })
+  // /api/cli/exchange is unauthenticated: an oversized JSON body must 413 before
+  // any buffering or code/verifier validation (no memory-exhaustion vector).
+  const exchange = await api.post('/api/cli/exchange', {
+    headers: { 'content-type': 'application/json' },
+    data: '{"padding":"' + 'a'.repeat(9_000) + '"}',
+  })
+  expect(exchange.status()).toBe(413)
+
+  // The password-gate form target is public; its POST body must also be capped.
+  const collectionSlug = `${runSlug}-body-caps`
+  const file = 'locked.html'
+  await api.put(`/api/pages/${collectionSlug}/${file}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, {
+      'content-type': 'text/html',
+      'x-press-page-password': 'cap-secret-1234',
+    }),
+    data: '<!doctype html><title>Cap</title>',
+  })
+  const unlock = await api.post(`/p/${collectionSlug}/${file}`, {
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    data: 'password=' + 'a'.repeat(20_000),
+  })
+  expect(unlock.status()).toBe(413)
+})
+
+test('password reroll invalidates a previously issued unlock cookie (F-15/19)', async ({
+  baseURL,
+  page,
+}) => {
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-gate-reroll`
+  const file = 'locked.html'
+  const firstSecret = 'first-secret-1234'
+  const bodyMarker = 'REPORT-BODY-AFTER-REROLL'
+
+  const published = await api.put(`/api/pages/${collectionSlug}/${file}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, {
+      'content-type': 'text/html',
+      'x-press-page-password': firstSecret,
+    }),
+    data: `<!doctype html><title>Reroll</title><article>${bodyMarker}</article>`,
+  })
+  expect(published.status()).toBe(200)
+  const path = `/p/${collectionSlug}/${file}`
+
+  // Unlock in a real browser: the gate posts the password, the 303 sets the
+  // page-scoped unlock cookie, and the report renders.
+  await page.goto(path)
+  await page.fill('input[name="password"]', firstSecret)
+  await page.click('button[type="submit"]')
+  await expect(page.locator('body')).toContainText(bodyMarker)
+
+  // Owner rerolls the password; the plaintext hash changes but the page id stays.
+  const reroll = await api.post(`/api/pages/${collectionSlug}/${file}/password`, {
+    headers: authHeaders(actors.owner.token),
+  })
+  expect(reroll.status()).toBe(200)
+  const rerollBody = (await reroll.json()) as { password: string }
+
+  // The same browser still holds the old unlock cookie. It must no longer open
+  // the page: the gate reappears and the report body is not served.
+  await page.goto(path)
+  await expect(page.locator('input[name="password"]')).toBeVisible()
+  await expect(page.locator('body')).not.toContainText(bodyMarker)
+
+  // The new password unlocks normally.
+  await page.fill('input[name="password"]', rerollBody.password)
+  await page.click('button[type="submit"]')
+  await expect(page.locator('body')).toContainText(bodyMarker)
+})
+
 test('page move preserves identity and ACL while permanent redirects track the canonical path', async ({
   baseURL,
 }) => {
@@ -1548,4 +1660,128 @@ test('localnet seeding restores a moved demo page without stale redirects or blo
   expect(hashBody(restoredBody)).toBe(restoredPage?.contentHash)
   expect(await exists(blobPath(destinationCollection, destinationFile))).toBe(false)
   expect(await findPageRedirect(db, demoPage.collectionSlug, demoPage.fileSlug)).toBeUndefined()
+})
+test('republish after unpublish starts neutral — stale ACL and password never resurrect (F-18)', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const owner = await signIn(baseURL, 'owner')
+  const collectionSlug = `${runSlug}-republish-neutral`
+  const lockedFile = 'locked.html'
+  const body = '<!doctype html><title>Locked</title>'
+  const publish = await api.put(`/api/pages/${collectionSlug}/${lockedFile}?visibility=password`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: body,
+  })
+  expect(publish.status()).toBe(200)
+  const publishBody = (await publish.json()) as { password: string; visibility: string }
+  expect(publishBody.visibility).toBe('password')
+  expect(
+    await expectServedOk(
+      await api.get(`/p/${collectionSlug}/${lockedFile}`, {
+        headers: { authorization: basicAuth(publishBody.password) },
+      }),
+    ),
+  ).toBe(body)
+
+  expect(
+    (
+      await api.delete(`/api/pages/${collectionSlug}/${lockedFile}`, {
+        headers: authHeaders(actors.owner.token),
+      })
+    ).status(),
+  ).toBe(200)
+
+  const republishedBody = '<!doctype html><title>Replaced content</title>'
+  const republish = await api.put(`/api/pages/${collectionSlug}/${lockedFile}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: republishedBody,
+  })
+  expect(republish.status(), await republish.text()).toBe(200)
+  const republishBody = (await republish.json()) as {
+    readonly visibility: string
+    readonly password?: string
+    readonly allow?: readonly string[]
+  }
+  // A fresh publish: neutral page state, resolved through the collection default.
+  expect(republishBody.visibility).toBe('default')
+  expect(republishBody.password).toBeUndefined()
+  expect(republishBody.allow).toBeUndefined()
+
+  const row = await findPage(db, collectionSlug, lockedFile)
+  expect(row).toMatchObject({ visibility: null, passwordHash: null, allowlist: [] })
+  expect(row?.archivedAt).toBeNull()
+
+  // The stale password channel is gone: no hash, so the old password must not unlock.
+  const oldPasswordAttempt = await api.get(`/p/${collectionSlug}/${lockedFile}`, {
+    headers: { authorization: basicAuth(publishBody.password) },
+  })
+  expect(oldPasswordAttempt.status()).toBe(401)
+  expect(await expectServedOk(await owner.get(`/p/${collectionSlug}/${lockedFile}`))).toBe(
+    republishedBody,
+  )
+
+  // Same neutrality for a private page: the archived allowlist must not resurrect.
+  const privateFile = 'private-allow.html'
+  const privatePublish = await api.put(
+    `/api/pages/${collectionSlug}/${privateFile}?visibility=private&allow=bob%40example.test`,
+    {
+      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+      data: '<!doctype html><title>Private</title>',
+    },
+  )
+  expect(privatePublish.status()).toBe(200)
+  expect((await findPage(db, collectionSlug, privateFile))?.allowlist).toEqual(['bob@example.test'])
+  expect(
+    (
+      await api.delete(`/api/pages/${collectionSlug}/${privateFile}`, {
+        headers: authHeaders(actors.owner.token),
+      })
+    ).status(),
+  ).toBe(200)
+  const privateRepublish = await api.put(`/api/pages/${collectionSlug}/${privateFile}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Private replaced</title>',
+  })
+  expect(privateRepublish.status(), await privateRepublish.text()).toBe(200)
+  const privateBody = (await privateRepublish.json()) as {
+    readonly visibility: string
+    readonly allow?: readonly string[]
+  }
+  expect(privateBody.visibility).toBe('default')
+  expect(privateBody.allow).toBeUndefined()
+  expect(await findPage(db, collectionSlug, privateFile)).toMatchObject({
+    visibility: null,
+    passwordHash: null,
+    allowlist: [],
+  })
+})
+
+test('concurrent first publishes to a brand-new collection never 500 (M-1)', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  // The race window is between each transaction's collection findFirst and its
+  // insert. Firing both PUTs concurrently across several brand-new collections
+  // forces the interleave often enough to make the pre-fix unique-violation 500
+  // observable; the hard invariant this guards is "never 500", which the fixed
+  // onConflictDoNothing + re-read makes deterministic for any interleave.
+  for (let round = 0; round < 4; round += 1) {
+    const collectionSlug = `${runSlug}-first-publish-race-${round}`
+    const [first, second] = await Promise.all([
+      api.put(`/api/pages/${collectionSlug}/a.html`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+        data: '<!doctype html><title>A</title>',
+      }),
+      api.put(`/api/pages/${collectionSlug}/b.html`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+        data: '<!doctype html><title>B</title>',
+      }),
+    ])
+    expect(first.status(), await first.text()).not.toBe(500)
+    expect(second.status(), await second.text()).not.toBe(500)
+    expect(await findPage(db, collectionSlug, 'a.html')).toBeDefined()
+    expect(await findPage(db, collectionSlug, 'b.html')).toBeDefined()
+    expect(await findCollection(db, collectionSlug)).toBeDefined()
+  }
 })

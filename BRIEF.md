@@ -2,8 +2,7 @@
 
 Law doc for the press product surface (server + CLI + repo), present-tense, no
 narrated history — git is the changelog. Amend Decisions and Boundary only with
-Allen's confirmation; log the rationale. Dated working memory lives in
-`DELTA.md` / `DEVIATIONS.md` beside this file. The web UI's design law is
+Allen's confirmation; log the rationale. The web UI's design law is
 `apps/web/BRIEF.md`.
 
 ## Bar
@@ -50,6 +49,11 @@ published page to attack its readers.
   red first), and the suite runs in CI on every push.
 - **Fresh-context review:** each loop phase ends with an independent reviewer
   (e.g. `/code-review` or an rl review gate) that did not author the diff.
+- **Harness limits:** reviewer/worker sandboxes cannot run Docker/Chromium
+  executable proofs; the driver runs them in a real environment and the review
+  gate accepts that evidence. The Google sign-in click-path (prod-only
+  provider) is covered only by the attended real-Google final gate — localnet
+  is credential-only (REQ-AUTH-002).
 - **Final gate (human, attended):** one manual walkthrough on a real deploy with
   real Google sign-in before any instance ships — the live system check the
   localnet proxy cannot replace.
@@ -67,7 +71,7 @@ published page to attack its readers.
   (INV-3).
 - Credential auth enabled in production (INV-5).
 - Weakening a floor or assertion to make a loop pass — infeasible items get the
-  nearest-feasible alternative plus a `DEVIATIONS.md` entry.
+  nearest-feasible alternative plus a dated BRIEF Decisions entry.
 - Pushing, publishing packages/images, or deploying from inside a loop.
 - Publishing tags or GitHub Release assets from inside a loop.
 
@@ -138,6 +142,40 @@ published page to attack its readers.
     `allow` (REQ-PUB-004 / REQ-CLI-004).
   - `/login` always presents the enabled provider's sign-in affordance and tells
     a reader who can't sign in what to do — never copy-only (REQ-AUTH-008).
+
+### 2026-08-11 — security ultra-audit follow-up (F-12..F-20)
+
+- Republish-after-unpublish is a **fresh publish** (F-18): a PUT on an
+  `archivedAt` row with no explicit visibility/allow/password options starts
+  neutral like a first publish (`visibility=null`, `allowlist=[]`, password
+  generated and returned once only when requested); overwrite of a LIVE page
+  keeps prior settings. (Ratified at review gate 1; final Allen ratification
+  at the boundary.)
+- Unlock cookies bind to the page's current password hash (F-15/19): the
+  cookie signature covers the row's `passwordHash`, so a reroll or
+  overwrite-publish invalidates outstanding cookies immediately, with no
+  schema change.
+- Small dedicated caps for anonymous bodies (M-3): `/api/cli/exchange` JSON
+  and the password-gate POST are byte-capped (413 before buffering, stream
+  cancel) far below `PRESS_MAX_UPLOAD_BYTES`; the publish upload cap is
+  unchanged.
+- The keychain test seam is test-build-only (F-16): `PRESS_E2E_KEYCHAIN_FILE`
+  is honored only in compiled test/e2e binaries, never a release build.
+- CLI authorize has a **same-origin consent step** (B-1 A, Allen): server-owned
+  pending-login record, same-origin approval page, loopback code minted only
+  after a CSRF-protected POST presenting a server-generated consent token
+  (F-12/17; REQ-AUTH-004 amended).
+- Config is the **admin source of truth** (B-2 A, Allen): the role is derived
+  at every sign-in (promote and demote) and resolved from
+  `PRESS_ADMIN_EMAILS` at every authorization use; the stored role column is a
+  cache (F-13; REQ-AUTH-007 amended).
+- The Better Auth `admin()` plugin is **removed** (B-3 A, Allen): press
+  moderation is read-all + unpublish via `decideAcl` (F-14).
+- Session and OAuth tokens at rest (F-04 residual, deferred 2026-07-04):
+  Better Auth session bearer tokens remain unhashed at rest by design —
+  hashing them or dropping the `account` token columns overrides Better Auth's
+  adapter schema for marginal benefit; the DB and its dumps are treated as
+  secret-bearing (`docs/ops.md`). Allen's call if that tradeoff changes.
 - Priority policy: **security > correctness > design > ergonomics > latency.**
   A security concern can force a redesign; latency cannot.
 

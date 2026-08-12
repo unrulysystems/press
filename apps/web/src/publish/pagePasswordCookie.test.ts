@@ -11,6 +11,9 @@ import {
 const SECRET = 'localnet-secret-at-least-32-bytes-long'
 const PAGE = 'demo-market-notes-secret.html'
 const NOW = 1_000_000_000_000
+const NULL_HASH = null
+const hashA = 'argon2id-hash-AAAAAAAA'
+const hashB = 'argon2id-hash-BBBBBBBB'
 
 describe('page password unlock cookie (REQ-SRV-004 / F1)', () => {
   test('cookie name is page-scoped', () => {
@@ -19,35 +22,54 @@ describe('page password unlock cookie (REQ-SRV-004 / F1)', () => {
   })
 
   test('a freshly signed cookie verifies for its page', () => {
-    const value = signPagePasswordCookie(SECRET, PAGE, NOW + PAGE_PASSWORD_COOKIE_TTL_MS)
-    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW)).toBe(true)
+    const value = signPagePasswordCookie(SECRET, PAGE, NOW + PAGE_PASSWORD_COOKIE_TTL_MS, NULL_HASH)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, NULL_HASH)).toBe(true)
   })
 
   test('rejects an expired cookie', () => {
-    const value = signPagePasswordCookie(SECRET, PAGE, NOW - 1)
-    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW)).toBe(false)
+    const value = signPagePasswordCookie(SECRET, PAGE, NOW - 1, NULL_HASH)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, NULL_HASH)).toBe(false)
   })
 
   test('rejects a cookie minted for a different page (page-scoped)', () => {
-    const value = signPagePasswordCookie(SECRET, 'other-page', NOW + PAGE_PASSWORD_COOKIE_TTL_MS)
-    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW)).toBe(false)
+    const value = signPagePasswordCookie(
+      SECRET,
+      'other-page',
+      NOW + PAGE_PASSWORD_COOKIE_TTL_MS,
+      NULL_HASH,
+    )
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, NULL_HASH)).toBe(false)
   })
 
   test('rejects a tampered signature', () => {
-    const value = signPagePasswordCookie(SECRET, PAGE, NOW + PAGE_PASSWORD_COOKIE_TTL_MS)
+    const value = signPagePasswordCookie(SECRET, PAGE, NOW + PAGE_PASSWORD_COOKIE_TTL_MS, NULL_HASH)
     const tampered = `${value.slice(0, -1)}${value.endsWith('a') ? 'b' : 'a'}`
-    expect(verifyPagePasswordCookie(SECRET, PAGE, tampered, NOW)).toBe(false)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, tampered, NOW, NULL_HASH)).toBe(false)
   })
 
   test('rejects a cookie signed with a different secret', () => {
-    const value = signPagePasswordCookie('another-secret-32-bytes-long-xxxx', PAGE, NOW + 10_000)
-    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW)).toBe(false)
+    const value = signPagePasswordCookie(
+      'another-secret-32-bytes-long-xxxx',
+      PAGE,
+      NOW + 10_000,
+      NULL_HASH,
+    )
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, NULL_HASH)).toBe(false)
   })
 
   test('rejects missing / malformed values', () => {
-    expect(verifyPagePasswordCookie(SECRET, PAGE, undefined, NOW)).toBe(false)
-    expect(verifyPagePasswordCookie(SECRET, PAGE, '', NOW)).toBe(false)
-    expect(verifyPagePasswordCookie(SECRET, PAGE, 'no-dot', NOW)).toBe(false)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, undefined, NOW, NULL_HASH)).toBe(false)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, '', NOW, NULL_HASH)).toBe(false)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, 'no-dot', NOW, NULL_HASH)).toBe(false)
+  })
+
+  test('binds the cookie to the page password hash (F-15/19)', () => {
+    // A cookie minted under one password must not verify after the hash changes
+    // (password reroll / republish replacing the hash) — even before expiry.
+    const value = signPagePasswordCookie(SECRET, PAGE, NOW + PAGE_PASSWORD_COOKIE_TTL_MS, hashA)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, hashA)).toBe(true)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, hashB)).toBe(false)
+    expect(verifyPagePasswordCookie(SECRET, PAGE, value, NOW, NULL_HASH)).toBe(false)
   })
 })
 

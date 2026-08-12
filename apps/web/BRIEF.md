@@ -2,8 +2,7 @@
 
 Law doc for the press web surface (feed, collection pages, login, chrome around
 served reports), present-tense, no narrated history — git is the changelog.
-Amend Decisions and Boundary only with Allen's confirmation. Dated working
-memory lives in `DELTA.md` / `DEVIATIONS.md` beside this file. Engineering law
+Amend Decisions and Boundary only with Allen's confirmation. Engineering law
 is the root `BRIEF.md`; this file governs taste.
 
 ## Bar

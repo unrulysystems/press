@@ -8,6 +8,8 @@ import { and, eq, isNull } from 'drizzle-orm'
 import { auth } from '../auth/server'
 import { db, dbConfig } from '../db/client'
 import { collection, page, pageRedirect, user } from '../db/schema'
+import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
+import { roleForEmail } from '../auth/role'
 import { pageBlobPath } from './storage'
 import {
   acceptsHtml,
@@ -200,7 +202,15 @@ async function resolvePagePasswordChannel(
   row: PageRow,
 ): Promise<BasicPasswordVerification | undefined> {
   const cookie = readCookieValue(request.headers.get('cookie'), pagePasswordCookieName(row.id))
-  if (verifyPagePasswordCookie(dbConfig.betterAuthSecret, row.id, cookie, Date.now())) {
+  if (
+    verifyPagePasswordCookie(
+      dbConfig.betterAuthSecret,
+      row.id,
+      cookie,
+      Date.now(),
+      row.passwordHash,
+    )
+  ) {
     return { verified: true }
   }
   return await verifyBasicPassword(request, row.passwordHash)
@@ -215,7 +225,14 @@ async function viewerForRequest(request: Request, row: PageRow): Promise<AclView
       where: eq(user.id, session.user.id),
     })
     if (dbUser) {
-      return viewerFromChannels({ authenticated: authenticatedViewer(dbUser), basicPassword })
+      return viewerFromChannels({
+        authenticated: authenticatedViewer({
+          id: dbUser.id,
+          email: dbUser.email,
+          role: roleForEmail(dbUser.email, dbConfig.adminEmails),
+        }),
+        basicPassword,
+      })
     }
   }
 
@@ -310,7 +327,9 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
   // The branded gate posts application/x-www-form-urlencoded; parse without FormData.
   // A genuine body-read failure propagates to the endpoint's 500 handler rather than
   // being masked as a wrong password — an empty body still parses to no password (401).
-  const bodyText = await request.text()
+  // The body is capped so a public POST can never make the server buffer unboundedly (M-3).
+  const PASSWORD_UNLOCK_BODY_LIMIT_BYTES = 16 * 1024
+  const bodyText = await readCappedBodyText(request, PASSWORD_UNLOCK_BODY_LIMIT_BYTES)
   const password = new URLSearchParams(bodyText).get('password') ?? ''
   const actionPath = servedPagePath(route)
   const verified = row.page.passwordHash
@@ -325,7 +344,12 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
     })
   }
   const expiryMs = Date.now() + PAGE_PASSWORD_COOKIE_TTL_MS
-  const value = signPagePasswordCookie(dbConfig.betterAuthSecret, row.page.id, expiryMs)
+  const value = signPagePasswordCookie(
+    dbConfig.betterAuthSecret,
+    row.page.id,
+    expiryMs,
+    row.page.passwordHash,
+  )
   // The 303 is a `/p/` response that is not the entry page, so it carries the sandbox
   // CSP + security headers of REQ-SRV-002 / INV-2 (via servedPageResponse), plus the
   // redirect Location and the page-scoped unlock cookie.
@@ -348,7 +372,10 @@ export async function servedPagePasswordEndpoint(request: Request): Promise<Resp
       return notFound()
     }
     return await servedPagePasswordUnlock(request, route)
-  } catch {
+  } catch (error) {
+    if (error instanceof BodyTooLargeError) {
+      return servedPageResponse(error.message, { status: 413 })
+    }
     return servedPageResponse('internal server error', { status: 500 })
   }
 }

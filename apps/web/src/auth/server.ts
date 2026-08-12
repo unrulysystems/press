@@ -2,13 +2,13 @@ import { eq } from 'drizzle-orm'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { createAuthMiddleware } from 'better-auth/api'
 import { betterAuth } from 'better-auth/minimal'
-import { admin } from 'better-auth/plugins'
 
 import type { Auth, BetterAuthOptions } from 'better-auth'
 
 import { db, dbConfig } from '../db/client'
 import { account, session, user, verification } from '../db/schema'
 import { buildAuthProviderConfig } from './providerConfig'
+import { roleForEmail } from './role'
 
 const authProviderConfig = buildAuthProviderConfig(dbConfig)
 
@@ -109,7 +109,7 @@ export const authOptions = {
       secure: dbConfig.nodeEnv === 'production',
     },
   },
-  plugins: [admin()],
+  plugins: [],
   hooks: {
     before: stripClientRequestedOAuthScopesHook,
   },
@@ -121,7 +121,7 @@ export const authOptions = {
           return {
             data: {
               ...newUser,
-              role: dbConfig.adminEmails.includes(email) ? 'admin' : 'user',
+              role: roleForEmail(email, dbConfig.adminEmails),
             },
           }
         },
@@ -130,11 +130,17 @@ export const authOptions = {
     session: {
       create: {
         async before(newSession) {
+          // Keep the role cache in sync in BOTH directions: promotion and, when
+          // an email leaves PRESS_ADMIN_EMAILS, demotion (B-2 / REQ-AUTH-007).
+          // Authorization never trusts this cache — it re-derives from config.
           const existingUser = await db.query.user.findFirst({
             where: eq(user.id, newSession.userId),
           })
-          if (existingUser && dbConfig.adminEmails.includes(existingUser.email.toLowerCase())) {
-            await db.update(user).set({ role: 'admin' }).where(eq(user.id, existingUser.id))
+          if (existingUser) {
+            await db
+              .update(user)
+              .set({ role: roleForEmail(existingUser.email, dbConfig.adminEmails) })
+              .where(eq(user.id, existingUser.id))
           }
         },
       },

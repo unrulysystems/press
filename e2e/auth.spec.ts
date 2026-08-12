@@ -87,3 +87,40 @@ test('localnet identity gate shows the seeded account hint and reader guidance (
   // Reader guidance for someone who cannot sign in — the gate is never a dead-end.
   await expect(page.getByText(/access follows your organization account/i)).toBeVisible()
 })
+
+test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-14)', async ({
+  page,
+}) => {
+  const probes = [
+    { method: 'GET', path: '/api/auth/admin/list-users' },
+    { method: 'POST', path: '/api/auth/admin/set-role' },
+  ] as const
+
+  // Anonymous sessions must 404 too — the route no longer exists at all.
+  for (const probe of probes) {
+    // oxlint-disable-next-line no-await-in-loop -- each anonymous probe is its own navigation
+    await page.goto('/login?next=/')
+    // oxlint-disable-next-line no-await-in-loop -- probe result asserted per iteration
+    const anonymous = await page.evaluate(async (entry) => {
+      const result = await fetch(entry.path, { method: entry.method })
+      return { status: result.status }
+    }, probe)
+    expect(anonymous.status, `anonymous ${probe.method} ${probe.path}`).toBe(404)
+  }
+
+  // An admin session — which previously reached these routes (200) — also 404s.
+  await page.goto('/login?next=/')
+  await page.getByLabel('Email').fill(localnetUsers.admin.email)
+  await page.getByLabel('Password').fill(localnetUsers.admin.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
+
+  for (const probe of probes) {
+    // oxlint-disable-next-line no-await-in-loop -- each admin probe is its own request
+    const response = await page.evaluate(async (entry) => {
+      const result = await fetch(entry.path, { method: entry.method })
+      return { status: result.status }
+    }, probe)
+    expect(response.status, `${probe.method} ${probe.path}`).toBe(404)
+  }
+})

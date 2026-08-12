@@ -1,127 +1,46 @@
 ---
 audit_version: 1
-last_batch_id: 'uaudit-2026-07-03-ff6d8b'
-last_run_at: '2026-07-03T15:48:18.269Z'
+last_batch_id: "uaudit-2026-08-11-7a71f5"
+last_run_at: "2026-08-11T04:47:23.776Z"
 scope_paths:
-  - '**'
-last_scope_sha: '7be62bc6eed12ecde1df6ebc8c6a687f429e7388'
+  - "**"
+last_scope_sha: "ca8af24652cf67794a8bd66ae86db8e34ac98401"
 coverage:
   failed_personas: []
   partial_batch: false
 finding_ledger:
-  F-01:
-    {
-      'fingerprint': 'a57f98611b9ba8f05522b6ad843e3a320091847f501abf8f66f51f98215b3669',
-      'status': 'open',
-      'severity': 'high',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-02:
-    {
-      'fingerprint': 'cbf3a5375250d332b40855f93ae42260af339a4303817d0e38877c52a483206b',
-      'status': 'open',
-      'severity': 'medium',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-03:
-    {
-      'fingerprint': '971fe17388ef2f7089fac28e6573f45d16011b2374f561efd8709521be6617a0',
-      'status': 'open',
-      'severity': 'high',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-04:
-    {
-      'fingerprint': 'ccb64f5ae1495654c4439dc3ca80c326dceb4764709c6bc0ea1c4f975c74cb68',
-      'status': 'open',
-      'severity': 'medium',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-05:
-    {
-      'fingerprint': 'e4201b6d6473af4869743c9d134195e80747ba573d32505a86453329f18a2227',
-      'status': 'open',
-      'severity': 'high',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-06:
-    {
-      'fingerprint': 'd6b580e406fe5a2f189e7997bba2c96df765809af7bfcc339e4312395ab7c875',
-      'status': 'open',
-      'severity': 'low',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-07:
-    {
-      'fingerprint': 'ff79403c6ea61117205e08b80d1c649d89fdb8e0426167e172a2dd8c6cffcaaf',
-      'status': 'open',
-      'severity': 'high',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-08:
-    {
-      'fingerprint': 'e3629979be2e6b134456505822dc7cf79168f1e006e71bf5741c7ea3fd86b3f8',
-      'status': 'open',
-      'severity': 'medium',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-09:
-    {
-      'fingerprint': 'cdccce007da344ed6436b36b9ce13bd80a36336aa14d823356acb0e829177eb3',
-      'status': 'open',
-      'severity': 'low',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-10:
-    {
-      'fingerprint': '2f8ff0b1eb8dd1ef5530e0a4dfbdac9c3077e3f477edf966cea8ef1c1ce71e33',
-      'status': 'open',
-      'severity': 'low',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
-  F-11:
-    {
-      'fingerprint': 'b097a697d44113be2f0c383f8a21d33a389d1de3f1f38fa020b8b767d03c1f35',
-      'status': 'open',
-      'severity': 'low',
-      'first_seen': 'uaudit-2026-07-03-ff6d8b',
-      'last_verified': 'uaudit-2026-07-03-ff6d8b',
-    }
+  F-01: {"fingerprint":"a57f98611b9ba8f05522b6ad843e3a320091847f501abf8f66f51f98215b3669","status":"resolved","severity":"high","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-02: {"fingerprint":"cbf3a5375250d332b40855f93ae42260af339a4303817d0e38877c52a483206b","status":"resolved","severity":"medium","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-03: {"fingerprint":"971fe17388ef2f7089fac28e6573f45d16011b2374f561efd8709521be6617a0","status":"resolved","severity":"high","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-04: {"fingerprint":"ccb64f5ae1495654c4439dc3ca80c326dceb4764709c6bc0ea1c4f975c74cb68","status":"resolved","severity":"medium","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-05: {"fingerprint":"e4201b6d6473af4869743c9d134195e80747ba573d32505a86453329f18a2227","status":"resolved","severity":"high","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-06: {"fingerprint":"d6b580e406fe5a2f189e7997bba2c96df765809af7bfcc339e4312395ab7c875","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-07: {"fingerprint":"ff79403c6ea61117205e08b80d1c649d89fdb8e0426167e172a2dd8c6cffcaaf","status":"resolved","severity":"high","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-08: {"fingerprint":"e3629979be2e6b134456505822dc7cf79168f1e006e71bf5741c7ea3fd86b3f8","status":"resolved","severity":"medium","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-09: {"fingerprint":"cdccce007da344ed6436b36b9ce13bd80a36336aa14d823356acb0e829177eb3","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-10: {"fingerprint":"2f8ff0b1eb8dd1ef5530e0a4dfbdac9c3077e3f477edf966cea8ef1c1ce71e33","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-11: {"fingerprint":"b097a697d44113be2f0c383f8a21d33a389d1de3f1f38fa020b8b767d03c1f35","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
+  F-12: {"fingerprint":"f4eefb25df8dd0d22419bfe34e08cc5c0b8e07b72d7ce88d6d75a12a7d8fcc0e","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-13: {"fingerprint":"086864ee3b4e3048f633a6d8ce1f6916548deba068ffe3a74a1555b791e8482b","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-14: {"fingerprint":"ccff5467bfc6703e90486a010fdee8883c952c85815542b36aa99609dfc871ca","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-15: {"fingerprint":"4e58d0377dfa26e376e04070ae9f3bf9f1b3b2044a6dc133fedccab114dd0455","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-16: {"fingerprint":"7b55ec01134475bef07e084e92eb91b3d83bf17199b6db142674aebac6a023c8","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-17: {"fingerprint":"09cc1211d485de35d7da9e781ccbefbf33155bdd73d85b934791fdd8955f9e2d","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-18: {"fingerprint":"6938942c2f6356f75db998a0a12a17e33e9d6614ae69dacfea80d15b4fd74583","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-19: {"fingerprint":"cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-20: {"fingerprint":"9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
 ---
 
 # Audit - AUDIT.md
 
-Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
-
-> **Driver status note (2026-07-03).** The ledger below shows all findings
-> `open` because the confirmatory re-audit could not complete cleanly in this
-> environment (see DELTA.md "phase 4 security re-audit"). The true state:
-> **F-01, F-02, F-06, F-07, F-08, F-09, F-10, F-11 are FIXED** (commits
-> `55f85af`, `a472783`, `f6df344`, `154f17a`, `17a7de3`; verified by 16 new
-> regression tests, `nub run e2e` 81/81, live dev:share lifecycle checks, and
-> an independent structured-review APPROVE on the phase-4 range).
-> **F-03, F-04, F-05 are DEFERRED to Allen** (design/framework decisions;
-> rationale and proposed fixes in `DEVIATIONS.md`) and remain genuinely
-> unfixed. `resolved` is deliberately NOT set on any finding: that status is
-> owned by a clean re-audit amendment, which should be re-run in CI or by
-> Allen to authoritatively flip the eight fixed findings to `resolved`.
+Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 ## Findings
 
-### F-01 (high) - An admin impersonating another user can mint a long-lived API token for the impersonate...
+### F-01 (high, RESOLVED in uaudit-2026-08-11-7a71f5) - An admin impersonating another user can mint a long-lived API token for the impersonate...
 
 **Fingerprint**: `a57f98611b9ba8f05522b6ad843e3a320091847f501abf8f66f51f98215b3669`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/cliFlow.ts:106-164`
 **First anchor line**: 106
 
@@ -133,13 +52,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-02 (medium) - A banned user with an existing press API token can continue authenticating to protected...
+### F-02 (medium, RESOLVED in uaudit-2026-08-11-7a71f5) - A banned user with an existing press API token can continue authenticating to protected...
 
 **Fingerprint**: `cbf3a5375250d332b40855f93ae42260af339a4303817d0e38877c52a483206b`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/apiTokens.ts:58-82`
 **First anchor line**: 58
 
@@ -151,13 +72,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-03 (high) - The CLI authorization endpoint mints a one-time code from a cookie-authenticated GET an...
+### F-03 (high, RESOLVED in uaudit-2026-08-11-7a71f5) - The CLI authorization endpoint mints a one-time code from a cookie-authenticated GET an...
 
 **Fingerprint**: `971fe17388ef2f7089fac28e6573f45d16011b2374f561efd8709521be6617a0`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/cliFlow.ts:101-130`
 **First anchor line**: 101
 
@@ -169,17 +92,19 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-04 (medium) - Session bearer tokens and OAuth provider tokens are modeled as plaintext database field...
+### F-04 (medium, RESOLVED in uaudit-2026-08-11-7a71f5) - The OAuth provider-token half of this finding is RESOLVED — press persists no Google `a...
 
 **Fingerprint**: `ccb64f5ae1495654c4439dc3ca80c326dceb4764709c6bc0ea1c4f975c74cb68`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/db/schema.ts:43-76`
 **First anchor line**: 43
 
-**Claim**: The OAuth provider-token half of this finding is RESOLVED — press persists no Google `accessToken`, `refreshToken`, or `idToken`. An `account` databaseHook nulls all provider tokens before any account row is written, on every sign-in path (including Better Auth's ID-token flow, which would otherwise persist client-supplied `idToken.accessToken` / `refreshToken` not bound to the enforced scopes). Only Better Auth session bearer tokens remain modeled as plaintext at rest, which is the accepted residual under the DEVIATIONS.md F-04 decision.
+**Claim**: The OAuth provider-token half of this finding is RESOLVED — press persists no Google `accessToken`, `refreshToken`, or `idToken`. An `account` databaseHook nulls all provider tokens before any account row is written, on every sign-in path (including Better Auth's ID-token flow, which would otherwise persist client-supplied `idToken.accessToken` / `refreshToken` not bound to the enforced scopes). Only Better Auth session bearer tokens remain modeled as plaintext at rest, which is the accepted residual decision in `BRIEF.md` (2026-07-04).
 
 **Evidence**: schema.ts:43-49 defines `session.token` as unique `text` (the remaining residual). schema.ts:61-72 still defines the `account.accessToken` / `refreshToken` / `idToken` columns, but `auth/server.ts` wires `stripStoredProviderTokens` on `databaseHooks.account.create.before` and `update.before` so those columns are written null. It also strips client `scopes` / `scope` from `/sign-in/social` and `/link-social` before the authorize URL is built; providerConfig.ts pins Google to `openid`, `email`, `profile` with no `accessType` / `prompt`. `apps/web/src/auth/server.test.ts` verifies both an identity-only authorize URL under a `drive.readonly` request and that the account hooks null every provider token.
 
@@ -187,13 +112,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: secrets-and-keys
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-05 (high) - The CLI authorization endpoint lets an arbitrary local process mint a long-lived API to...
+### F-05 (high, RESOLVED in uaudit-2026-08-11-7a71f5) - The CLI authorization endpoint lets an arbitrary local process mint a long-lived API to...
 
 **Fingerprint**: `e4201b6d6473af4869743c9d134195e80747ba573d32505a86453329f18a2227`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/cliFlow.ts:101-164`
 **First anchor line**: 101
 
@@ -205,13 +132,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: ipc-and-sandbox
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-06 (low) - The press login loopback listener accepts the first /callback request containing any co...
+### F-06 (low, RESOLVED in uaudit-2026-08-11-7a71f5) - The press login loopback listener accepts the first /callback request containing any co...
 
 **Fingerprint**: `d6b580e406fe5a2f189e7997bba2c96df765809af7bfcc339e4312395ab7c875`
-**Status**: open
+**Status**: resolved
 **Location**: `packages/cli/src/index.ts:288-357`
 **First anchor line**: 288
 
@@ -223,13 +152,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: ipc-and-sandbox
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-07 (high) - The scheduled dependency updater has contents: write, runs mutable third-party actions ...
+### F-07 (high, RESOLVED in uaudit-2026-08-11-7a71f5) - The scheduled dependency updater has contents: write, runs mutable third-party actions ...
 
 **Fingerprint**: `ff79403c6ea61117205e08b80d1c649d89fdb8e0426167e172a2dd8c6cffcaaf`
-**Status**: open
+**Status**: resolved
 **Location**: `.github/workflows/update-deps.yml:8-55`
 **First anchor line**: 8
 
@@ -241,13 +172,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: supply-chain
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-08 (medium) - Migration integrity is tracked only by filename, not content. If a generated SQL migrat...
+### F-08 (medium, RESOLVED in uaudit-2026-08-11-7a71f5) - Migration integrity is tracked only by filename, not content. If a generated SQL migrat...
 
 **Fingerprint**: `e3629979be2e6b134456505822dc7cf79168f1e006e71bf5741c7ea3fd86b3f8`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/db/migrate.ts:10-38`
 **First anchor line**: 10
 
@@ -259,13 +192,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: supply-chain
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-09 (low) - The non-flake Nix fallback imports flake-compat from the moving `master.tar.gz` URL, by...
+### F-09 (low, RESOLVED in uaudit-2026-08-11-7a71f5) - The non-flake Nix fallback imports flake-compat from the moving `master.tar.gz` URL, by...
 
 **Fingerprint**: `cdccce007da344ed6436b36b9ce13bd80a36336aa14d823356acb0e829177eb3`
-**Status**: open
+**Status**: resolved
 **Location**: `shell.nix:1-4`
 **First anchor line**: 1
 
@@ -277,13 +212,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: supply-chain
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-10 (low) - The dev-share flow mints an owner API token and persists the plaintext bearer token to ...
+### F-10 (low, RESOLVED in uaudit-2026-08-11-7a71f5) - The dev-share flow mints an owner API token and persists the plaintext bearer token to ...
 
 **Fingerprint**: `2f8ff0b1eb8dd1ef5530e0a4dfbdac9c3077e3f477edf966cea8ef1c1ce71e33`
-**Status**: open
+**Status**: resolved
 **Location**: `scripts/devShare.ts:56-72`
 **First anchor line**: 56
 
@@ -295,13 +232,15 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
 
 ---
 
-### F-11 (low) - Unpublished HTML is retained by moving the blob into `.archive` rather than deleting it...
+### F-11 (low, RESOLVED in uaudit-2026-08-11-7a71f5) - Unpublished HTML is retained by moving the blob into `.archive` rather than deleting it...
 
 **Fingerprint**: `b097a697d44113be2f0c383f8a21d33a389d1de3f1f38fa020b8b767d03c1f35`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/publish/storage.ts:125-135`
 **First anchor line**: 125
 
@@ -313,3 +252,177 @@ Scope: `**` at HEAD `7be62bc6ee` (last batch `uaudit-2026-07-03-ff6d8b`)
 
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-07-03-ff6d8b · **Last verified**: uaudit-2026-07-03-ff6d8b
+**Resolved in**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-12 (high) - A malicious local process can obtain a victim’s long-lived API token by opening an atta...
+
+**Fingerprint**: `f4eefb25df8dd0d22419bfe34e08cc5c0b8e07b72d7ce88d6d75a12a7d8fcc0e`
+**Status**: open
+**Location**: `apps/web/src/auth/cliFlow.ts:136-182`
+**First anchor line**: 136
+
+**Claim**: A malicious local process can obtain a victim’s long-lived API token by opening an attacker-constructed CLI authorization URL in the victim’s browser; the cookie-authenticated GET issues and redirects a code without an explicit approval step.
+
+**Evidence**: authorizeCliRequest (cliFlow.ts:136-182) is cookie-session GET-only: parses caller port/challenge, stores userId+challenge, 302s code to http://127.0.0.1:${port}/callback with no consent UI. cliExchangeEndpoint (202-244) deletes the code, checks hash(verifier)==challenge, mints a no-expiry API token (apiTokens.ts:38-58).
+
+**Suggested fix**: Issue codes only after a same-origin CSRF-protected approval POST bound to server-created pending-login state/nonce. Keep PKCE and loopback state checks; do not mint/redirect from a bare authenticated GET with attacker-chosen port and challenge.
+
+**Discovered by**: auth-and-authz
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-13 (high) - Admin authority can persist after an email is removed from PRESS_ADMIN_EMAILS because t...
+
+**Fingerprint**: `086864ee3b4e3048f633a6d8ce1f6916548deba068ffe3a74a1555b791e8482b`
+**Status**: open
+**Location**: `apps/web/src/auth/server.ts:112-138`
+**First anchor line**: 112
+
+**Claim**: Admin authority can persist after an email is removed from PRESS_ADMIN_EMAILS because the sign-in hook promotes matching users but never demotes nonmatching users. A removed administrator therefore retains private-page access and admin unpublish capability through existing or newly used API tokens.
+
+**Evidence**: server.ts:119-125 assigns role from adminEmails only on user create. session.create before (130-138) promotes matching emails to admin but never sets role to user when email is absent. ACL isAdmin uses viewer.role (core index.ts:153-155); private read and unpublish allow admins (195-196, 236-237). apiTokens verifyApiToken selects user.role (70-113). REQ-AUTH-007 defines admins as PRESS_ADMIN_EMAILS membership.
+
+**Suggested fix**: In session.create before, always persist role from config: set admin when normalized email is in adminEmails, else user. Add a regression that demotes a former admin email and asserts session and bearer-token ACL no longer grant private read or unpublish.
+
+**Discovered by**: auth-and-authz
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-14 (high) - The unconfigured Better Auth admin plugin exposes role-management APIs through the catc...
+
+**Fingerprint**: `ccff5467bfc6703e90486a010fdee8883c952c85815542b36aa99609dfc871ca`
+**Status**: open
+**Location**: `apps/web/src/auth/server.ts:112-112`
+**First anchor line**: 112
+
+**Claim**: The unconfigured Better Auth admin plugin exposes role-management APIs through the catch-all auth handler, allowing any current admin to promote an ordinary user outside PRESS_ADMIN_EMAILS. That user’s existing bearer token then gains admin reads and moderation rights, bypassing the configured admin allowlist.
+
+**Evidence**: server.ts:112 installs admin() with no AC; user create/session hooks only promote PRESS_ADMIN_EMAILS (124-137), never demote. [...sub]+api.ts:5-6 forwards all auth GET/POST to auth.handler. Better Auth default admin has user:set-role via POST /admin/set-role. core isAdmin is role==='admin' (index.ts:153-154); verifyApiToken reads live user.role (apiTokens.ts:85,112), so promoted users gain admin read/unpublish.
+
+**Suggested fix**: Drop admin() if only ban/schema fields are needed, or pass custom roles that omit user:set-role (and other unused user-management powers). Re-check role against PRESS_ADMIN_EMAILS on session/token resolution so set-role cannot stick. Test POST /api/auth/admin/set-role returns 403/404.
+
+**Discovered by**: auth-and-authz
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-15 (medium) - A reader’s unlock cookie remains valid after the owner rerolls the page password, allow...
+
+**Fingerprint**: `4e58d0377dfa26e376e04070ae9f3bf9f1b3b2044a6dc133fedccab114dd0455`
+**Status**: open
+**Location**: `[REDACTED-SECRET].ts:45-71`
+**First anchor line**: 45
+
+**Claim**: A reader’s unlock cookie remains valid after the owner rerolls the page password, allowing that reader to continue accessing the protected page for up to one hour without knowing the replacement password.
+
+**Evidence**: pagePasswordCookie.ts:45-71 signs/verifies HMAC(secret, pageId.expiryMs) only—no password material. serving.ts:202-204 accepts a valid cookie as password-verified without reading passwordHash. routes.ts:1052-1060 password-reroll updates passwordHash but keeps page.id. TTL is 1h (PAGE_PASSWORD_COOKIE_TTL_MS). Old cookies therefore authorize reads after reroll until expiry.
+
+**Suggested fix**: Bind the unlock cookie to a password-generation value (password-version column or digest of passwordHash) and re-check it on serve. On reroll, bump the version so prior cookies fail. Add e2e: unlock → reroll → old cookie GETs gate/401, not the blob.
+
+**Discovered by**: auth-and-authz
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-16 (medium) - The packaged CLI honors the test-only `PRESS_E2E_KEYCHAIN_FILE` variable without a test...
+
+**Fingerprint**: `7b55ec01134475bef07e084e92eb91b3d83bf17199b6db142674aebac6a023c8`
+**Status**: open
+**Location**: `packages/cli/src/keychain.ts:296-302`
+**First anchor line**: 296
+
+**Claim**: The packaged CLI honors the test-only `PRESS_E2E_KEYCHAIN_FILE` variable without a test-build guard, redirecting a newly issued long-lived API token from the OS keychain into a plaintext JSON file.
+
+**Evidence**: keychain.ts:298-302: backend() returns fileBackend when PRESS_E2E_KEYCHAIN_FILE is set, with no release/test-build guard. fileBackend.store (63-66) writeFileSyncs the API token as JSON (mode 0o600). SPEC.md:89-92 REQ-AUTH-006: CLI never writes tokens to disk in plaintext. verifyCliBinary.ts:231 sets the env against the built binary.
+
+**Suggested fix**: Fail closed in release: strip fileBackend at compile time, or reject PRESS_E2E_KEYCHAIN_FILE unless a test-only build flag is set. Do not honor the env in packaged CLI binaries.
+
+**Discovered by**: secrets-and-keys
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-17 (high) - Any local process can obtain a durable API token from an existing browser session by op...
+
+**Fingerprint**: `09cc1211d485de35d7da9e781ccbefbf33155bdd73d85b934791fdd8955f9e2d`
+**Status**: open
+**Location**: `apps/web/src/auth/cliFlow.ts:136-182`
+**First anchor line**: 136
+
+**Claim**: Any local process can obtain a durable API token from an existing browser session by opening a crafted CLI authorization URL, choosing its own loopback port and PKCE challenge, receiving the redirected code, and exchanging it without explicit user approval.
+
+**Evidence**: authorizeCliRequest (cliFlow.ts:136-182): cookie session only; parses caller port/challenge; stores userId+challenge; 302 to http://127.0.0.1:${port}/callback?code= with no approval UI. Unit test (cliFlow.test.ts:49-71) shows authenticated GET → immediate loopback redirect. cliExchangeEndpoint (202-247) takes code+verifier and mintApiTokenForUser (apiTokens.ts:38-58) with no token expiry (schema revokedAt only).
+
+**Suggested fix**: Add server-owned pending CLI login (bind port/challenge/state), show same-origin confirmation, and issue the loopback redirect only after a CSRF-protected approval POST. Keep PKCE; do not mint codes from a bare authenticated GET.
+
+**Discovered by**: ipc-and-sandbox
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-18 (medium) - Republishing an archived path without explicit ACL options silently restores the archiv...
+
+**Fingerprint**: `6938942c2f6356f75db998a0a12a17e33e9d6614ae69dacfea80d15b4fd74583`
+**Status**: open
+**Location**: `apps/web/src/publish/routes.ts:552-607`
+**First anchor line**: 552
+
+**Claim**: Republishing an archived path without explicit ACL options silently restores the archived page's visibility, allowlist, and password hash. Reusing a formerly public or externally shared path can therefore disclose newly uploaded HTML to the previous audience instead of applying the collection default.
+
+**Evidence**: routes.ts:552-564: [REDACTED-SECRET] fall back to txPage even when archived; 533 treats archived as publish; 591-605 write those values and clear archivedAt. DELETE 1114-1117 only sets archivedAt, preserving ACL. Path: public publish → DELETE → PUT without visibility → old public ACL applies to new HTML.
+
+**Suggested fix**: If txPage.archivedAt is set, treat like a new page: use requestedVisibility ?? null and requestedAllowlist ?? [], and do not reuse passwordHash unless visibility=password is explicit (then generate/hash a new password). Add unpublish-then-republish tests for public, private, and password.
+
+**Discovered by**: data-flow
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-19 (medium) - A password-page unlock cookie remains valid after the page password is rerolled because...
+
+**Fingerprint**: `cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b`
+**Status**: open
+**Location**: `[REDACTED-SECRET].ts:45-71`
+**First anchor line**: 45
+
+**Claim**: A password-page unlock cookie remains valid after the page password is rerolled because the cookie is bound only to page ID and expiry, not the current password hash or a credential version. A previously authorized reader can continue reading for up to one hour after revocation.
+
+**Evidence**: Cookie HMAC binds only pageId+expiry (pagePasswordCookie.ts:45-71). serving.ts:202-205 accepts a valid cookie without consulting passwordHash. routes.ts:1052-1060 password-reroll updates passwordHash only, so prior unlock cookies stay valid until 1h TTL.
+
+**Suggested fix**: Include a password version or digest of the current passwordHash in the signed cookie payload; verify against the live row. Bump version on reroll/replace/archive/visibility change; add a stale-cookie rejection test.
+
+**Discovered by**: data-flow
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
+---
+
+### F-20 (medium) - The localnet Postgres database is published on every host interface with committed stat...
+
+**Fingerprint**: `9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e`
+**Status**: open
+**Location**: `compose.yaml:5-12`
+**First anchor line**: 5
+
+**Claim**: The localnet Postgres database is published on every host interface with committed static credentials. A network peer reaching PRESS_POSTGRES_PORT can read or alter user emails, private allowlists, password hashes, audit history, and plaintext Better Auth session tokens across the container boundary.
+
+**Evidence**: compose.yaml:6-7 publishes ${PRESS_POSTGRES_PORT}:5432 with no host IP (Docker binds all interfaces). compose.yaml:10-11 commits fixed localnet DB credentials. silo.toml:13 defaults PRESS_POSTGRES_PORT=54329. apps/web/src/db/schema.ts:47-218 holds user.email, session.token, page.passwordHash/allowlist, auditEvent reachable via that host port.
+
+**Suggested fix**: Bind the host mapping to loopback only: `127.0.0.1:${PRESS_POSTGRES_PORT}:5432` in compose.yaml, or drop host ports and use in-network clients. Keep static localnet credentials only when the published port is loopback-bound.
+
+**Discovered by**: data-flow
+**First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+
+
