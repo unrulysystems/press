@@ -8,11 +8,11 @@ name: Publish image
 on:
   push:
     tags:
-      - "v*"
+      - 'v*'
   workflow_dispatch:
     inputs:
       mirror:
-        description: "Also notify 0xsend/press-deploy to mirror this build (needs MIRROR_DISPATCH_TOKEN)"
+        description: 'Also notify 0xsend/press-deploy to mirror this build (needs MIRROR_DISPATCH_TOKEN)'
         type: boolean
         default: false
 
