@@ -64,14 +64,23 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      # Optional convenience: kick the mirror in 0xsend/press-deploy. Requires a
-      # MIRROR_DISPATCH_TOKEN secret (PAT with `repo` scope on 0xsend/press-deploy).
-      # Left off by default — running the mirror manually after publish is fine.
+      # Kick the mirror in 0xsend/press-deploy on every published tag (or a manual
+      # dispatch with inputs.mirror). Requires the MIRROR_DISPATCH_TOKEN secret
+      # (PAT with `repo` scope on 0xsend/press-deploy); the step is skipped until
+      # that secret exists.
       - name: Trigger mirror
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mirror }}
+        if: >-
+          ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mirror))
+              && env.DISPATCH_TOKEN != '' }}
         env:
+          DISPATCH_TOKEN: ${{ secrets.MIRROR_DISPATCH_TOKEN }}
           GH_TOKEN: ${{ secrets.MIRROR_DISPATCH_TOKEN }}
         run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            tag="${{ github.ref_name }}"
+          else
+            tag="sha-$(git rev-parse --short HEAD)"
+          fi
           gh api repos/0xsend/press-deploy/dispatches \
             -f event_type=press-image \
-            -F client_payload[tag]="sha-$(git rev-parse --short HEAD)"
+            -F "client_payload[tag]=$tag"
