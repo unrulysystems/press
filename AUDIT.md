@@ -20,15 +20,15 @@ finding_ledger:
   F-09: {"fingerprint":"cdccce007da344ed6436b36b9ce13bd80a36336aa14d823356acb0e829177eb3","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
   F-10: {"fingerprint":"2f8ff0b1eb8dd1ef5530e0a4dfbdac9c3077e3f477edf966cea8ef1c1ce71e33","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
   F-11: {"fingerprint":"b097a697d44113be2f0c383f8a21d33a389d1de3f1f38fa020b8b767d03c1f35","status":"resolved","severity":"low","first_seen":"uaudit-2026-07-03-ff6d8b","last_verified":"uaudit-2026-07-03-ff6d8b","resolved_in":"uaudit-2026-08-11-7a71f5"}
-  F-12: {"fingerprint":"f4eefb25df8dd0d22419bfe34e08cc5c0b8e07b72d7ce88d6d75a12a7d8fcc0e","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-13: {"fingerprint":"086864ee3b4e3048f633a6d8ce1f6916548deba068ffe3a74a1555b791e8482b","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-14: {"fingerprint":"ccff5467bfc6703e90486a010fdee8883c952c85815542b36aa99609dfc871ca","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-15: {"fingerprint":"4e58d0377dfa26e376e04070ae9f3bf9f1b3b2044a6dc133fedccab114dd0455","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-16: {"fingerprint":"7b55ec01134475bef07e084e92eb91b3d83bf17199b6db142674aebac6a023c8","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-17: {"fingerprint":"09cc1211d485de35d7da9e781ccbefbf33155bdd73d85b934791fdd8955f9e2d","status":"open","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-18: {"fingerprint":"6938942c2f6356f75db998a0a12a17e33e9d6614ae69dacfea80d15b4fd74583","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-19: {"fingerprint":"cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
-  F-20: {"fingerprint":"9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e","status":"open","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5"}
+  F-12: {"fingerprint":"f4eefb25df8dd0d22419bfe34e08cc5c0b8e07b72d7ce88d6d75a12a7d8fcc0e","status":"resolved","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-13: {"fingerprint":"086864ee3b4e3048f633a6d8ce1f6916548deba068ffe3a74a1555b791e8482b","status":"resolved","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-14: {"fingerprint":"ccff5467bfc6703e90486a010fdee8883c952c85815542b36aa99609dfc871ca","status":"resolved","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-15: {"fingerprint":"4e58d0377dfa26e376e04070ae9f3bf9f1b3b2044a6dc133fedccab114dd0455","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-16: {"fingerprint":"7b55ec01134475bef07e084e92eb91b3d83bf17199b6db142674aebac6a023c8","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-17: {"fingerprint":"09cc1211d485de35d7da9e781ccbefbf33155bdd73d85b934791fdd8955f9e2d","status":"resolved","severity":"high","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-18: {"fingerprint":"6938942c2f6356f75db998a0a12a17e33e9d6614ae69dacfea80d15b4fd74583","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-19: {"fingerprint":"cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-20: {"fingerprint":"9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
 ---
 
 # Audit - AUDIT.md
@@ -257,10 +257,10 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 ---
 
-### F-12 (high) - A malicious local process can obtain a victim’s long-lived API token by opening an atta...
+### F-12 (high, RESOLVED in PR-14) - A malicious local process can obtain a victim’s long-lived API token by opening an atta...
 
 **Fingerprint**: `f4eefb25df8dd0d22419bfe34e08cc5c0b8e07b72d7ce88d6d75a12a7d8fcc0e`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/cliFlow.ts:136-182`
 **First anchor line**: 136
 
@@ -272,14 +272,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-13 (high) - Admin authority can persist after an email is removed from PRESS_ADMIN_EMAILS because t...
+### F-13 (high, RESOLVED in PR-14) - Admin authority can persist after an email is removed from PRESS_ADMIN_EMAILS because t...
 
 **Fingerprint**: `086864ee3b4e3048f633a6d8ce1f6916548deba068ffe3a74a1555b791e8482b`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/server.ts:112-138`
 **First anchor line**: 112
 
@@ -291,14 +292,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-14 (high) - The unconfigured Better Auth admin plugin exposes role-management APIs through the catc...
+### F-14 (high, RESOLVED in PR-14) - The unconfigured Better Auth admin plugin exposes role-management APIs through the catc...
 
 **Fingerprint**: `ccff5467bfc6703e90486a010fdee8883c952c85815542b36aa99609dfc871ca`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/server.ts:112-112`
 **First anchor line**: 112
 
@@ -310,14 +312,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-15 (medium) - A reader’s unlock cookie remains valid after the owner rerolls the page password, allow...
+### F-15 (medium, RESOLVED in PR-14) - A reader’s unlock cookie remains valid after the owner rerolls the page password, allow...
 
 **Fingerprint**: `4e58d0377dfa26e376e04070ae9f3bf9f1b3b2044a6dc133fedccab114dd0455`
-**Status**: open
+**Status**: resolved
 **Location**: `[REDACTED-SECRET].ts:45-71`
 **First anchor line**: 45
 
@@ -329,14 +332,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: auth-and-authz
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-16 (medium) - The packaged CLI honors the test-only `PRESS_E2E_KEYCHAIN_FILE` variable without a test...
+### F-16 (medium, RESOLVED in PR-14) - The packaged CLI honors the test-only `PRESS_E2E_KEYCHAIN_FILE` variable without a test...
 
 **Fingerprint**: `7b55ec01134475bef07e084e92eb91b3d83bf17199b6db142674aebac6a023c8`
-**Status**: open
+**Status**: resolved
 **Location**: `packages/cli/src/keychain.ts:296-302`
 **First anchor line**: 296
 
@@ -348,14 +352,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: secrets-and-keys
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-17 (high) - Any local process can obtain a durable API token from an existing browser session by op...
+### F-17 (high, RESOLVED in PR-14) - Any local process can obtain a durable API token from an existing browser session by op...
 
 **Fingerprint**: `09cc1211d485de35d7da9e781ccbefbf33155bdd73d85b934791fdd8955f9e2d`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/auth/cliFlow.ts:136-182`
 **First anchor line**: 136
 
@@ -367,14 +372,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: ipc-and-sandbox
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-18 (medium) - Republishing an archived path without explicit ACL options silently restores the archiv...
+### F-18 (medium, RESOLVED in PR-14) - Republishing an archived path without explicit ACL options silently restores the archiv...
 
 **Fingerprint**: `6938942c2f6356f75db998a0a12a17e33e9d6614ae69dacfea80d15b4fd74583`
-**Status**: open
+**Status**: resolved
 **Location**: `apps/web/src/publish/routes.ts:552-607`
 **First anchor line**: 552
 
@@ -386,14 +392,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-19 (medium) - A password-page unlock cookie remains valid after the page password is rerolled because...
+### F-19 (medium, RESOLVED in PR-14) - A password-page unlock cookie remains valid after the page password is rerolled because...
 
 **Fingerprint**: `cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b`
-**Status**: open
+**Status**: resolved
 **Location**: `[REDACTED-SECRET].ts:45-71`
 **First anchor line**: 45
 
@@ -405,14 +412,15 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
 ---
 
-### F-20 (medium) - The localnet Postgres database is published on every host interface with committed stat...
+### F-20 (medium, RESOLVED in PR-14) - The localnet Postgres database is published on every host interface with committed stat...
 
 **Fingerprint**: `9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e`
-**Status**: open
+**Status**: resolved
 **Location**: `compose.yaml:5-12`
 **First anchor line**: 5
 
@@ -424,5 +432,6 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
+**Resolved in**: PR-14
 
 
