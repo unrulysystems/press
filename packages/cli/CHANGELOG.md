@@ -1,5 +1,17 @@
 # @press/cli
 
+## 0.4.0
+
+### Minor Changes
+
+- Standalone binaries are rebuilt from the security ultra-audit follow-up: the
+  CLI authorize flow gains a same-origin consent step (server-owned pending
+  record, approval page, loopback code minted only after a CSRF-protected POST),
+  admin authority moves to config, the Better Auth admin plugin is dropped, and
+  publish/ACL/input hardening lands (F-12..F-20, M-1..M-3). The CLI loopback
+  contract itself is unchanged; the release carries the hardened server + CLI
+  build for the mirrored web image.
+
 ## 0.3.1
 
 ### Patch Changes
