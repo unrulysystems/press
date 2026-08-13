@@ -1,6 +1,6 @@
 # press
 
-Self-hosted, CLI-published, identity-gated HTML report publishing.
+Self-hosted, CLI-published, identity-gated HTML report publishing. MIT licensed.
 
 Publish a self-contained HTML report in one command; readers get a
 magazine-grade site with per-page access control. Self-hosted — no third
