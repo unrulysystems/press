@@ -1,7 +1,7 @@
 # press
 
 Self-hosted, CLI-published, identity-gated HTML report publishing. Owned by
-unrulysystems (Allen / 0xbigboss). Built from typescript-template.
+unrulysystems. Built from typescript-template.
 
 ## Document map (read before working)
 
@@ -34,5 +34,4 @@ unrulysystems (Allen / 0xbigboss). Built from typescript-template.
 - Secrets never in argv, logs, or the repo; page passwords exist only in the
   one-time publish response.
 - Push, package/image publish, OAuth client creation, DNS, deploys: Allen only.
-- Takeout v2 (`~/0xbigboss/tamagui/takeout2`) is a pattern source to copy from,
-  never a runtime dependency.
+- Takeout v2 is a pattern source to copy from, never a runtime dependency.

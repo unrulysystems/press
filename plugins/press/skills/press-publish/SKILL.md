@@ -66,7 +66,7 @@ token):
 To change a page's access later:
 
 ```
-press page set weekly/q3-summary.html --visibility private --allow teammate@send.it
+press page set weekly/q3-summary.html --visibility private --allow teammate@example.com
 ```
 
 To change its canonical collection/file path while keeping the old reader link:

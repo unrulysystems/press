@@ -37,7 +37,7 @@ published page to attack its readers.
 | Sandbox CSP on served report pages                       | e2e asserts REQ-SRV-002 headers on every `/p/` 200 serving report content; the REQ-SRV-004 entry page instead carries its strict form-capable CSP (no scripts, no report body)                 |
 | Publish path exercised end-to-end                        | e2e drives the actual `press` binary (spawned process), not raw HTTP shortcuts                                                                                                                 |
 | Packaged CLI is self-contained                           | binary smoke runs `--version` and `doctor --json` from outside the checkout with Bun absent from `PATH`; archive rehearsal asserts one root `press` executable plus matching SHA-256 checksums |
-| Fleet release platforms are truthful                     | native macOS arm64 and Linux x64 release jobs assert the executable architecture and run the packaged-binary smoke before upload                                                               |
+| Release platforms are truthful                           | native macOS arm64 and Linux x64 release jobs assert the executable architecture and run the packaged-binary smoke before upload                                                               |
 | Boot fail-closed                                         | e2e asserts prod+credential-auth boot refusal (INV-5) and missing-config abort (REQ-CFG-002)                                                                                                   |
 
 ## Oracle
@@ -77,12 +77,14 @@ published page to attack its readers.
 
 ## Decisions (ratified by Allen, 2026-07-02 — do not re-ask)
 
-- Generic multi-report product under **unrulysystems**; instance #1 is Send's
-  `reports.send.it`. All org-isms are env config (REQ-CFG-001).
+- Generic multi-report product under **unrulysystems**. All org-isms are env
+  config (REQ-CFG-001); each deployment is an instance with its own identity
+  provider client, allowed domains, hostname, and storage.
 - **Web-only.** No native targets, no Zero sync, no SST/hot-updater grafts.
 - Stack: **One (OneStack) + Tamagui + Better Auth + Drizzle + Postgres**, built
-  on the typescript-template skeleton; graft patterns from Takeout v2
-  (`~/0xbigboss/tamagui/takeout2`) — copy liberally where useful, don't fork it.
+  on the typescript-template skeleton; graft patterns from a reference
+  monorepo (Better Auth wiring, Drizzle setup, upload route shape) — copy
+  liberally where useful, don't fork it.
 - **Postgres from day one** (not SQLite). Blobs are flat files on disk.
 - oauth2-proxy is **out**; the app owns login, sessions, ACLs, Basic auth,
   public bypass.
@@ -123,15 +125,15 @@ published page to attack its readers.
   standalone redirect management are out of v1 (ratified 2026-07-09).
 - The CLI ships as standalone GitHub Release binaries for macOS arm64 and Linux
   x64, with one root `press` executable per archive, SHA-256 checksums, and
-  `press --version` equal to the semver release. Dotfiles/mise is the sole fleet
-  owner; no Homebrew, npm-global, bun-global, checkout shim, or ad-hoc
+  `press --version` equal to the semver release. Installation on operator hosts
+  is owned by a single managed fleet tool; no Homebrew, npm-global, bun-global,
+  checkout shim, or ad-hoc
   `~/.local/bin` owner runs in parallel. Source-package release capability
   remains available (ratified 2026-07-12).
-- The release channel is authenticated GitHub Releases in the existing private
-  `unrulysystems/press` repository, with no public release-only mirror.
-  Dotfiles/mise may obtain download authorization from each host's existing
-  GitHub CLI session without storing a token in either repository (ratified
-  2026-07-13).
+- The release channel is authenticated GitHub Releases in this repository,
+  with no separate release-only mirror. Hosts may obtain download authorization
+  from the operator's existing GitHub CLI session without storing a token in
+  the repository (ratified 2026-07-13).
 - Reader-facing gates are magazine-grade, never dead-ends (ratified 2026-07-04,
   from the dogfood bug bash):
   - `password` pages serve a **branded HTML password-entry page** to browsers
@@ -183,7 +185,7 @@ published page to attack its readers.
 
 - Creating or changing visibility of a GitHub repo; pushing anywhere; creating
   tags or GitHub Releases; publishing images, packages, or release assets.
-- Deploying the resulting dotfiles/mise configuration to fleet hosts.
+- Deploying the resulting configuration to instance hosts.
 - Creating the Google OAuth client; DNS; any deploy; any live secret.
 - The attended real-Google final-gate walkthrough.
 - Amending SPEC requirements, this brief's Decisions/Boundary, or the design

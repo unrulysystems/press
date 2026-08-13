@@ -26,9 +26,7 @@ beautiful by default.**
 
 press is a generic product owned by **unrulysystems**. Each deployment is an
 instance configured with its own identity provider client, allowed email domains,
-hostname, and storage. The first instance is Send's `reports.send.it`
-(@send.it-gated, Swiss cluster, manifests and image mirror in `0xsend/press`).
-Nothing org-specific is hardcoded.
+hostname, and storage. Nothing org-specific is hardcoded.
 
 ## Who it serves
 

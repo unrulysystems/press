@@ -101,5 +101,5 @@ publication he'd read — the human gate no quorum replaces.
 
 - Ratifying or changing the taste direction, exemplars, font pairing, and
   light/dark stance.
-- Any brand identity for unrulysystems/press (logo, name treatment).
+- Any brand identity for press (logo, name treatment).
 - Final acceptance on the deployed instance.
