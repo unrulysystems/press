@@ -65,9 +65,11 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       # Kick the mirror in 0xsend/press-deploy on every published tag (or a manual
-      # dispatch with inputs.mirror). Requires the MIRROR_DISPATCH_TOKEN secret
-      # (PAT with `repo` scope on 0xsend/press-deploy); the step is skipped until
-      # that secret exists.
+      # dispatch with inputs.mirror). Requires the MIRROR_DISPATCH_TOKEN secret —
+      # send-bot's PAT with `repo` scope on 0xsend/press-deploy; the step is
+      # skipped until that secret exists. This is the only cross-org credential
+      # left in the flow: the mirror's source reads are public, and the
+      # destination image/release writes are scoped to send-bot.
       - name: Trigger mirror
         if: >-
           ${{ (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mirror))
