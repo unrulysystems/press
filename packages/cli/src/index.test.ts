@@ -6,6 +6,8 @@ import {
   buildDoctorReport,
   CLI_VERSION,
   createLoopbackCallbackHandler,
+  nextDevicePollAction,
+  parseLoginArguments,
   parseMoveArguments,
 } from './index'
 
@@ -82,6 +84,17 @@ describe('buildDoctorReport', () => {
     expect(report.nextStep).toBeNull()
   })
 
+  test('reports a last-resort file store as the token source', () => {
+    const report = buildDoctorReport({
+      host,
+      tokenSource: 'file',
+      whoami: { ok: true, email: 'owner@send.it' },
+    })
+    expect(report.authenticated).toBe(true)
+    expect(report.tokenSource).toBe('file')
+    expect(report.nextStep).toBeNull()
+  })
+
   test('flags a present-but-rejected token with the rejection detail', () => {
     const report = buildDoctorReport({
       host,
@@ -92,6 +105,33 @@ describe('buildDoctorReport', () => {
     expect(report.tokenSource).toBe('keychain')
     expect(report.nextStep).toContain('token was rejected')
     expect(report.detail).toBe('request failed with HTTP 401')
+  })
+})
+
+describe('parseLoginArguments', () => {
+  test('defaults to loopback and treats --device as opt-in', () => {
+    expect(parseLoginArguments([])).toEqual({ device: false, noOpen: false })
+    expect(parseLoginArguments(['--device'])).toEqual({ device: true, noOpen: false })
+    expect(parseLoginArguments(['--device', '--no-open'])).toEqual({ device: true, noOpen: true })
+  })
+})
+
+describe('nextDevicePollAction', () => {
+  test('waits on pending and slow_down, fails closed on deny/expiry', () => {
+    expect(nextDevicePollAction('authorization_pending', 5)).toEqual({ kind: 'wait', interval: 5 })
+    expect(nextDevicePollAction('slow_down', 5)).toEqual({ kind: 'wait', interval: 10 })
+    expect(nextDevicePollAction('access_denied', 5)).toEqual({
+      kind: 'fail',
+      message: 'login was denied',
+    })
+    expect(nextDevicePollAction('expired_token', 5)).toEqual({
+      kind: 'fail',
+      message: 'login expired',
+    })
+    expect(nextDevicePollAction('invalid_grant', 5)).toEqual({
+      kind: 'fail',
+      message: 'invalid_grant',
+    })
   })
 })
 

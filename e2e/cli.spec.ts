@@ -89,7 +89,7 @@ function runPress(args: readonly string[], env: PressEnv): Promise<PressResult> 
       stderr += String(chunk)
     })
     child.on('error', reject)
-    child.on('exit', (code) => {
+    child.on('close', (code) => {
       resolveRun({ code: code ?? 1, stdout, stderr })
     })
   })
@@ -119,7 +119,7 @@ async function loginViaLoopback(
   let stderr = ''
   const exitResult = new Promise<PressResult>((resolveRun, reject) => {
     child.on('error', reject)
-    child.on('exit', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
+    child.on('close', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
   })
   const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
     child.stdout.on('data', (chunk) => {
@@ -213,7 +213,7 @@ test('press CLI login completes through a real-browser consent click (B-1 CSP fl
   let stderr = ''
   const exitResult = new Promise<PressResult>((resolveRun, reject) => {
     child.on('error', reject)
-    child.on('exit', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
+    child.on('close', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
   })
   const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
     child.stdout.on('data', (chunk) => {
@@ -254,6 +254,90 @@ test('press CLI login completes through a real-browser consent click (B-1 CSP fl
   expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
 
   // Revoke the minted token so the localnet token table stays clean.
+  const logout = await runPress(['logout'], env)
+  expect(logout.code).toBe(0)
+})
+
+test('press CLI device login completes through a real-browser consent click', async ({
+  baseURL,
+  page,
+}) => {
+  test.setTimeout(60_000)
+  if (!baseURL) {
+    throw new Error('Playwright baseURL missing')
+  }
+
+  const env = await makePressEnv(baseURL, 'device-owner')
+  const child = spawn(pressBin, ['login', '--device'], {
+    cwd: root,
+    env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let stdout = ''
+  let stderr = ''
+  const exitResult = new Promise<PressResult>((resolveRun, reject) => {
+    child.on('error', reject)
+    child.on('close', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
+  })
+  const started = await new Promise<{ readonly url: string; readonly userCode: string }>(
+    (resolveStart, reject) => {
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+        const match =
+          /Visit (https?:\/\/\S+\/cli\/activate) and enter code ([A-Z2-9]{4}-[A-Z2-9]{4})/.exec(
+            stdout,
+          )
+        if (match?.[1] && match[2]) {
+          resolveStart({ url: match[1], userCode: match[2] })
+        }
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+      child.on('error', reject)
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          reject(new Error(`press login --device exited ${code}: ${stderr || stdout}`))
+        }
+      })
+      setTimeout(
+        () => reject(new Error('press login --device did not print a verification URI')),
+        10_000,
+      ).unref()
+    },
+  )
+
+  expect(stdout).toContain('/cli/activate')
+  expect(stdout).not.toContain('device_code')
+  expect(stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+
+  const beforeApprove = await runPress(['whoami'], env)
+  expect(beforeApprove.code).toBe(2)
+
+  await page.goto('/login?next=/')
+  await page.getByLabel('Email').fill(localnetUsers.owner.email)
+  await page.getByLabel('Password').fill(localnetUsers.owner.password)
+  await page.getByRole('button', { name: 'Sign in' }).click()
+  await expect(page).toHaveURL('/')
+
+  const activateResponse = await page.goto(`${started.url}?user_code=${started.userCode}`)
+  expect(activateResponse?.status()).toBe(200)
+  await expect(page.getByRole('heading', { name: 'Approve CLI sign-in?' })).toBeVisible()
+  await expect(page.getByLabel('User code')).toHaveValue(started.userCode)
+  await page.getByRole('button', { name: 'Approve' }).click()
+  await expect(page.getByRole('heading', { name: 'CLI sign-in approved' })).toBeVisible()
+
+  const result = await exitResult
+  expect(result.code).toBe(0)
+  expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
+  expect(result.stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+  expect(result.stderr).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+
+  const whoami = await runPress(['whoami'], env)
+  expect(whoami.code).toBe(0)
+  expect(whoami.stdout).toContain(localnetUsers.owner.email)
+  expect(whoami.stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+
   const logout = await runPress(['logout'], env)
   expect(logout.code).toBe(0)
 })

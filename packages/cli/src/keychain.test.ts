@@ -1,13 +1,15 @@
-import { mkdtemp, readFile } from 'node:fs/promises'
+import { mkdtemp, readFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, test } from 'bun:test'
 
 import {
+  chooseTokenStore,
   KeychainWriteError,
   readKeychainToken,
   removeKeychainToken,
+  resolveFileTokenPath,
   writeKeychainToken,
 } from './keychain'
 
@@ -61,6 +63,66 @@ describe('PRESS_E2E_KEYCHAIN_FILE backend', () => {
       await expect(readFile(file, 'utf8')).rejects.toThrow()
       expect(await readKeychainToken('https://press.test')).toBeNull()
     })
+  })
+
+  test('creates parent directories and persists the file mode 0600', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'press-keychain-mode-'))
+    const file = join(dir, 'nested', 'keychain.json')
+    await withEnv({ PRESS_E2E_KEYCHAIN_FILE: file }, async () => {
+      await writeKeychainToken('https://press.test', 'mode-token')
+      const info = await stat(file)
+      expect(info.mode & 0o777).toBe(0o600)
+      expect(await readKeychainToken('https://press.test')).toBe('mode-token')
+    })
+  })
+})
+
+describe('last-resort XDG file store selection', () => {
+  test('resolveFileTokenPath prefers XDG_CONFIG_HOME then ~/.config/press/tokens.json', () => {
+    expect(resolveFileTokenPath({ XDG_CONFIG_HOME: '/xdg' }, '/home/op')).toBe(
+      '/xdg/press/tokens.json',
+    )
+    expect(resolveFileTokenPath({}, '/home/op')).toBe('/home/op/.config/press/tokens.json')
+  })
+
+  test('chooseTokenStore prefers the test seam, then macOS keychain, then the file store', () => {
+    expect(
+      chooseTokenStore({
+        platform: 'darwin',
+        testBuild: true,
+        testSeam: '/tmp/seam.json',
+        keychainAvailable: true,
+      }),
+    ).toBe('seam')
+    expect(
+      chooseTokenStore({
+        platform: 'darwin',
+        testBuild: true,
+        keychainAvailable: true,
+      }),
+    ).toBe('keychain')
+    expect(
+      chooseTokenStore({
+        platform: 'darwin',
+        testBuild: false,
+        testSeam: '/tmp/seam.json',
+        keychainAvailable: true,
+      }),
+    ).toBe('keychain')
+    expect(
+      chooseTokenStore({
+        platform: 'linux',
+        testBuild: false,
+        keychainAvailable: false,
+      }),
+    ).toBe('file')
+    expect(
+      chooseTokenStore({
+        platform: 'darwin',
+        testBuild: false,
+        keychainAvailable: false,
+      }),
+    ).toBe('file')
   })
 })
 
