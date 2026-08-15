@@ -161,8 +161,8 @@ published page to attack its readers.
   token. `PRESS_E2E_KEYCHAIN_FILE` remains test-build-only (F-16).
 - Not a general OAuth authorization server: no `client_id`, no
   `grant_type`, no third-party device clients. Activate lives at
-  `/cli/activate`. The darwin Keychain FFI is not rewritten to
-  `Bun.secrets` in this campaign.
+  `/cli/activate`. The darwin Keychain FFI is the macOS token store; it
+  is not replaced by `Bun.secrets`.
 
 ### 2026-08-11 — security ultra-audit follow-up (F-12..F-20)
 
