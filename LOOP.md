@@ -10,8 +10,8 @@ ladder; the verifier — not confidence — decides when work is done.
 
 ## State (updated 2026-08-15 — rewrite each iteration; newest facts first)
 
-- Branch `feat/device-code-login`, HEAD `3134dc3` (XFF rate-limit fix +
-  AUDIT F-21..F-26). Feature commit `893225e`. Nothing pushed.
+- Branch `feat/device-code-login`. Feature `893225e`, follow-ups `3134dc3`
+  `27c862d` plus pending poll-CAS. Nothing pushed.
 - Floors: `nub run check` green; `nub run test` 260 pass; `nub run e2e`
   107 pass including compiled `press login --device` and loopback. Localnet
   dogfood printed URI+user code only; fresh whoami returned owner@send.it.

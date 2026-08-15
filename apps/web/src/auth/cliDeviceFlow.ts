@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-import { eq, sql } from 'drizzle-orm'
+import { and, eq, sql } from 'drizzle-orm'
 
 import { db, dbConfig } from '../db/client'
 import { user, verification } from '../db/schema'
@@ -496,12 +496,65 @@ export async function startCliDeviceRequest(
 export type CliDevicePollDependencies = {
   readonly now?: () => number
   readonly loadRow: (identifier: string) => Promise<VerificationInsert | undefined>
-  readonly saveRow: (row: VerificationInsert) => Promise<void>
+  readonly compareAndSaveRow: (input: {
+    readonly expectedValue: string
+    readonly next: VerificationInsert
+  }) => Promise<boolean>
   readonly consumeRow: (identifier: string) => Promise<VerificationInsert | undefined>
   readonly mintToken: (userId: string) => Promise<{
     readonly token: string
     readonly user: { readonly id: string; readonly email: string; readonly role: string }
   }>
+}
+
+async function mintFromConsumedGrant(
+  identifier: string,
+  verifier: string,
+  dependencies: CliDevicePollDependencies,
+): Promise<Response> {
+  const consumed = await dependencies.consumeRow(identifier)
+  if (!consumed) {
+    throw new HttpError(400, 'invalid_grant')
+  }
+  const consumedGrant = parseDeviceGrant(consumed.value)
+  if (consumedGrant.denied) {
+    throw new HttpError(400, 'access_denied')
+  }
+  if (!consumedGrant.userId || consumedGrant.challenge !== hashSecret(verifier)) {
+    throw new HttpError(400, 'invalid_grant')
+  }
+  await dependencies.consumeRow(consumedGrant.userCodeIdentifier)
+  const minted = await dependencies.mintToken(consumedGrant.userId)
+  return json({
+    token: minted.token,
+    user: minted.user,
+  })
+}
+
+async function continueAfterLostPollCas(
+  identifier: string,
+  verifier: string,
+  now: number,
+  dependencies: CliDevicePollDependencies,
+): Promise<Response> {
+  const fresh = await dependencies.loadRow(identifier)
+  if (!fresh) {
+    throw new HttpError(400, 'invalid_grant')
+  }
+  if (fresh.expiresAt.getTime() < now) {
+    throw new HttpError(400, 'expired_token')
+  }
+  const grant = parseDeviceGrant(fresh.value)
+  if (grant.denied) {
+    throw new HttpError(400, 'access_denied')
+  }
+  if (!grant.userId) {
+    throw new HttpError(400, 'authorization_pending')
+  }
+  if (grant.challenge !== hashSecret(verifier)) {
+    throw new HttpError(400, 'invalid_grant')
+  }
+  return await mintFromConsumedGrant(identifier, verifier, dependencies)
 }
 
 export async function pollCliDeviceRequest(
@@ -533,19 +586,25 @@ export async function pollCliDeviceRequest(
         ...grant,
         intervalSeconds: grant.intervalSeconds + CLI_DEVICE_SLOW_DOWN_SECONDS,
       }
-      await dependencies.saveRow({
-        ...row,
-        value: JSON.stringify(slowed),
+      const saved = await dependencies.compareAndSaveRow({
+        expectedValue: row.value,
+        next: { ...row, value: JSON.stringify(slowed) },
       })
+      if (!saved) {
+        return await continueAfterLostPollCas(identifier, verifier, now, dependencies)
+      }
       throw new HttpError(400, 'slow_down')
     }
 
     if (!grant.userId) {
       const pending: CliDeviceGrant = { ...grant, lastPollAt: now }
-      await dependencies.saveRow({
-        ...row,
-        value: JSON.stringify(pending),
+      const saved = await dependencies.compareAndSaveRow({
+        expectedValue: row.value,
+        next: { ...row, value: JSON.stringify(pending) },
       })
+      if (!saved) {
+        return await continueAfterLostPollCas(identifier, verifier, now, dependencies)
+      }
       throw new HttpError(400, 'authorization_pending')
     }
 
@@ -553,23 +612,7 @@ export async function pollCliDeviceRequest(
       throw new HttpError(400, 'invalid_grant')
     }
 
-    const consumed = await dependencies.consumeRow(identifier)
-    if (!consumed) {
-      throw new HttpError(400, 'invalid_grant')
-    }
-    const consumedGrant = parseDeviceGrant(consumed.value)
-    if (consumedGrant.denied) {
-      throw new HttpError(400, 'access_denied')
-    }
-    if (!consumedGrant.userId || consumedGrant.challenge !== hashSecret(verifier)) {
-      throw new HttpError(400, 'invalid_grant')
-    }
-    await dependencies.consumeRow(consumedGrant.userCodeIdentifier)
-    const minted = await dependencies.mintToken(consumedGrant.userId)
-    return json({
-      token: minted.token,
-      user: minted.user,
-    })
+    return await mintFromConsumedGrant(identifier, verifier, dependencies)
   } catch (error) {
     return errorResponse(error)
   }
@@ -825,6 +868,23 @@ async function saveVerificationRow(row: VerificationInsert): Promise<void> {
     .where(eq(verification.identifier, row.identifier))
 }
 
+async function compareAndSaveVerificationRow(input: {
+  readonly expectedValue: string
+  readonly next: VerificationInsert
+}): Promise<boolean> {
+  const updated = await db
+    .update(verification)
+    .set({ value: input.next.value, updatedAt: new Date() })
+    .where(
+      and(
+        eq(verification.identifier, input.next.identifier),
+        eq(verification.value, input.expectedValue),
+      ),
+    )
+    .returning({ id: verification.id })
+  return updated.length > 0
+}
+
 async function consumeVerificationRow(identifier: string): Promise<VerificationInsert | undefined> {
   const rows = await db
     .delete(verification)
@@ -867,7 +927,7 @@ export async function cliDeviceStartEndpoint(request: Request): Promise<Response
 export async function cliDevicePollEndpoint(request: Request): Promise<Response> {
   return await pollCliDeviceRequest(request, {
     loadRow: loadVerificationRow,
-    saveRow: saveVerificationRow,
+    compareAndSaveRow: compareAndSaveVerificationRow,
     consumeRow: consumeVerificationRow,
     mintToken: async (userId) => {
       const token = await mintApiTokenForUser(db, {

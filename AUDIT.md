@@ -39,6 +39,7 @@ finding_ledger:
   F-28: {"fingerprint":"ed869b4a30e5f6e2ac4105716cec68c17492a3c3709d756ea48ad96913af530c","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03","resolved_in":"feat/device-code-login"}
   F-29: {"fingerprint":"966df744e936601028b3f95c40fb21efc5a89a9a6a5043a83fa491b7352dc765","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03"}
   F-30: {"fingerprint":"0476656adffd1d176b9264a47bd1863557b5191cc4f85d4d39a41a1e68bd1224","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03"}
+  F-31: {"fingerprint":"poll-pending-cas-2026-08-15","status":"resolved","severity":"high","first_seen":"skeptic-2026-08-15","last_verified":"skeptic-2026-08-15","resolved_in":"feat/device-code-login"}
 ---
 
 # Audit - AUDIT.md
@@ -613,5 +614,24 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: ipc-and-sandbox
 **First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
+
+
+---
+
+### F-31 (high, RESOLVED in feat/device-code-login) - Poll lastPollAt write could clobber a concurrent Approve
+
+**Fingerprint**: `poll-pending-cas-2026-08-15`
+**Status**: resolved
+**Location**: `apps/web/src/auth/cliDeviceFlow.ts`
+
+**Claim**: Poll pending/slow_down `saveRow` wrote a stale grant (`userId` still null) via a blind UPDATE and could overwrite a concurrent Approve, leaving later polls `authorization_pending` until expiry.
+
+**Evidence**: Review of poll `saveRow` after load; Approve is a separate `saveRow` of the whole JSON value.
+
+**Suggested fix**: CAS `lastPollAt`/`interval` updates against the loaded value; on conflict reload and mint if Approve won.
+
+**Discovered by**: skeptic panel
+**First seen**: skeptic-2026-08-15 · **Last verified**: skeptic-2026-08-15
+**Resolved in**: feat/device-code-login
 
 

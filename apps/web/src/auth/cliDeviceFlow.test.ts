@@ -130,8 +130,13 @@ function pollDeps(
     async loadRow(identifier) {
       return memory.rows.get(identifier)
     },
-    async saveRow(row) {
-      memory.rows.set(row.identifier, row)
+    async compareAndSaveRow({ expectedValue, next }) {
+      const current = memory.rows.get(next.identifier)
+      if (!current || current.value !== expectedValue) {
+        return false
+      }
+      memory.rows.set(next.identifier, next)
+      return true
     },
     async consumeRow(identifier) {
       const row = memory.rows.get(identifier)
@@ -492,6 +497,85 @@ describe('activateCliDeviceRequest', () => {
 })
 
 describe('device grant happy path', () => {
+  function compareAndSaveAfterConcurrentApprove(
+    memory: Memory,
+  ): CliDevicePollDependencies['compareAndSaveRow'] {
+    return async ({ expectedValue, next }) => {
+      const current = memory.rows.get(next.identifier)
+      if (!current) {
+        return false
+      }
+      const approved: CliDeviceGrant = {
+        ...deviceFlow.parseDeviceGrant(current.value),
+        userId: 'owner-user',
+        denied: false,
+      }
+      memory.rows.set(next.identifier, {
+        ...current,
+        value: JSON.stringify(approved),
+      })
+      const afterApprove = memory.rows.get(next.identifier)
+      if (!afterApprove || afterApprove.value !== expectedValue) {
+        return false
+      }
+      memory.rows.set(next.identifier, next)
+      return true
+    }
+  }
+
+  test('pending lastPollAt CAS cannot clobber a concurrent Approve', async () => {
+    const memory = createMemory()
+    const challenge = challengeFor(VERIFIER)
+    await startGrant(memory, challenge)
+    const identifier = deviceFlow.deviceGrantIdentifier(DEVICE_CODE)
+
+    const first = await deviceFlow.pollCliDeviceRequest(
+      pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
+      pollDeps(memory, {
+        now: () => 10_000,
+        compareAndSaveRow: compareAndSaveAfterConcurrentApprove(memory),
+      }),
+    )
+    expect(first.status).toBe(200)
+    const minted = (await first.json()) as { readonly token?: string }
+    expect(minted.token).toBe('press_minted-token')
+    expect(memory.minted).toEqual(['owner-user'])
+    expect(memory.rows.has(identifier)).toBe(false)
+
+    const again = await deviceFlow.pollCliDeviceRequest(
+      pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
+      pollDeps(memory, { now: () => 20_000 }),
+    )
+    expect(again.status).toBe(400)
+    await expect(again.json()).resolves.toEqual({ error: 'invalid_grant' })
+    expect(memory.minted).toEqual(['owner-user'])
+  })
+
+  test('slow_down lastPollAt CAS cannot clobber a concurrent Approve', async () => {
+    const memory = createMemory()
+    const challenge = challengeFor(VERIFIER)
+    await startGrant(memory, challenge)
+    const identifier = deviceFlow.deviceGrantIdentifier(DEVICE_CODE)
+
+    const pending = await deviceFlow.pollCliDeviceRequest(
+      pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
+      pollDeps(memory, { now: () => 1000 }),
+    )
+    expect(pending.status).toBe(400)
+    expect(grantFromMemory(memory).userId).toBeNull()
+
+    const raced = await deviceFlow.pollCliDeviceRequest(
+      pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
+      pollDeps(memory, {
+        now: () => 2000,
+        compareAndSaveRow: compareAndSaveAfterConcurrentApprove(memory),
+      }),
+    )
+    expect(raced.status).toBe(200)
+    expect(memory.minted).toEqual(['owner-user'])
+    expect(memory.rows.has(identifier)).toBe(false)
+  })
+
   test('matching PKCE verifier after approve mints once; a second poll is invalid', async () => {
     const memory = createMemory()
     const challenge = challengeFor(VERIFIER)
