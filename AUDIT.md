@@ -29,6 +29,12 @@ finding_ledger:
   F-18: {"fingerprint":"6938942c2f6356f75db998a0a12a17e33e9d6614ae69dacfea80d15b4fd74583","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
   F-19: {"fingerprint":"cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
   F-20: {"fingerprint":"9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
+  F-21: {"fingerprint":"9ac03c2d01fd1314e835f21f1ee87fc5012d8e0ecaf1b3f5b1775e6e38c61fbc","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f","resolved_in":"feat/device-code-login"}
+  F-22: {"fingerprint":"63f6df1b4c4f92980deb485caf380b1dabffc10401978e6a1116a50aecb6077d","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
+  F-23: {"fingerprint":"a15578aa8f8449fa893aaf583e9d155439f08601a3d76c91ba9be58be4fb9eb3","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
+  F-24: {"fingerprint":"f61ca377217e9d4595c00809043b481717852e6390103ffe79d600fa94cb3962","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
+  F-25: {"fingerprint":"4f495e658ae53878bd6467fe87a1452786088f907b75394a92d4057bfeef9c0d","status":"deferred","severity":"low","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
+  F-26: {"fingerprint":"e7223ec8e3a0f4c8caa2de0e6c886898f972a20aee702565c96964feabdd51c6","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
 ---
 
 # Audit - AUDIT.md
@@ -433,5 +439,105 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-08-11-7a71f5 · **Last verified**: uaudit-2026-08-11-7a71f5
 **Resolved in**: PR-14
+
+
+---
+
+### F-21 (medium, RESOLVED in feat/device-code-login) - Device-start rate limit trusted client-supplied X-Forwarded-For
+
+**Fingerprint**: `9ac03c2d01fd1314e835f21f1ee87fc5012d8e0ecaf1b3f5b1775e6e38c61fbc`
+**Status**: resolved
+**Location**: `apps/web/src/auth/cliDeviceFlow.ts`
+**First anchor line**: 380
+
+**Claim**: The anonymous device-start endpoint lets callers choose their rate-limit identity through the first X-Forwarded-For value. Rotating that header bypasses the 20/hour limit and creates persistent grant rows.
+
+**Evidence**: uaudit-2026-08-15-2dc50f verified `defaultClientIp` returned the first XFF hop with no trusted-proxy check.
+
+**Suggested fix**: Do not take start rate-limit identity from XFF. Use a single global start bucket; rate-limit activate POSTs by authenticated user id.
+
+**Discovered by**: ipc-and-sandbox
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+**Resolved in**: feat/device-code-login (global start key; activate keyed by session user)
+
+
+---
+
+### F-22 (medium, DEFERRED) - Serving follows storage-dir symlinks
+
+**Fingerprint**: `63f6df1b4c4f92980deb485caf380b1dabffc10401978e6a1116a50aecb6077d`
+**Status**: deferred
+**Location**: `apps/web/src/publish/serving.ts:278-290`
+
+**Claim**: A local worker with write access to PRESS_STORAGE_DIR can replace a public page blob with a symlink and have `/p/` serve the target bytes.
+
+**Rationale**: Outside the device-login/auth-store surface (publish serving). Requires a local writer already inside the storage volume. Not addressed in this campaign.
+
+**Discovered by**: ipc-and-sandbox
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+
+
+---
+
+### F-23 (medium, DEFERRED) - Legacy null migration checksums are accepted
+
+**Fingerprint**: `a15578aa8f8449fa893aaf583e9d155439f08601a3d76c91ba9be58be4fb9eb3`
+**Status**: deferred
+**Location**: `apps/web/src/db/migrate.ts:57-63`
+
+**Claim**: Null checksums on applied migration rows skip verification, so drifted historical SQL is accepted on upgraded databases.
+
+**Rationale**: Outside the device-login/auth-store surface (migration verifier). Pre-existing; this campaign adds no schema migration.
+
+**Discovered by**: supply-chain
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+
+
+---
+
+### F-24 (medium, DEFERRED) - Applied migrations missing from the shipped directory are not detected
+
+**Fingerprint**: `f61ca377217e9d4595c00809043b481717852e6390103ffe79d600fa94cb3962`
+**Status**: deferred
+**Location**: `apps/web/src/db/migrate.ts:47-52`
+
+**Claim**: An applied migration id with no matching `.sql` file is accepted, so fresh and upgraded databases can diverge.
+
+**Rationale**: Outside the device-login/auth-store surface (migration verifier). Pre-existing; this campaign adds no schema migration.
+
+**Discovered by**: supply-chain
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+
+
+---
+
+### F-25 (low, DEFERRED) - Report blobs inherit umask permissions
+
+**Fingerprint**: `4f495e658ae53878bd6467fe87a1452786088f907b75394a92d4057bfeef9c0d`
+**Status**: deferred
+**Location**: `apps/web/src/publish/storage.ts:72-88`
+
+**Claim**: Private/password report bytes are written with umask-default modes (often 0644), so another local account on the volume can read them without the HTTP ACL.
+
+**Rationale**: Outside the device-login/auth-store surface (blob store). Pre-existing publish storage.
+
+**Discovered by**: data-flow
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+
+
+---
+
+### F-26 (medium, DEFERRED) - Page ACL patches omit before/after disclosure state from audit
+
+**Fingerprint**: `e7223ec8e3a0f4c8caa2de0e6c886898f972a20aee702565c96964feabdd51c6`
+**Status**: deferred
+**Location**: `apps/web/src/publish/routes.ts:948-1019`
+
+**Claim**: Visibility/allowlist/title patches write a generic `visibility-change` audit row with only contentHash, so temporary public or external-email exposure cannot be reconstructed.
+
+**Rationale**: Outside the device-login/auth-store surface (publish audit details). Pre-existing.
+
+**Discovered by**: data-flow
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
 
 

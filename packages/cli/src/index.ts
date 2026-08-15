@@ -479,9 +479,6 @@ async function commandDeviceLogin(ctx: CliContext): Promise<void> {
     verificationUrl: started.verification_uri,
     userCode: started.user_code,
   })
-  if (typeof Bun.stdout.flush === 'function') {
-    Bun.stdout.flush()
-  }
 }
 
 function maybeHintDeviceLogin(): void {

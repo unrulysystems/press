@@ -204,6 +204,25 @@ function grantFromMemory(memory: Memory): CliDeviceGrant {
   return deviceFlow.parseDeviceGrant(row.value)
 }
 
+describe('deviceStartRateLimitKey', () => {
+  test('ignores X-Forwarded-For so callers cannot choose their rate-limit identity', () => {
+    const spoofed = new Request('http://press.test/api/cli/device/start', {
+      headers: { 'x-forwarded-for': '203.0.113.9, 198.51.100.2' },
+    })
+    const other = new Request('http://press.test/api/cli/device/start', {
+      headers: { 'x-forwarded-for': '198.51.100.7' },
+    })
+    const direct = new Request('http://press.test/api/cli/device/start')
+    expect(deviceFlow.deviceStartRateLimitKey(spoofed)).toBe(deviceFlow.DEVICE_START_RATE_LIMIT_KEY)
+    expect(deviceFlow.deviceStartRateLimitKey(other)).toBe(
+      deviceFlow.deviceStartRateLimitKey(spoofed),
+    )
+    expect(deviceFlow.deviceStartRateLimitKey(direct)).toBe(
+      deviceFlow.deviceStartRateLimitKey(spoofed),
+    )
+  })
+})
+
 describe('user-code helpers', () => {
   test('normalizes hyphens, spaces, and case, then formats XXXX-XXXX', () => {
     expect(deviceFlow.normalizeUserCode('ab cd-2345')).toBe('ABCD2345')
@@ -259,6 +278,29 @@ describe('startCliDeviceRequest', () => {
     )
     expect(oversized.status).toBe(413)
     expect(memory.rows.size).toBe(0)
+  })
+
+  test('rate-limits start with the global key even when X-Forwarded-For is set', async () => {
+    const memory = createMemory()
+    const keys: string[] = []
+    const response = await deviceFlow.startCliDeviceRequest(
+      new Request('http://press.test/api/cli/device/start', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '203.0.113.9',
+        },
+        body: JSON.stringify({ challenge: CHALLENGE }),
+      }),
+      startDeps(memory, {
+        async consumeStartLimit(key) {
+          keys.push(key)
+          return true
+        },
+      }),
+    )
+    expect(response.status).toBe(200)
+    expect(keys).toEqual([deviceFlow.DEVICE_START_RATE_LIMIT_KEY])
   })
 
   test('rate-limits start without creating a grant', async () => {

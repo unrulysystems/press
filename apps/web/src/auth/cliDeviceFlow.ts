@@ -62,7 +62,7 @@ export const CLI_SMALL_BODY_LIMIT_BYTES = 8 * 1024
 export const USER_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 export const USER_CODE_LENGTH = 8
 
-const START_LIMIT_MAX = 20
+const START_LIMIT_MAX = 60
 const START_LIMIT_WINDOW_MS = 60 * 60 * 1000
 const ACTIVATE_LIMIT_MAX = 5
 const ACTIVATE_LIMIT_WINDOW_MS = 60 * 1000
@@ -377,16 +377,14 @@ function parseConsentValue(value: string): CliDeviceConsent {
   return { kind: 'cli-device-consent', userId: record.userId }
 }
 
-function defaultClientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')
-  if (forwarded) {
-    const [first] = forwarded.split(',')
-    const trimmed = first?.trim()
-    if (trimmed) {
-      return trimmed
-    }
-  }
-  return 'local'
+// Fetch Request has no trusted peer address. X-Forwarded-For is
+// client-controlled unless we terminate TLS ourselves, so start rate-limits
+// are a single global bucket (bounded grant creation) and activate limits
+// by the authenticated user id.
+export const DEVICE_START_RATE_LIMIT_KEY = 'global'
+
+export function deviceStartRateLimitKey(_request: Request): string {
+  return DEVICE_START_RATE_LIMIT_KEY
 }
 
 function rejectImpersonation(session: CliAuthorizeSession): void {
@@ -410,8 +408,7 @@ export type CliDeviceStartDependencies = {
   readonly randomDeviceCode?: () => string
   readonly randomUserCode?: () => string
   readonly randomId?: () => string
-  readonly consumeStartLimit: (ip: string) => Promise<boolean>
-  readonly clientIp?: (request: Request) => string
+  readonly consumeStartLimit: (key: string) => Promise<boolean>
   readonly insertRow: (row: VerificationInsert) => Promise<void>
   readonly hasIdentifier: (identifier: string) => Promise<boolean>
 }
@@ -424,8 +421,7 @@ export async function startCliDeviceRequest(
     if (request.method !== 'POST') {
       return json({ error: 'method not allowed' }, 405)
     }
-    const ip = (dependencies.clientIp ?? defaultClientIp)(request)
-    if (!(await dependencies.consumeStartLimit(ip))) {
+    if (!(await dependencies.consumeStartLimit(deviceStartRateLimitKey(request)))) {
       return json({ error: 'rate limited' }, 429)
     }
     const input = await readJsonObject(request)
@@ -582,8 +578,7 @@ export type CliDeviceActivateDependencies = {
   readonly now?: () => number
   readonly randomConsent?: () => string
   readonly randomId?: () => string
-  readonly consumeActivateLimit: (ip: string) => Promise<boolean>
-  readonly clientIp?: (request: Request) => string
+  readonly consumeActivateLimit: (userId: string) => Promise<boolean>
   readonly insertRow: (row: VerificationInsert) => Promise<void>
   readonly consumeRow: (identifier: string) => Promise<VerificationInsert | undefined>
   readonly loadRow: (identifier: string) => Promise<VerificationInsert | undefined>
@@ -660,8 +655,7 @@ export async function activateCliDeviceRequest(
       return await issueActivatePage(dependencies, session, prefilled)
     }
 
-    const ip = (dependencies.clientIp ?? defaultClientIp)(request)
-    if (!(await dependencies.consumeActivateLimit(ip))) {
+    if (!(await dependencies.consumeActivateLimit(session.user.id))) {
       throw new HttpError(429, 'rate limited')
     }
     const form = await readActivateForm(request)
@@ -831,9 +825,9 @@ async function hasVerificationIdentifier(identifier: string): Promise<boolean> {
 export async function cliDeviceStartEndpoint(request: Request): Promise<Response> {
   return await startCliDeviceRequest(request, {
     baseUrl: dbConfig.baseUrl,
-    consumeStartLimit: async (ip) =>
+    consumeStartLimit: async (key) =>
       consumeLimit({
-        identifier: startLimitIdentifier(ip),
+        identifier: startLimitIdentifier(key),
         max: START_LIMIT_MAX,
         windowMs: START_LIMIT_WINDOW_MS,
         now: Date.now(),
@@ -876,9 +870,9 @@ export async function cliDeviceActivateEndpoint(request: Request): Promise<Respo
     baseUrl: dbConfig.baseUrl,
     getSession: async (headers) =>
       (await auth.api.getSession({ headers })) as CliAuthorizeSession | null,
-    consumeActivateLimit: async (ip) =>
+    consumeActivateLimit: async (userId) =>
       consumeLimit({
-        identifier: activateLimitIdentifier(ip),
+        identifier: activateLimitIdentifier(userId),
         max: ACTIVATE_LIMIT_MAX,
         windowMs: ACTIVATE_LIMIT_WINDOW_MS,
         now: Date.now(),
