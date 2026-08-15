@@ -56,7 +56,9 @@ press login
 
 This opens a browser for Google sign-in and stores the token in the OS keychain
 for the current host. Use `press login --no-open` to print the URL instead of
-opening a browser.
+opening a browser. On a remote/headless host where the browser is elsewhere,
+use `press login --device` and complete `/cli/activate` on any signed-in
+device.
 
 ## 3. Verify
 

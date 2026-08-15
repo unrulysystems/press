@@ -1,5 +1,15 @@
 # @press/cli
 
+## 0.5.0
+
+### Minor Changes
+
+- Add `press login --device`, an RFC 8628-shaped second front door for
+  headless/remote CLIs (user code + `/cli/activate` consent, PKCE poll).
+  Loopback remains the default. Tokens persist via macOS Keychain, then a
+  last-resort 0600 XDG file store (`$XDG_CONFIG_HOME/press/tokens.json`),
+  then `PRESS_TOKEN`. The minted token is never printed.
+
 ## 0.4.0
 
 ### Minor Changes

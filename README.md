@@ -25,8 +25,9 @@ party sits in the data path.
 
 - `apps/web` — a One (OneStack) app: the magazine UI and the API (auth,
   publish, serving) as plain `Request → Response` handlers.
-- `packages/cli` — the `press` CLI: browser-loopback login, token stored in
-  the OS keychain (or `PRESS_TOKEN` for agents/CI).
+- `packages/cli` — the `press` CLI: browser-loopback login by default,
+  `press login --device` for remote/headless hosts; token stored in the OS
+  keychain, then a 0600 XDG file store, or `PRESS_TOKEN` for agents/CI.
 - **Data** — Postgres (Drizzle) rows are the source of truth; report blobs are
   flat files under `PRESS_STORAGE_DIR/<collection>/<file>`.
 
@@ -57,6 +58,7 @@ nub run e2e          # full Playwright acceptance suite (localnet only)
 
 ```sh
 press login          # browser-loopback sign-in; token to the OS keychain
+press login --device # remote/headless: print a URL + user code, poll until approved
 press doctor         # status: resolved host, token source, identity
 press publish report.html --to weekly [--visibility private] [--allow a@b.c]
 press list [collection]
