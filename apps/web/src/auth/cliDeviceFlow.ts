@@ -1,6 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
 
 import { db, dbConfig } from '../db/client'
 import { user, verification } from '../db/schema'
@@ -558,6 +558,9 @@ export async function pollCliDeviceRequest(
       throw new HttpError(400, 'invalid_grant')
     }
     const consumedGrant = parseDeviceGrant(consumed.value)
+    if (consumedGrant.denied) {
+      throw new HttpError(400, 'access_denied')
+    }
     if (!consumedGrant.userId || consumedGrant.challenge !== hashSecret(verifier)) {
       throw new HttpError(400, 'invalid_grant')
     }
@@ -697,7 +700,9 @@ export async function activateCliDeviceRequest(
     }
 
     const nextGrant: CliDeviceGrant =
-      form.action === 'deny' ? { ...grant, denied: true } : { ...grant, userId: session.user.id }
+      form.action === 'deny'
+        ? { ...grant, denied: true, userId: null }
+        : { ...grant, userId: session.user.id, denied: false }
     await dependencies.saveRow({
       ...grantRow,
       value: JSON.stringify(nextGrant),
@@ -722,7 +727,7 @@ export async function activateCliDeviceRequest(
   }
 }
 
-type RateLimitState = {
+export type RateLimitState = {
   readonly count: number
   readonly windowStart: number
 }
@@ -743,33 +748,55 @@ function parseRateLimitState(value: string): RateLimitState | null {
   }
 }
 
+export function nextRateLimitState(
+  existing: RateLimitState | null,
+  now: number,
+  windowMs: number,
+): RateLimitState {
+  if (existing && now - existing.windowStart < windowMs) {
+    return { count: existing.count + 1, windowStart: existing.windowStart }
+  }
+  return { count: 1, windowStart: now }
+}
+
 async function consumeLimit(input: {
   readonly identifier: string
   readonly max: number
   readonly windowMs: number
   readonly now: number
 }): Promise<boolean> {
-  const existing = await db
-    .delete(verification)
-    .where(eq(verification.identifier, input.identifier))
-    .returning()
-  const row = existing[0]
-  let count = 1
-  let windowStart = input.now
-  if (row) {
-    const state = parseRateLimitState(row.value)
-    if (state && input.now - state.windowStart < input.windowMs) {
-      count = state.count + 1
-      windowStart = state.windowStart
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.identifier}))`)
+    const existing = await tx
+      .select()
+      .from(verification)
+      .where(eq(verification.identifier, input.identifier))
+    const row = existing[0]
+    const state = nextRateLimitState(
+      row ? parseRateLimitState(row.value) : null,
+      input.now,
+      input.windowMs,
+    )
+    const expiresAt = new Date(state.windowStart + input.windowMs)
+    if (row) {
+      await tx
+        .update(verification)
+        .set({
+          value: JSON.stringify(state),
+          expiresAt,
+          updatedAt: new Date(input.now),
+        })
+        .where(eq(verification.identifier, input.identifier))
+    } else {
+      await tx.insert(verification).values({
+        id: randomUUID(),
+        identifier: input.identifier,
+        value: JSON.stringify(state),
+        expiresAt,
+      })
     }
-  }
-  await db.insert(verification).values({
-    id: randomUUID(),
-    identifier: input.identifier,
-    value: JSON.stringify({ count, windowStart } satisfies RateLimitState),
-    expiresAt: new Date(windowStart + input.windowMs),
+    return state.count <= input.max
   })
-  return count <= input.max
 }
 
 async function insertVerificationRow(row: VerificationInsert): Promise<void> {

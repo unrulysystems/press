@@ -10,13 +10,17 @@ ladder; the verifier — not confidence — decides when work is done.
 
 ## State (updated 2026-08-15 — rewrite each iteration; newest facts first)
 
-- Branch `feat/device-code-login`, tree dirty with SPEC/BRIEF/LOOP, device
-  flow, CLI `--device`, XDG file store, and e2e. Nothing pushed.
-- Unit floors green (`nub run check`, `nub run test` 260 pass). Localnet
-  `silo up main` healthy; dogfood `press login --device` → activate Approve
-  → fresh `whoami` as `owner@send.it` with no token in stdout. Poll timer
-  must stay referenced (unref let the process exit 0 before minting).
-- E2E suite in flight. Close GitHub issues is a human boundary step.
+- Branch `feat/device-code-login`, HEAD `3134dc3` (XFF rate-limit fix +
+  AUDIT F-21..F-26). Feature commit `893225e`. Nothing pushed.
+- Floors: `nub run check` green; `nub run test` 260 pass; `nub run e2e`
+  107 pass including compiled `press login --device` and loopback. Localnet
+  dogfood printed URI+user code only; fresh whoami returned owner@send.it.
+- Ultra-audit 1 (`uaudit-2026-08-15-2dc50f`): F-21 XFF start limit fixed;
+  F-22..F-26 deferred. Confirming audit 2 (`uaudit-2026-08-15-ee2f03`):
+  F-21 gone; F-27 rate-limit race and F-28 poll/deny race fixed on the
+  device surface; F-29/F-30 and remaining serving/migrate items deferred.
+  No third audit (campaign bound: one address pass + one confirm).
+- Close GitHub issues is a human boundary step.
 
 ## Decisions (append-only; do not re-litigate)
 

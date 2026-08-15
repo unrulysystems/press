@@ -35,6 +35,10 @@ finding_ledger:
   F-24: {"fingerprint":"f61ca377217e9d4595c00809043b481717852e6390103ffe79d600fa94cb3962","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
   F-25: {"fingerprint":"4f495e658ae53878bd6467fe87a1452786088f907b75394a92d4057bfeef9c0d","status":"deferred","severity":"low","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
   F-26: {"fingerprint":"e7223ec8e3a0f4c8caa2de0e6c886898f972a20aee702565c96964feabdd51c6","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
+  F-27: {"fingerprint":"808e86e7c0d777329df66c80700b3297fb3b38a338ce59c785006b20e1c365a8","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03","resolved_in":"feat/device-code-login"}
+  F-28: {"fingerprint":"ed869b4a30e5f6e2ac4105716cec68c17492a3c3709d756ea48ad96913af530c","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03","resolved_in":"feat/device-code-login"}
+  F-29: {"fingerprint":"966df744e936601028b3f95c40fb21efc5a89a9a6a5043a83fa491b7352dc765","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03"}
+  F-30: {"fingerprint":"0476656adffd1d176b9264a47bd1863557b5191cc4f85d4d39a41a1e68bd1224","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03"}
 ---
 
 # Audit - AUDIT.md
@@ -539,5 +543,75 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: data-flow
 **First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+
+
+---
+
+### F-27 (medium, RESOLVED in feat/device-code-login) - Device rate limiter delete+insert was racy
+
+**Fingerprint**: `808e86e7c0d777329df66c80700b3297fb3b38a338ce59c785006b20e1c365a8`
+**Status**: resolved
+**Location**: `apps/web/src/auth/cliDeviceFlow.ts`
+
+**Claim**: Concurrent start/activate requests could each observe an empty bucket and insert count=1, bypassing the limit.
+
+**Evidence**: uaudit-2026-08-15-ee2f03 verified consumeLimit deleted then inserted outside a lock.
+
+**Suggested fix**: Transaction plus `pg_advisory_xact_lock(hashtext(identifier))` and a single-row upsert.
+
+**Discovered by**: ipc-and-sandbox
+**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
+**Resolved in**: feat/device-code-login
+
+
+---
+
+### F-28 (medium, RESOLVED in feat/device-code-login) - Poll could mint after a racing Cancel
+
+**Fingerprint**: `ed869b4a30e5f6e2ac4105716cec68c17492a3c3709d756ea48ad96913af530c`
+**Status**: resolved
+**Location**: `apps/web/src/auth/cliDeviceFlow.ts`
+
+**Claim**: A poll that loaded an approved grant, then lost a race to Cancel, still minted because post-consume checks ignored `denied`.
+
+**Evidence**: uaudit-2026-08-15-ee2f03 verified consume checked only userId+challenge.
+
+**Suggested fix**: After consume, refuse mint when `denied`; Cancel also clears `userId`.
+
+**Discovered by**: ipc-and-sandbox
+**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
+**Resolved in**: feat/device-code-login
+
+
+---
+
+### F-29 (medium, DEFERRED) - Banned sessions still read protected pages
+
+**Fingerprint**: `966df744e936601028b3f95c40fb21efc5a89a9a6a5043a83fa491b7352dc765`
+**Status**: deferred
+**Location**: `apps/web/src/publish/serving.ts:219-239`
+
+**Claim**: Session viewer construction ignores `banned`/`banExpires`, unlike bearer-token verification.
+
+**Rationale**: Outside the device-login/auth-store surface (page serving). Pre-existing.
+
+**Discovered by**: auth-and-authz
+**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
+
+
+---
+
+### F-30 (medium, DEFERRED) - Unlimited Argon2 on password-page Basic auth
+
+**Fingerprint**: `0476656adffd1d176b9264a47bd1863557b5191cc4f85d4d39a41a1e68bd1224`
+**Status**: deferred
+**Location**: `apps/web/src/publish/serving.ts:179-216`
+
+**Claim**: Unauthenticated Basic-auth attempts to a password page are not rate-limited and each runs memory-hard Argon2.
+
+**Rationale**: Outside the device-login/auth-store surface (page password gate). Pre-existing.
+
+**Discovered by**: ipc-and-sandbox
+**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
 
 

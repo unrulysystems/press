@@ -204,6 +204,23 @@ function grantFromMemory(memory: Memory): CliDeviceGrant {
   return deviceFlow.parseDeviceGrant(row.value)
 }
 
+describe('nextRateLimitState', () => {
+  test('increments inside the window and resets after it', () => {
+    expect(deviceFlow.nextRateLimitState(null, 1000, 60_000)).toEqual({
+      count: 1,
+      windowStart: 1000,
+    })
+    expect(deviceFlow.nextRateLimitState({ count: 3, windowStart: 1000 }, 2000, 60_000)).toEqual({
+      count: 4,
+      windowStart: 1000,
+    })
+    expect(deviceFlow.nextRateLimitState({ count: 3, windowStart: 1000 }, 61_000, 60_000)).toEqual({
+      count: 1,
+      windowStart: 61_000,
+    })
+  })
+})
+
 describe('deviceStartRateLimitKey', () => {
   test('ignores X-Forwarded-For so callers cannot choose their rate-limit identity', () => {
     const spoofed = new Request('http://press.test/api/cli/device/start', {
@@ -528,6 +545,48 @@ describe('device grant happy path', () => {
     expect(again.status).toBe(400)
     await expect(again.json()).resolves.toEqual({ error: 'invalid_grant' })
     expect(memory.minted).toEqual(['owner-user'])
+  })
+
+  test('a consume that races a deny after approve does not mint', async () => {
+    const memory = createMemory()
+    await startGrant(memory, challengeFor(VERIFIER))
+    await deviceFlow.activateCliDeviceRequest(activateGet(), activateDeps(memory))
+    await deviceFlow.activateCliDeviceRequest(
+      activatePost({ consent: CONSENT, userCode: 'ABCD-2345', action: 'approve' }),
+      activateDeps(memory),
+    )
+    const identifier = deviceFlow.deviceGrantIdentifier(DEVICE_CODE)
+    const approved = memory.rows.get(identifier)
+    if (!approved) {
+      throw new Error('approved grant missing')
+    }
+    const polled = await deviceFlow.pollCliDeviceRequest(
+      pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
+      pollDeps(memory, {
+        now: () => 10_000,
+        async loadRow(requested) {
+          return requested === identifier ? approved : memory.rows.get(requested)
+        },
+        async consumeRow(requested) {
+          if (requested !== identifier) {
+            const row = memory.rows.get(requested)
+            memory.rows.delete(requested)
+            return row
+          }
+          memory.rows.delete(requested)
+          return {
+            ...approved,
+            value: JSON.stringify({
+              ...deviceFlow.parseDeviceGrant(approved.value),
+              denied: true,
+            }),
+          }
+        },
+      }),
+    )
+    expect(polled.status).toBe(400)
+    await expect(polled.json()).resolves.toEqual({ error: 'access_denied' })
+    expect(memory.minted).toEqual([])
   })
 
   test('deny makes subsequent polls access_denied and never mints', async () => {
