@@ -1,10 +1,10 @@
 ---
 audit_version: 1
-last_batch_id: "uaudit-2026-08-11-7a71f5"
-last_run_at: "2026-08-11T04:47:23.776Z"
+last_batch_id: "skeptic-2026-08-15b"
+last_run_at: "2026-08-15T22:59:53.974Z"
 scope_paths:
   - "**"
-last_scope_sha: "ca8af24652cf67794a8bd66ae86db8e34ac98401"
+last_scope_sha: "60f38f9eb3f97c53bf55101456b34862845d617a"
 coverage:
   failed_personas: []
   partial_batch: false
@@ -30,21 +30,24 @@ finding_ledger:
   F-19: {"fingerprint":"cd93d4a9de6880f928105b583d44e8fccd5afae8f16f2ef18d38f8eadcebde1b","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
   F-20: {"fingerprint":"9873ed7698d5c3672b12bde16289af69bf9a5de2a7dd5cbc85a2cbe96077205e","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-11-7a71f5","last_verified":"uaudit-2026-08-11-7a71f5","resolved_in":"PR-14"}
   F-21: {"fingerprint":"9ac03c2d01fd1314e835f21f1ee87fc5012d8e0ecaf1b3f5b1775e6e38c61fbc","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f","resolved_in":"feat/device-code-login"}
-  F-22: {"fingerprint":"63f6df1b4c4f92980deb485caf380b1dabffc10401978e6a1116a50aecb6077d","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
+  F-22: {"fingerprint":"63f6df1b4c4f92980deb485caf380b1dabffc10401978e6a1116a50aecb6077d","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"skeptic-2026-08-15b","resolved_in":"feat/device-code-login"}
   F-23: {"fingerprint":"a15578aa8f8449fa893aaf583e9d155439f08601a3d76c91ba9be58be4fb9eb3","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
   F-24: {"fingerprint":"f61ca377217e9d4595c00809043b481717852e6390103ffe79d600fa94cb3962","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
   F-25: {"fingerprint":"4f495e658ae53878bd6467fe87a1452786088f907b75394a92d4057bfeef9c0d","status":"deferred","severity":"low","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
   F-26: {"fingerprint":"e7223ec8e3a0f4c8caa2de0e6c886898f972a20aee702565c96964feabdd51c6","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-2dc50f","last_verified":"uaudit-2026-08-15-2dc50f"}
   F-27: {"fingerprint":"808e86e7c0d777329df66c80700b3297fb3b38a338ce59c785006b20e1c365a8","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03","resolved_in":"feat/device-code-login"}
   F-28: {"fingerprint":"ed869b4a30e5f6e2ac4105716cec68c17492a3c3709d756ea48ad96913af530c","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03","resolved_in":"feat/device-code-login"}
-  F-29: {"fingerprint":"966df744e936601028b3f95c40fb21efc5a89a9a6a5043a83fa491b7352dc765","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03"}
-  F-30: {"fingerprint":"0476656adffd1d176b9264a47bd1863557b5191cc4f85d4d39a41a1e68bd1224","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"uaudit-2026-08-15-ee2f03"}
+  F-29: {"fingerprint":"966df744e936601028b3f95c40fb21efc5a89a9a6a5043a83fa491b7352dc765","status":"resolved","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"skeptic-2026-08-15b","resolved_in":"feat/device-code-login"}
+  F-30: {"fingerprint":"0476656adffd1d176b9264a47bd1863557b5191cc4f85d4d39a41a1e68bd1224","status":"deferred","severity":"medium","first_seen":"uaudit-2026-08-15-ee2f03","last_verified":"skeptic-2026-08-15b"}
   F-31: {"fingerprint":"poll-pending-cas-2026-08-15","status":"resolved","severity":"high","first_seen":"skeptic-2026-08-15","last_verified":"skeptic-2026-08-15","resolved_in":"feat/device-code-login"}
+  F-32: {"fingerprint":"cli-activate-consent-amplify-2026-08-15","status":"resolved","severity":"medium","first_seen":"skeptic-2026-08-15b","last_verified":"skeptic-2026-08-15b","resolved_in":"feat/device-code-login"}
+  F-33: {"fingerprint":"no-gc-verification-rows-2026-08-15","status":"resolved","severity":"low","first_seen":"skeptic-2026-08-15b","last_verified":"skeptic-2026-08-15b","resolved_in":"feat/device-code-login"}
+  F-34: {"fingerprint":"unbounded-json-mutations-2026-08-15","status":"resolved","severity":"low","first_seen":"skeptic-2026-08-15b","last_verified":"skeptic-2026-08-15b","resolved_in":"feat/device-code-login"}
 ---
 
 # Audit - AUDIT.md
 
-Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
+Scope: `**` at HEAD `60f38f9e` (last batch `skeptic-2026-08-15b`)
 
 ## Findings
 
@@ -468,18 +471,19 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 ---
 
-### F-22 (medium, DEFERRED) - Serving follows storage-dir symlinks
+### F-22 (medium, RESOLVED in feat/device-code-login) - Serving follows storage-dir symlinks
 
 **Fingerprint**: `63f6df1b4c4f92980deb485caf380b1dabffc10401978e6a1116a50aecb6077d`
-**Status**: deferred
-**Location**: `apps/web/src/publish/serving.ts:278-290`
+**Status**: resolved
+**Location**: `apps/web/src/publish/storage.ts` (`openPageBlobForRead`), called from `serving.ts`
 
 **Claim**: A local worker with write access to PRESS_STORAGE_DIR can replace a public page blob with a symlink and have `/p/` serve the target bytes.
 
-**Rationale**: Outside the device-login/auth-store surface (publish serving). Requires a local writer already inside the storage volume. Not addressed in this campaign.
+**Fix**: `openPageBlobForRead` opens the collection directory (`O_NOFOLLOW|O_DIRECTORY`) and the blob (`O_NOFOLLOW`), rejects non-regular nodes (FIFO/device/socket), then verifies the collection dir's inode still matches the path so a single swap between the opens is caught. This closes static symlinks (file or collection dir) and single-swap races. Residual: an ABA swap (rename the collection dir aside, install a symlink for the blob open, restore before the stat) is not closable without `openat2(RESOLVE_NO_SYMLINKS)`, which Node does not expose — documented as a waiver in `storage.ts`. Verified live: a static blob or collection-dir symlink returns 500. Regression floor in `storage.test.ts`.
 
 **Discovered by**: ipc-and-sandbox
-**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
+**First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: skeptic-2026-08-15b
+**Resolved in**: feat/device-code-login
 
 
 ---
@@ -492,7 +496,7 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Claim**: Null checksums on applied migration rows skip verification, so drifted historical SQL is accepted on upgraded databases.
 
-**Rationale**: Outside the device-login/auth-store surface (migration verifier). Pre-existing; this campaign adds no schema migration.
+**Rationale**: Outside the device-login/auth-store surface (migration verifier). Pre-existing migration-verifier hardening, independent of the F-33 index migration added on this branch.
 
 **Discovered by**: supply-chain
 **First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
@@ -508,7 +512,7 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Claim**: An applied migration id with no matching `.sql` file is accepted, so fresh and upgraded databases can diverge.
 
-**Rationale**: Outside the device-login/auth-store surface (migration verifier). Pre-existing; this campaign adds no schema migration.
+**Rationale**: Outside the device-login/auth-store surface (migration verifier). Pre-existing migration-verifier hardening, independent of the F-33 index migration added on this branch.
 
 **Discovered by**: supply-chain
 **First seen**: uaudit-2026-08-15-2dc50f · **Last verified**: uaudit-2026-08-15-2dc50f
@@ -586,18 +590,19 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 ---
 
-### F-29 (medium, DEFERRED) - Banned sessions still read protected pages
+### F-29 (medium, RESOLVED in feat/device-code-login) - Banned sessions still read protected pages
 
 **Fingerprint**: `966df744e936601028b3f95c40fb21efc5a89a9a6a5043a83fa491b7352dc765`
-**Status**: deferred
-**Location**: `apps/web/src/publish/serving.ts:219-239`
+**Status**: resolved
+**Location**: `apps/web/src/auth/sessionViewer.ts` (`authenticatedViewerForSession`), used by `serving.ts` and `indexes.ts`
 
 **Claim**: Session viewer construction ignores `banned`/`banExpires`, unlike bearer-token verification.
 
-**Rationale**: Outside the device-login/auth-store surface (page serving). Pre-existing.
+**Fix**: Both viewer paths now route through `authenticatedViewerForSession`, which returns null for an actively-banned user (mirroring `verifyApiToken`), so a live session reads as anonymous. Verified live: banned `owner@send.it` session reads of `default`/`private` pages return 401 while the token path also rejects. Unit floor in `sessionViewer.test.ts`, e2e floor in `publish.spec.ts`.
 
 **Discovered by**: auth-and-authz
-**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
+**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: skeptic-2026-08-15b
+**Resolved in**: feat/device-code-login
 
 
 ---
@@ -606,14 +611,14 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Fingerprint**: `0476656adffd1d176b9264a47bd1863557b5191cc4f85d4d39a41a1e68bd1224`
 **Status**: deferred
-**Location**: `apps/web/src/publish/serving.ts:179-216`
+**Location**: `apps/web/src/publish/serving.ts` (password gate)
 
 **Claim**: Unauthenticated Basic-auth attempts to a password page are not rate-limited and each runs memory-hard Argon2.
 
-**Rationale**: Outside the device-login/auth-store surface (page password gate). Pre-existing.
+**Rationale**: A per-page limiter keyed by page id (there is no trusted peer address in the Fetch Request runtime) lets any anonymous caller exhaust the budget and lock out valid readers — violating REQ-ACL-002 (a correct Basic password must serve 200) — so that fix is worse than the CPU cost it bounds. A clean fix needs trusted client identity (reverse-proxy/infra rate limiting) or a password-gate redesign, both outside this surface. Pre-existing; remains deferred.
 
 **Discovered by**: ipc-and-sandbox
-**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: uaudit-2026-08-15-ee2f03
+**First seen**: uaudit-2026-08-15-ee2f03 · **Last verified**: skeptic-2026-08-15b
 
 
 ---
@@ -632,6 +637,63 @@ Scope: `**` at HEAD `ca8af24652` (last batch `uaudit-2026-08-11-7a71f5`)
 
 **Discovered by**: skeptic panel
 **First seen**: skeptic-2026-08-15 · **Last verified**: skeptic-2026-08-15
+**Resolved in**: feat/device-code-login
+
+
+---
+
+### F-32 (medium, RESOLVED in feat/device-code-login) - GET /cli/activate mints consent rows without a rate limit
+
+**Fingerprint**: `cli-activate-consent-amplify-2026-08-15`
+**Status**: resolved
+**Location**: `apps/web/src/auth/cliDeviceFlow.ts` (`activateCliDeviceRequest`)
+
+**Claim**: Only the POST path consumes `consumeActivateLimit`; the GET path renders the approve page and inserts a fresh `cli:device:consent:*` verification row per request with no limit, so an authenticated user can grow the `verification` table without bound.
+
+**Evidence**: Verified live against localnet — 30 `GET /cli/activate` requests created 30 consent rows, all 200, no 429.
+
+**Fix**: The GET path now consumes the same per-user activate budget as the POST before issuing the consent page, bounding consent-row creation. Unit floor in `cliDeviceFlow.test.ts`.
+
+**Discovered by**: skeptic panel
+**First seen**: skeptic-2026-08-15b · **Last verified**: skeptic-2026-08-15b
+**Resolved in**: feat/device-code-login
+
+
+---
+
+### F-33 (low, RESOLVED in feat/device-code-login) - Expired device/loopback auth rows are never garbage-collected
+
+**Fingerprint**: `no-gc-verification-rows-2026-08-15`
+**Status**: resolved
+**Location**: `apps/web/src/auth/verificationCleanup.ts` (sweep), called from `cliDeviceStartEndpoint` + `cliAuthorizeEndpoint`
+
+**Claim**: Device grants, user-code indexes, loopback pending rows, and consent rows are removed only when consumed; an abandoned flow leaks its row forever, so a long-running instance accumulates `verification` rows with no sweep.
+
+**Evidence**: Leftover `cli:device:*` and `cli:device:consent:*` rows from prior runs were present in localnet's `verification` table with no cleanup job anywhere in the codebase.
+
+**Fix**: `sweepExpiredCliVerificationRows` deletes expired `cli:*` rows in bounded batches after a 1-hour grace period (so a poll still returns `expired_token` per REQ-AUTH-004 rather than `invalid_grant`); the device-start, loopback-authorize, and activate entry points call it (best-effort) before creating new rows. This is opportunistic cleanup — no boot timer (the server entry doubles as the Dockerfile's must-exit preflight, so it cannot host an interval) — so expired rows are drained as flows continue, and an abandoned flow's rows persist until the next auth entry request. e2e floor in `publish.spec.ts`.
+
+**Discovered by**: skeptic panel
+**First seen**: skeptic-2026-08-15b · **Last verified**: skeptic-2026-08-15b
+**Resolved in**: feat/device-code-login
+
+
+---
+
+### F-34 (low, RESOLVED in feat/device-code-login) - Authenticated mutations read request bodies unboundedly
+
+**Fingerprint**: `unbounded-json-mutations-2026-08-15`
+**Status**: resolved
+**Location**: `apps/web/src/publish/routes.ts` (`readMutationJson` used by `movePage`, `patchPage`, `patchCollection`)
+
+**Claim**: The move/patch mutation endpoints parse the body with `request.json()` (unbounded), unlike the anonymous endpoints which use `readCappedBodyText`; a caller holding any valid token can buffer an arbitrarily large body and exhaust memory.
+
+**Evidence**: Verified live — `PATCH /api/pages/...` buffered a 200KB JSON body (returned 400 for an invalid field, not 413), while `POST /api/cli/device/start` correctly 413s at 8KB.
+
+**Fix**: Move/patch bodies now read through `readCappedBodyText` capped at the dedicated `PRESS_MAX_METADATA_BYTES` config (REQ-CFG-001, default 1 MiB), returning 413 over the limit. Unit floor in `routes.test.ts`, e2e floor in `publish.spec.ts`.
+
+**Discovered by**: skeptic panel
+**First seen**: skeptic-2026-08-15b · **Last verified**: skeptic-2026-08-15b
 **Resolved in**: feat/device-code-login
 
 
