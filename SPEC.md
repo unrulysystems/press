@@ -76,9 +76,9 @@ Slug grammar (both collection and file slugs):
   state are restored even after a demo page has moved.
 - **REQ-AUTH-003** Browser sessions are HttpOnly, Secure (in prod), SameSite=Lax
   cookies via Better Auth.
-- **REQ-AUTH-004** The CLI authenticates with a press-issued API token: `press
-login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with
-  a loopback port + PKCE-style one-time challenge + state nonce; the server
+- **REQ-AUTH-004** The CLI authenticates with a press-issued API token. Default
+  `press login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize`
+  with a loopback port + PKCE-style one-time challenge + state nonce; the server
   records a pending login bound to the session, port, challenge, and state, and
   renders a same-origin approval page whose form carries a server-generated
   consent token; only a CSRF-protected POST to `/cli/approve` presenting that
@@ -86,13 +86,28 @@ login` runs a browser-loopback flow (CLI opens `BASE_URL/cli/authorize` with
   redirects to `127.0.0.1:<port>` with the code and the bound state; the CLI
   exchanges the code for a long-lived API token). The exchange endpoint is
   testable without a real browser. (Consent step ratified 2026-08-11, B-1.)
+  `press login --device` is an opt-in second front door (RFC 8628-shaped, not a
+  general OAuth authorization server): the CLI POSTs a PKCE challenge to
+  `/api/cli/device/start` and receives a high-entropy device secret, a short
+  user code, a same-origin verification URI (`/cli/activate`), expiry, and poll
+  interval; a signed-in browser confirms the user code and clicks Approve on a
+  CSRF-protected same-origin POST (GET never claims or mints; a session cookie
+  never returns the API token); the CLI polls `/api/cli/device/poll` with the
+  device secret and PKCE verifier until success or `authorization_pending` /
+  `slow_down` / `access_denied` / `expired_token`. Poll-before-approve does not
+  mint. Default `press login` remains loopback; a missing browser/`open`/DISPLAY
+  prints a hint only and does not auto-switch. (Device door ratified 2026-08-15.)
 - **REQ-AUTH-005** API tokens are stored hashed server-side, are revocable
   (`press logout` revokes; users can revoke any of their tokens), and record
   lastUsedAt.
-- **REQ-AUTH-006** CLI token resolution order: OS keychain (macOS `security`),
-  then `PRESS_TOKEN` env var (for CI/agents on non-mac hosts, injected by a
-  secret manager). The CLI never writes the token to disk in plaintext and never
-  accepts it as a command argument.
+- **REQ-AUTH-006** CLI token resolution order: OS keychain (macOS Keychain
+  Services), then the host-scoped 0600 file store at
+  `$XDG_CONFIG_HOME/press/tokens.json` (default `~/.config/press/tokens.json`)
+  when no usable OS keychain exists, then `PRESS_TOKEN` env var (for CI/agents,
+  injected by a secret manager). The CLI never accepts the token as a command
+  argument and never prints a minted token. The XDG file store is last-resort
+  persistence for hosts without a usable OS keychain (directory mode 0700, file
+  mode 0600). The `PRESS_E2E_KEYCHAIN_FILE` seam remains test-build-only.
 - **REQ-AUTH-007** Instance admins are the users whose emails appear in
   `PRESS_ADMIN_EMAILS`. The config list is authoritative and enforced at every
   authorization use (sign-in assigns, tokens/sessions/whoami re-derive); removing
@@ -254,7 +269,7 @@ frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that 
 
 ### CLI — packages/cli, bin `press`
 
-- **REQ-CLI-001** Commands: `press login [--host <url>]`, `press logout`,
+- **REQ-CLI-001** Commands: `press login [--device] [--host <url>]`, `press logout`,
   `press whoami`, `press publish <file> --to <collection> [--as <file-slug>]
 [--visibility <v>] [--allow <emails>] [--password]`, `press list [collection]`,
   `press page set <collection>/<file> [--visibility <v>] [--allow <emails>]
@@ -295,7 +310,8 @@ frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that 
   `PRESS_BASE_URL`, `PRESS_ALLOWED_DOMAINS` (csv, ≥1 in prod),
   `PRESS_ADMIN_EMAILS` (csv), `DATABASE_URL`, `PRESS_STORAGE_DIR`,
   `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (prod),
-  `PRESS_ENABLE_CREDENTIAL_AUTH` (localnet only), `PRESS_MAX_UPLOAD_BYTES`.
+  `PRESS_ENABLE_CREDENTIAL_AUTH` (localnet only), `PRESS_MAX_UPLOAD_BYTES`,
+  `PRESS_MAX_METADATA_BYTES`.
 - **REQ-CFG-002** Config is validated at boot; missing/invalid required values
   abort startup with a descriptive error (fail loudly).
 
@@ -320,7 +336,9 @@ Native apps; realtime/Zero sync; S3/object-store blobs; page version history;
 multi-file/tarball uploads; identity providers beyond Google + localnet
 credentials; quotas/billing; full-text search; comments/reactions; npm
 distribution of the CLI; in-app HTML authoring or editing; temporary redirects;
-standalone redirect creation, listing, or removal.
+standalone redirect creation, listing, or removal; a general OAuth authorization
+server (`client_id`, `grant_type`, third-party device clients); auto-selecting
+device-code login; replacing the macOS Keychain backend with `Bun.secrets`.
 
 ## Risk tags
 
@@ -361,6 +379,12 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 - [ ] Every `/p/` 200 serving report content carries the exact CSP of REQ-SRV-002;
       the password entry page (REQ-SRV-004) instead carries its strict form-capable
       CSP (no scripts, no report body)
+- [ ] `press login --device` (real compiled CLI) prints a verification URI and
+      user code only (never the device secret or API token), completes after a
+      signed-in browser Approve on `/cli/activate`, exits 0, and a subsequent
+      `press whoami` in a fresh process returns the signed-in email. Poll before
+      approve does not mint. Default `press login` remains loopback
+      (REQ-AUTH-004, REQ-AUTH-006, REQ-CLI-001)
 - [ ] `press publish` (real CLI binary) creates a collection, publishes, prints
       URL; republish overwrites; second user's publish to same collection → 403
       (exit 3)
@@ -403,9 +427,9 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-AUTH-001                                  | `packages/core/src/config.test.ts:64` requires production-only config; `apps/web/src/server/config.test.ts:59` registers Google provider                                                                                                                                                                                                               |
 | REQ-AUTH-002                                  | `apps/web/src/server/config.test.ts:41` credential provider gating; `e2e/auth.spec.ts:5`; `e2e/publish.spec.ts` moved-demo reseed idempotency; `e2e/publish.spec.ts:780`; `scripts/smokeImage.ts` production image refusal                                                                                                                             |
 | REQ-AUTH-003                                  | `e2e/auth.spec.ts:5` credential provider signs in a seeded localnet user                                                                                                                                                                                                                                                                               |
-| REQ-AUTH-004                                  | `e2e/cli.spec.ts:227` press CLI loopback login, publish, list, page set, unpublish, and logout                                                                                                                                                                                                                                                         |
+| REQ-AUTH-004                                  | `e2e/cli.spec.ts` loopback login; `apps/web/src/auth/cliDeviceFlow.test.ts` device start/activate/poll; `e2e/cli.spec.ts` compiled `--device` happy path                                                                                                                                                                                               |
 | REQ-AUTH-005                                  | `e2e/cli.spec.ts:227` token logout/revoke; `e2e/publish.spec.ts:161` token lastUsedAt                                                                                                                                                                                                                                                                  |
-| REQ-AUTH-006                                  | `e2e/cli.spec.ts:227` keychain-backed token flow and `PRESS_TOKEN` fallback                                                                                                                                                                                                                                                                            |
+| REQ-AUTH-006                                  | `e2e/cli.spec.ts` keychain-backed token flow and `PRESS_TOKEN` fallback; `packages/cli/src/keychain.test.ts` XDG file-store last resort                                                                                                                                                                                                                |
 | REQ-AUTH-007                                  | `packages/core/src/config.test.ts:22` admin email config; `e2e/publish.spec.ts:270` admin unpublish path                                                                                                                                                                                                                                               |
 | BRIEF Decision (Better Auth rate limiting on) | `e2e/rateLimit.spec.ts:147` credential sign-in is rate limited by endpoint on an isolated server                                                                                                                                                                                                                                                       |
 | REQ-ACL-001                                   | `packages/core/src/acl.test.ts:142` decideAcl read matrix; `e2e/publish.spec.ts:512`, `:589`, `:612`, `:635`, `:666`                                                                                                                                                                                                                                   |
@@ -432,7 +456,7 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 | REQ-IDX-001                                   | `e2e/magazine.spec.ts:30`, `:47`, `:62`; `e2e/smoke.spec.ts:75`; `scripts/smokeImage.ts` image feed shell                                                                                                                                                                                                                                              |
 | REQ-IDX-002                                   | `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:75`                                                                                                                                                                                                                                                                                                      |
 | REQ-IDX-003                                   | `e2e/magazine.spec.ts:47`; `e2e/magazine.spec.ts:77`; `e2e/smoke.spec.ts:238`                                                                                                                                                                                                                                                                          |
-| REQ-CLI-001                                   | `e2e/cli.spec.ts:227` press CLI loopback login, publish, list, page set, unpublish, and logout                                                                                                                                                                                                                                                         |
+| REQ-CLI-001                                   | `e2e/cli.spec.ts` loopback login; `packages/cli/src/index.test.ts` `--device` parse; `e2e/cli.spec.ts` compiled `--device` happy path                                                                                                                                                                                                                  |
 | REQ-CLI-002                                   | `e2e/cli.spec.ts:227` `--json` success/error output and exit codes                                                                                                                                                                                                                                                                                     |
 | REQ-CLI-003                                   | `e2e/cli.spec.ts:227` host-scoped token storage and `PRESS_TOKEN` fallback                                                                                                                                                                                                                                                                             |
 | REQ-CLI-004                                   | `e2e/cli.spec.ts:227` publish URL and one-time password output                                                                                                                                                                                                                                                                                         |

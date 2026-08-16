@@ -7,7 +7,7 @@ import type { PageRedirectMode } from '@press/core'
 import {
   KeychainUnavailableError,
   KeychainWriteError,
-  readKeychainToken,
+  readCliToken,
   removeKeychainToken,
   writeKeychainToken,
 } from './keychain'
@@ -26,6 +26,7 @@ type CliContext = {
 
 type TokenSource =
   | { readonly kind: 'keychain'; readonly token: string }
+  | { readonly kind: 'file'; readonly token: string }
   | { readonly kind: 'env'; readonly token: string }
 
 class CliError extends Error {
@@ -70,8 +71,8 @@ function randomBase64Url(bytes: number): string {
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
 }
 
-async function findKeychainToken(host: string): Promise<string | null> {
-  return await readKeychainToken(host).catch((error: unknown) => {
+async function findStoredToken(host: string): Promise<TokenSource | null> {
+  return await readCliToken(host).catch((error: unknown) => {
     if (error instanceof KeychainUnavailableError) {
       return null
     }
@@ -82,7 +83,7 @@ async function findKeychainToken(host: string): Promise<string | null> {
 async function storeKeychainToken(host: string, token: string): Promise<void> {
   await writeKeychainToken(host, token).catch((error: unknown) => {
     if (error instanceof KeychainUnavailableError) {
-      throw new CliError('macOS keychain unavailable: set PRESS_TOKEN for this host instead')
+      throw new CliError('token store unavailable: set PRESS_TOKEN for this host instead')
     }
     if (error instanceof KeychainWriteError) {
       throw new CliError(error.message)
@@ -96,9 +97,9 @@ async function deleteKeychainToken(host: string): Promise<void> {
 }
 
 async function resolveToken(host: string): Promise<TokenSource | null> {
-  const keychainToken = await findKeychainToken(host)
-  if (keychainToken) {
-    return { kind: 'keychain', token: keychainToken }
+  const stored = await findStoredToken(host)
+  if (stored) {
+    return stored
   }
   const envToken = process.env.PRESS_TOKEN?.trim()
   return envToken ? { kind: 'env', token: envToken } : null
@@ -110,7 +111,7 @@ type WhoamiProbe =
 
 type DoctorReport = {
   readonly host: string
-  readonly tokenSource: 'keychain' | 'env' | 'none'
+  readonly tokenSource: 'keychain' | 'file' | 'env' | 'none'
   readonly authenticated: boolean
   readonly email: string | null
   readonly nextStep: string | null
@@ -122,7 +123,7 @@ type DoctorReport = {
 // and the whoami probe result; this decides the human-facing verdict + guidance.
 export function buildDoctorReport(input: {
   readonly host: string
-  readonly tokenSource: 'keychain' | 'env' | 'none'
+  readonly tokenSource: 'keychain' | 'file' | 'env' | 'none'
   readonly whoami: WhoamiProbe | null
 }): DoctorReport {
   const { host, tokenSource, whoami } = input
@@ -332,8 +333,170 @@ export function createLoopbackCallbackHandler(input: {
   }
 }
 
+export function parseLoginArguments(args: readonly string[]): {
+  readonly device: boolean
+  readonly noOpen: boolean
+} {
+  return {
+    device: hasFlag(args, '--device'),
+    noOpen: hasFlag(args, '--no-open') || process.env.PRESS_NO_BROWSER === '1',
+  }
+}
+
+export function nextDevicePollAction(
+  error: string | undefined,
+  interval: number,
+):
+  | { readonly kind: 'wait'; readonly interval: number }
+  | { readonly kind: 'fail'; readonly message: string } {
+  if (error === 'authorization_pending') {
+    return { kind: 'wait', interval }
+  }
+  if (error === 'slow_down' || error === 'rate limited') {
+    return { kind: 'wait', interval: interval + 5 }
+  }
+  if (error === 'access_denied') {
+    return { kind: 'fail', message: 'login was denied' }
+  }
+  if (error === 'expired_token') {
+    return { kind: 'fail', message: 'login expired' }
+  }
+  return { kind: 'fail', message: error ?? 'login exchange rejected' }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    // Keep the timer referenced: this wait is the only live handle during
+    // device-code polling, and unref() would let the process exit 0 early.
+    setTimeout(resolve, ms)
+  })
+}
+
+type DeviceStartResponse = {
+  readonly device_code?: string
+  readonly user_code?: string
+  readonly verification_uri?: string
+  readonly verification_uri_complete?: string
+  readonly expires_in?: number
+  readonly interval?: number
+}
+
+type DevicePollResult =
+  | {
+      readonly ok: true
+      readonly token: string
+      readonly user: { readonly email?: string; readonly id?: string; readonly role?: string }
+    }
+  | { readonly ok: false; readonly error: string }
+
+async function pollDeviceOnce(
+  ctx: CliContext,
+  deviceCode: string,
+  verifier: string,
+): Promise<DevicePollResult> {
+  const response = await fetch(`${ctx.host}/api/cli/device/poll`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ device_code: deviceCode, verifier }),
+  })
+  const body = (await response.json().catch(() => ({}))) as {
+    readonly token?: string
+    readonly user?: { readonly email?: string; readonly id?: string; readonly role?: string }
+    readonly error?: string
+  }
+  if (response.ok && body.token && body.user) {
+    return { ok: true, token: body.token, user: body.user }
+  }
+  return {
+    ok: false,
+    error: typeof body.error === 'string' ? body.error : `HTTP ${response.status}`,
+  }
+}
+
+async function commandDeviceLogin(ctx: CliContext): Promise<void> {
+  const verifier = randomBase64Url(32)
+  const challenge = sha256Base64Url(verifier)
+  const started = (await apiFetch(ctx, '/api/cli/device/start', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ challenge }),
+  })) as DeviceStartResponse
+  if (
+    !started.device_code ||
+    !started.user_code ||
+    !started.verification_uri ||
+    typeof started.expires_in !== 'number'
+  ) {
+    throw new CliError('device login returned an invalid response')
+  }
+  const deviceCode = started.device_code
+  const publicFields = {
+    status: 'authorization-required',
+    verificationUrl: started.verification_uri,
+    verificationUrlComplete: started.verification_uri_complete ?? started.verification_uri,
+    userCode: started.user_code,
+    expiresIn: started.expires_in,
+    interval: started.interval ?? 5,
+  }
+  if (ctx.json) {
+    console.log(JSON.stringify({ ok: true, data: publicFields }))
+  } else {
+    console.log(`Visit ${started.verification_uri} and enter code ${started.user_code}`)
+    if (started.verification_uri_complete) {
+      console.log(started.verification_uri_complete)
+    }
+  }
+
+  const deadline = Date.now() + started.expires_in * 1000
+  let interval = Math.max(1, started.interval ?? 5)
+  let polls = 0
+  const maxPolls = 256
+  let minted: Extract<DevicePollResult, { readonly ok: true }> | undefined
+  while (!minted && Date.now() < deadline && polls < maxPolls) {
+    // oxlint-disable-next-line no-await-in-loop -- RFC 8628 polling is sequential; each wait honors the server interval.
+    await sleep(interval * 1000)
+    polls += 1
+    // oxlint-disable-next-line no-await-in-loop -- The next poll depends on the previous error (pending vs slow_down).
+    const polled = await pollDeviceOnce(ctx, deviceCode, verifier)
+    if (polled.ok) {
+      minted = polled
+      break
+    }
+    const action = nextDevicePollAction(polled.error, interval)
+    if (action.kind === 'wait') {
+      interval = action.interval
+      continue
+    }
+    throw new CliError(action.message)
+  }
+  if (!minted || !minted.user.email) {
+    throw new CliError(minted ? 'login exchange returned an invalid response' : 'login timed out')
+  }
+  await storeKeychainToken(ctx.host, minted.token)
+  printSuccess(ctx, {
+    message: `logged in as ${minted.user.email}`,
+    user: minted.user,
+    verificationUrl: started.verification_uri,
+    userCode: started.user_code,
+  })
+}
+
+function maybeHintDeviceLogin(): void {
+  if (process.platform !== 'darwin' && !process.env.DISPLAY) {
+    console.error(
+      'no display detected; if this host cannot complete loopback, use press login --device',
+    )
+  }
+}
+
 async function commandLogin(ctx: CliContext, args: readonly string[]): Promise<void> {
-  const noOpen = hasFlag(args, '--no-open') || process.env.PRESS_NO_BROWSER === '1'
+  const parsed = parseLoginArguments(args)
+  if (parsed.device) {
+    await commandDeviceLogin(ctx)
+    return
+  }
+  maybeHintDeviceLogin()
+  const noOpen = parsed.noOpen
   const verifier = randomBase64Url(32)
   const challenge = sha256Base64Url(verifier)
   const state = randomBase64Url(32)
@@ -453,7 +616,7 @@ async function commandLogout(ctx: CliContext): Promise<void> {
     method: 'POST',
     token: source.token,
   })
-  if (source.kind === 'keychain') {
+  if (source.kind === 'keychain' || source.kind === 'file') {
     await deleteKeychainToken(ctx.host)
   }
   printSuccess(ctx, { message: 'logged out' })
@@ -673,7 +836,8 @@ async function run(argv: readonly string[]): Promise<void> {
 if (import.meta.main) {
   void run(Bun.argv.slice(2))
     .then(() => {
-      process.exit(0)
+      // Natural success exit so stdout/stderr flush; process.exit(0) can drop
+      // the final "logged in as" line on a pipe (device login has no finally work).
     })
     .catch((error) => {
       process.exit(printError(Bun.argv.includes('--json'), error))

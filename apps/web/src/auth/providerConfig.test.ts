@@ -14,6 +14,7 @@ const baseConfig: PressConfig = {
   betterAuthSecret: 'localnet-secret-at-least-32-bytes',
   credentialAuthEnabled: true,
   maxUploadBytes: 1024 * 1024,
+  maxMetadataBytes: 1024 * 1024,
 }
 
 describe('auth provider config', () => {

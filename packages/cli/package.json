@@ -1,6 +1,6 @@
 {
   "name": "@press/cli",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "bin": {
     "press": "./src/index.ts"
   },

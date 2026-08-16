@@ -1,6 +1,7 @@
 export const VERSION = '0.0.0'
 
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+const DEFAULT_MAX_METADATA_BYTES = 1024 * 1024
 
 export const PAGE_VISIBILITIES = ['default', 'public', 'password', 'private'] as const
 
@@ -264,6 +265,7 @@ export type PressConfig = {
   readonly betterAuthSecret: string
   readonly credentialAuthEnabled: boolean
   readonly maxUploadBytes: number
+  readonly maxMetadataBytes: number
   readonly googleClientId?: string
   readonly googleClientSecret?: string
 }
@@ -397,6 +399,21 @@ function parseMaxUploadBytes(env: PressEnv): number {
   return value
 }
 
+function parseMaxMetadataBytes(env: PressEnv): number {
+  const raw = readOptional(env, 'PRESS_MAX_METADATA_BYTES')
+  if (!raw) {
+    return DEFAULT_MAX_METADATA_BYTES
+  }
+  if (!/^[1-9]\d*$/.test(raw)) {
+    fail('PRESS_MAX_METADATA_BYTES', 'must be a positive integer byte count')
+  }
+  const value = Number(raw)
+  if (!Number.isSafeInteger(value)) {
+    fail('PRESS_MAX_METADATA_BYTES', 'must be a safe integer byte count')
+  }
+  return value
+}
+
 function parseGoogleConfig(
   env: PressEnv,
   nodeEnv: string,
@@ -438,6 +455,7 @@ export function parseConfig(env: PressEnv): PressConfig {
     betterAuthSecret: readRequired(env, 'BETTER_AUTH_SECRET'),
     credentialAuthEnabled: parseCredentialAuth(env, nodeEnv),
     maxUploadBytes: parseMaxUploadBytes(env),
+    maxMetadataBytes: parseMaxMetadataBytes(env),
   }
 
   return {

@@ -1,4 +1,6 @@
-import { readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { dirname, join } from 'node:path'
 
 import { dlopen, FFIType as T, ptr, read, toArrayBuffer, type Pointer } from 'bun:ffi'
 
@@ -59,11 +61,16 @@ function readFileState(file: string): FileState {
 
 function fileBackend(file: string): Backend {
   const key = (service: string): string => `${service}:${account}`
+  const persist = (state: FileState): void => {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
+    writeFileSync(file, JSON.stringify(state), { mode: 0o600 })
+    chmodSync(file, 0o600)
+  }
   return {
     store(service, token) {
       const state = readFileState(file)
       state[key(service)] = token
-      writeFileSync(file, JSON.stringify(state), { mode: 0o600 })
+      persist(state)
     },
     find(service) {
       const value = readFileState(file)[key(service)]
@@ -72,9 +79,38 @@ function fileBackend(file: string): Backend {
     remove(service) {
       const state = readFileState(file)
       delete state[key(service)]
-      writeFileSync(file, JSON.stringify(state), { mode: 0o600 })
+      persist(state)
     },
   }
+}
+
+export function resolveFileTokenPath(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir(),
+): string {
+  const xdg = env.XDG_CONFIG_HOME?.trim()
+  const base = xdg ? xdg : join(home, '.config')
+  return join(base, 'press', 'tokens.json')
+}
+
+export function chooseTokenStore(input: {
+  readonly platform: string
+  readonly testBuild: boolean
+  readonly testSeam?: string
+  readonly keychainAvailable: boolean
+}): 'seam' | 'keychain' | 'file' {
+  if (input.testBuild && input.testSeam) {
+    return 'seam'
+  }
+  if (input.platform === 'darwin' && input.keychainAvailable) {
+    return 'keychain'
+  }
+  return 'file'
+}
+
+export type StoredCliToken = {
+  readonly kind: 'keychain' | 'file'
+  readonly token: string
 }
 
 // ---- FFI backend: macOS Keychain Services (Security.framework + CoreFoundation) -----------------
@@ -302,16 +338,12 @@ function testBuildKeychainSeamEnabled(): boolean {
   return !process.env.PRESS_TEST_BUILD || process.env.PRESS_TEST_BUILD !== '0'
 }
 
-// Resolve the active backend: the file seam wins when PRESS_E2E_KEYCHAIN_FILE is set (test builds only),
-// else the macOS FFI backend, else nothing (non-mac / load failure) -> callers fall back to PRESS_TOKEN.
-function backend(): Backend {
-  const file = testBuildKeychainSeamEnabled() ? process.env.PRESS_E2E_KEYCHAIN_FILE : undefined
-  if (file) {
-    return fileBackend(file)
-  }
-  if (process.platform !== 'darwin') {
-    throw new KeychainUnavailableError()
-  }
+type SelectedStore = {
+  readonly backend: Backend
+  readonly reportAs: 'keychain' | 'file'
+}
+
+function loadFfiBackend(): Backend {
   if (ffiBackend === undefined) {
     try {
       ffiBackend = createFfiBackend()
@@ -330,8 +362,44 @@ function backend(): Backend {
   return ffiBackend
 }
 
+// Resolve the active backend: the file seam wins when PRESS_E2E_KEYCHAIN_FILE is
+// set (test builds only), else the macOS FFI backend, else the last-resort 0600
+// XDG file store. The seam reports as keychain so hermetic tests stay a stand-in
+// for the OS store (F-16).
+function selectStore(): SelectedStore {
+  const testBuild = testBuildKeychainSeamEnabled()
+  const seam = testBuild ? process.env.PRESS_E2E_KEYCHAIN_FILE : undefined
+  const choice = chooseTokenStore({
+    platform: process.platform,
+    testBuild,
+    ...(seam ? { testSeam: seam } : {}),
+    keychainAvailable: process.platform === 'darwin',
+  })
+  if (choice === 'seam' && seam) {
+    return { backend: fileBackend(seam), reportAs: 'keychain' }
+  }
+  if (choice === 'keychain') {
+    try {
+      return { backend: loadFfiBackend(), reportAs: 'keychain' }
+    } catch {
+      return { backend: fileBackend(resolveFileTokenPath()), reportAs: 'file' }
+    }
+  }
+  return { backend: fileBackend(resolveFileTokenPath()), reportAs: 'file' }
+}
+
+function backend(): Backend {
+  return selectStore().backend
+}
+
+export async function readCliToken(host: string): Promise<StoredCliToken | null> {
+  const store = selectStore()
+  const token = store.backend.find(serviceName(host))
+  return token ? { kind: store.reportAs, token } : null
+}
+
 export async function readKeychainToken(host: string): Promise<string | null> {
-  return backend().find(serviceName(host))
+  return (await readCliToken(host))?.token ?? null
 }
 
 // Store the token, then read it back and assert it round-trips. `security -w`/misconfigured stores

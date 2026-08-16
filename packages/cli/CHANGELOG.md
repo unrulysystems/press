@@ -1,5 +1,21 @@
 # @press/cli
 
+## 0.5.0
+
+### Minor Changes
+
+- Add `press login --device`, an RFC 8628-shaped second front door for
+  headless/remote CLIs (user code + `/cli/activate` consent, PKCE poll).
+  Loopback remains the default. Tokens persist via macOS Keychain, then a
+  last-resort 0600 XDG file store (`$XDG_CONFIG_HOME/press/tokens.json`),
+  then `PRESS_TOKEN`. The minted token is never printed.
+- Audit follow-up on the same release: banned sessions no longer read
+  protected pages; `/p/` opens blobs with `O_NOFOLLOW` (documented ABA-swap
+  residual); device activate GETs share the per-user rate budget; expired
+  `cli:*` verification rows are swept (additive index `0003`); move/patch
+  JSON is capped by `PRESS_MAX_METADATA_BYTES`. Operators must apply
+  migration `0003` (`verification_expires_at_idx`) on existing instances.
+
 ## 0.4.0
 
 ### Minor Changes

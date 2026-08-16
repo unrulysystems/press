@@ -35,6 +35,7 @@ def _localnet_env():
         "BETTER_AUTH_SECRET": os.getenv("BETTER_AUTH_SECRET", "localnet-secret-at-least-32-bytes"),
         "PRESS_ENABLE_CREDENTIAL_AUTH": os.getenv("PRESS_ENABLE_CREDENTIAL_AUTH", "1"),
         "PRESS_MAX_UPLOAD_BYTES": os.getenv("PRESS_MAX_UPLOAD_BYTES", "26214400"),
+        "PRESS_MAX_METADATA_BYTES": os.getenv("PRESS_MAX_METADATA_BYTES", "1048576"),
     }
 
 

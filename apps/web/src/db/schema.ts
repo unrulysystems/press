@@ -107,7 +107,10 @@ export const verification = pgTable(
     createdAt: timestamp('createdAt', { mode: 'date' }).notNull().defaultNow(),
     updatedAt: timestamp('updatedAt', { mode: 'date' }).notNull().defaultNow(),
   },
-  (table) => [index('verification_identifier_idx').on(table.identifier)],
+  (table) => [
+    index('verification_identifier_idx').on(table.identifier),
+    index('verification_expires_at_idx').on(table.expiresAt),
+  ],
 )
 
 export const apiToken = pgTable(
