@@ -1,6 +1,7 @@
-import { constants } from 'node:fs'
+import { closeSync, constants, createReadStream, fstatSync, open as openFile } from 'node:fs'
 import { mkdir, open, rename, rm, stat, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { Readable } from 'node:stream'
 
 import type { CollectionSlug, FileSlug } from '@press/core'
 
@@ -67,6 +68,116 @@ export function pageBlobPath(
   fileSlug: FileSlug,
 ): string {
   return blobPath(storageDir, collectionSlug, fileSlug)
+}
+
+// Open a served blob for reading, rejecting symlinks at the collection-directory
+// and blob components (F-22) — the two components a local writer with
+// PRESS_STORAGE_DIR access can tamper with. The storage dir itself and its
+// ancestors are operator configuration, not this check's threat surface.
+export async function openPageBlobForRead(
+  storageDir: string,
+  collectionSlug: CollectionSlug,
+  fileSlug: FileSlug,
+): Promise<ReadableStream<Uint8Array>> {
+  const collectionDir = join(storageDir, collectionSlug)
+  const path = join(collectionDir, fileSlug)
+
+  // O_NOFOLLOW rejects a symlink at this component; O_DIRECTORY rejects a
+  // non-directory. Open (not lstat) so a symlink fails the open itself rather than
+  // a separate check an attacker can race.
+  const dirHandle = await open(
+    collectionDir,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  ).catch((error: unknown) => {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      throw new Error(`stored page blob missing for ${collectionSlug}/${fileSlug}`, {
+        cause: error,
+      })
+    }
+    if (
+      error instanceof Error &&
+      'code' in error &&
+      (error.code === 'ELOOP' || error.code === 'ENOTDIR')
+    ) {
+      throw new Error(`stored page collection is not a real directory for ${collectionSlug}`)
+    }
+    throw error
+  })
+
+  let fd: number | undefined
+  let dirOpen = true
+  const closeDir = async (): Promise<void> => {
+    if (dirOpen) {
+      dirOpen = false
+      await dirHandle.close()
+    }
+  }
+  try {
+    const dirStat = await dirHandle.stat()
+
+    // Open the blob (final component) with O_NOFOLLOW | O_NONBLOCK via the callback
+    // API for a raw descriptor owned by the stream's autoClose (no FileHandle GC
+    // finalizer). O_NONBLOCK is load-bearing: a FIFO at this path would otherwise
+    // block the open until a writer connects, before the non-regular-node check below
+    // could ever run. O_NONBLOCK has no effect on regular-file reads.
+    fd = await new Promise<number>((resolve, reject) => {
+      openFile(
+        path,
+        constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW,
+        (error, descriptor) => {
+          if (error) {
+            reject(error)
+          } else {
+            resolve(descriptor)
+          }
+        },
+      )
+    }).catch((error: unknown) => {
+      if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+        throw new Error(`stored page blob missing for ${collectionSlug}/${fileSlug}`, {
+          cause: error,
+        })
+      }
+      if (error instanceof Error && 'code' in error && error.code === 'ELOOP') {
+        throw new Error(`stored page blob is not a regular file for ${collectionSlug}/${fileSlug}`)
+      }
+      throw error
+    })
+    const fileStat = fstatSync(fd)
+    // Reject non-regular nodes (FIFO, device, socket): O_NOFOLLOW only rejects
+    // symlinks, so a named pipe could otherwise become the served stream and block.
+    if (!fileStat.isFile()) {
+      throw new Error(`stored page blob is not a regular file for ${collectionSlug}/${fileSlug}`)
+    }
+
+    // Verify the collection directory was not swapped to a symlink between the dir
+    // open and the blob open: stat() re-resolves the path (following any swap), so an
+    // inode/device mismatch with the directory handle we opened means a race lost.
+    // The blob itself is guarded by O_NOFOLLOW at open time; a concurrent republish
+    // (rename over the blob) legitimately replaces it and must not read as tampering.
+    //
+    // Determinism / security waiver: an ABA swap — rename the genuine collection dir
+    // aside, install a symlink to an external dir for the blob open, then restore the
+    // genuine dir before this stat — passes the inode comparison while the descriptor
+    // serves the external file. Closing it requires openat2(RESOLVE_NO_SYMLINKS), which
+    // Node does not expose; this is a permanent exemption (removed by a native addon or
+    // a storage layout that never shares the path namespace with untrusted writers).
+    const parentStat = await stat(collectionDir)
+    if (parentStat.ino !== dirStat.ino || parentStat.dev !== dirStat.dev) {
+      throw new Error(`stored page collection changed while reading ${collectionSlug}/${fileSlug}`)
+    }
+
+    await closeDir()
+    return Readable.toWeb(
+      createReadStream(path, { fd, autoClose: true }),
+    ) as unknown as ReadableStream<Uint8Array>
+  } catch (error) {
+    if (fd !== undefined) {
+      closeSync(fd)
+    }
+    await closeDir()
+    throw error
+  }
 }
 
 export async function writeTempBlob(

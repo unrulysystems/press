@@ -78,7 +78,8 @@ One container image (`ghcr.io/unrulysystems/press`, published by the release
 workflow on `v*` tags) plus Postgres. An instance is configured entirely by
 env: identity-provider client, allowed email domains, hostname, storage
 (`PRESS_BASE_URL`, `PRESS_ALLOWED_DOMAINS`, `PRESS_ADMIN_EMAILS`,
-`BETTER_AUTH_SECRET`, OAuth client credentials, `PRESS_MAX_UPLOAD_BYTES`).
+`BETTER_AUTH_SECRET`, OAuth client credentials, `PRESS_MAX_UPLOAD_BYTES`,
+`PRESS_MAX_METADATA_BYTES`).
 Instance manifests and registry mirroring are operator-managed outside this
 repo. See `docs/ops.md` for backup/restore and archive purge.
 

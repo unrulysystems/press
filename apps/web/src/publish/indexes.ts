@@ -2,13 +2,12 @@ import { decideAcl, parseCollectionSlug } from '@press/core'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 
 import { auth } from '../auth/server'
-import { roleForEmail } from '../auth/role'
+import { authenticatedViewerForSession } from '../auth/sessionViewer'
 import { db, dbConfig } from '../db/client'
 import { collection, page, user } from '../db/schema'
 
 import type {
   AclViewer,
-  AuthenticatedViewer,
   CollectionAcl,
   CollectionDefaultVisibility,
   CollectionSlug,
@@ -53,15 +52,6 @@ export type MagazineCollection = {
   readonly entries: readonly MagazineEntry[]
 }
 
-function authenticatedViewer(row: Pick<UserRow, 'id' | 'email' | 'role'>): AuthenticatedViewer {
-  return {
-    kind: 'authenticated',
-    userId: row.id,
-    email: row.email,
-    role: row.role,
-  }
-}
-
 function magazineViewer(viewer: AclViewer): MagazineViewer {
   if (viewer.kind === 'anonymous') {
     return { authenticated: false }
@@ -83,11 +73,7 @@ async function viewerForRequest(request: Request | undefined): Promise<AclViewer
     where: eq(user.id, session.user.id),
   })
   return dbUser
-    ? authenticatedViewer({
-        id: dbUser.id,
-        email: dbUser.email,
-        role: roleForEmail(dbUser.email, dbConfig.adminEmails),
-      })
+    ? (authenticatedViewerForSession(dbUser, dbConfig.adminEmails) ?? { kind: 'anonymous' })
     : { kind: 'anonymous' }
 }
 

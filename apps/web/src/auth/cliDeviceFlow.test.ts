@@ -9,6 +9,7 @@ import type {
   CliDeviceStartDependencies,
   VerificationInsert,
 } from './cliDeviceFlow'
+import { nextRateLimitState } from './rateLimit'
 
 type DeviceFlowModule = typeof import('./cliDeviceFlow')
 
@@ -211,15 +212,15 @@ function grantFromMemory(memory: Memory): CliDeviceGrant {
 
 describe('nextRateLimitState', () => {
   test('increments inside the window and resets after it', () => {
-    expect(deviceFlow.nextRateLimitState(null, 1000, 60_000)).toEqual({
+    expect(nextRateLimitState(null, 1000, 60_000)).toEqual({
       count: 1,
       windowStart: 1000,
     })
-    expect(deviceFlow.nextRateLimitState({ count: 3, windowStart: 1000 }, 2000, 60_000)).toEqual({
+    expect(nextRateLimitState({ count: 3, windowStart: 1000 }, 2000, 60_000)).toEqual({
       count: 4,
       windowStart: 1000,
     })
-    expect(deviceFlow.nextRateLimitState({ count: 3, windowStart: 1000 }, 61_000, 60_000)).toEqual({
+    expect(nextRateLimitState({ count: 3, windowStart: 1000 }, 61_000, 60_000)).toEqual({
       count: 1,
       windowStart: 61_000,
     })
@@ -427,6 +428,14 @@ describe('activateCliDeviceRequest', () => {
     expect(html).not.toContain('press_minted-token')
     expect(grantFromMemory(memory).userId).toBeNull()
     expect(memory.minted).toEqual([])
+  })
+
+  test('GET is rate-limited so it cannot mint unbounded consent rows (F-32)', async () => {
+    const memory = createMemory()
+    memory.activateAllowed = false
+    const response = await deviceFlow.activateCliDeviceRequest(activateGet(), activateDeps(memory))
+    expect(response.status).toBe(429)
+    expect(memory.rows.size).toBe(0)
   })
 
   test('rejects impersonated sessions on GET and POST', async () => {

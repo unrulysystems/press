@@ -310,7 +310,8 @@ frame-ancestors 'none'`) rather than the report sandbox of REQ-SRV-002 — that 
   `PRESS_BASE_URL`, `PRESS_ALLOWED_DOMAINS` (csv, ≥1 in prod),
   `PRESS_ADMIN_EMAILS` (csv), `DATABASE_URL`, `PRESS_STORAGE_DIR`,
   `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` (prod),
-  `PRESS_ENABLE_CREDENTIAL_AUTH` (localnet only), `PRESS_MAX_UPLOAD_BYTES`.
+  `PRESS_ENABLE_CREDENTIAL_AUTH` (localnet only), `PRESS_MAX_UPLOAD_BYTES`,
+  `PRESS_MAX_METADATA_BYTES`.
 - **REQ-CFG-002** Config is validated at boot; missing/invalid required values
   abort startup with a descriptive error (fail loudly).
 

@@ -15,6 +15,7 @@ import { drizzle } from 'drizzle-orm/node-postgres'
 import { verifyApiToken } from '../auth/apiTokens'
 import { db, dbConfig, pool } from '../db/client'
 import { auditEvent, collection, page, pageRedirect, schema } from '../db/schema'
+import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
 import { MIN_PAGE_PASSWORD_LENGTH, hashPagePassword, isStrongPagePassword } from './passwords'
 import { withPagePathLocks } from './pagePathLocks'
 import { moveResponseBody, publishResponseBody } from './responseShape'
@@ -61,10 +62,35 @@ function errorResponse(error: unknown): Response {
   if (error instanceof HttpError) {
     return json({ error: error.message }, error.status)
   }
+  if (error instanceof BodyTooLargeError) {
+    return json({ error: error.message }, error.status)
+  }
   if (error instanceof SlugValidationError) {
     return json({ error: error.message }, 400)
   }
   return json({ error: 'internal server error' }, 500)
+}
+
+// Mutation JSON bodies (move / page patch / collection patch) read through the
+// bounded reader (F-34): a caller holding a token must not be able to make the server
+// buffer an unbounded body, unlike the anonymous endpoints which already cap (M-3).
+// The bound is the dedicated PRESS_MAX_METADATA_BYTES config (REQ-CFG-001), independent
+// of PRESS_MAX_UPLOAD_BYTES which scopes the HTML publish body.
+export async function readMutationJson(
+  request: Request,
+  byteLimit: number = dbConfig.maxMetadataBytes,
+): Promise<Record<string, unknown>> {
+  const text = await readCappedBodyText(request, byteLimit)
+  let body: unknown
+  try {
+    body = JSON.parse(text)
+  } catch {
+    throw new HttpError(400, 'request body must be JSON')
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new HttpError(400, 'request body must be a JSON object')
+  }
+  return body as Record<string, unknown>
 }
 
 function viewerFromToken(user: {
@@ -675,13 +701,7 @@ type MoveDestination = {
 }
 
 async function readMoveDestination(request: Request): Promise<MoveDestination> {
-  const body = await request.json().catch(() => {
-    throw new HttpError(400, 'request body must be JSON')
-  })
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object')
-  }
-  const input = body as Record<string, unknown>
+  const input = await readMutationJson(request)
   if (typeof input.collection !== 'string' || typeof input.file !== 'string') {
     throw new HttpError(400, 'collection and file must be strings')
   }
@@ -947,14 +967,7 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
 
 async function patchPage(request: Request, route: PageRoute): Promise<Response> {
   const { viewer } = await authenticatedViewer(request)
-  const body = await request.json().catch(() => {
-    throw new HttpError(400, 'request body must be JSON')
-  })
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object')
-  }
-
-  const input = body as Record<string, unknown>
+  const input = await readMutationJson(request)
   const visibility = parseOptionalVisibilityPatch(input.visibility)
   const allowlist = input.allowlist === undefined ? undefined : parseAllowlistArray(input.allowlist)
   const title = parseOptionalString(input.title, 'title')
@@ -1251,13 +1264,7 @@ async function patchCollection(
   collectionSlug: CollectionSlug,
 ): Promise<Response> {
   const { viewer } = await authenticatedViewer(request)
-  const body = await request.json().catch(() => {
-    throw new HttpError(400, 'request body must be JSON')
-  })
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object')
-  }
-  const input = body as Record<string, unknown>
+  const input = await readMutationJson(request)
   const defaultVisibility = parseOptionalCollectionDefaultVisibilityPatch(input.defaultVisibility)
   if (defaultVisibility === null) {
     throw new HttpError(400, 'defaultVisibility cannot be null')

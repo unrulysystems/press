@@ -7,6 +7,7 @@ import { apiToken, auditEvent, user, verification } from '../db/schema'
 import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
 import { auth } from './server'
 import { mintApiTokenForUser, verifyApiToken } from './apiTokens'
+import { sweepExpiredCliVerificationRowsBestEffort } from './verificationCleanup'
 
 class HttpError extends Error {
   constructor(
@@ -434,6 +435,8 @@ export async function approveCliRequest(
 
 export async function cliAuthorizeEndpoint(request: Request): Promise<Response> {
   try {
+    // F-33: sweep stale cli:* rows before creating a new loopback pending row.
+    await sweepExpiredCliVerificationRowsBestEffort(db)
     return await authorizeCliRequest(request, {
       baseUrl: dbConfig.baseUrl,
       // The admin plugin used to type session.impersonatedBy; the column is still

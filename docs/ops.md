@@ -29,7 +29,8 @@ needed for a normal boot:
 - `PRESS_STORAGE_DIR` pointing at the blob directory to restore.
 - `PRESS_BASE_URL`, `PRESS_ALLOWED_DOMAINS`, `PRESS_ADMIN_EMAILS`,
   `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
-  `PRESS_MAX_UPLOAD_BYTES`, and any deployment-specific server config required
+  `PRESS_MAX_UPLOAD_BYTES`, `PRESS_MAX_METADATA_BYTES`, and any
+  deployment-specific server config required
   by `press` boot validation.
 - The same `press` build or image version that produced the backup. Upgrade as
   a separate migration after the restore is verified.

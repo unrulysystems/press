@@ -1785,3 +1785,85 @@ test('concurrent first publishes to a brand-new collection never 500 (M-1)', asy
     expect(await findCollection(db, collectionSlug)).toBeDefined()
   }
 })
+
+test('banned user session cannot read protected pages (F-29)', async ({ baseURL }) => {
+  // The bearer-token path already rejects bans (verifyApiToken); the session path
+  // must match. secondUser (send.it) may read the seeded default page while
+  // unbanned and must be denied once banned, even though the session is still live.
+  const session = await signIn(baseURL, 'secondUser')
+  const pagePath = '/p/systems-review/latency-budget-audit.html'
+
+  // Snapshot the full prior ban state so cleanup restores it exactly (the seed does
+  // not reset these fields, and an interrupted earlier run must not poison later
+  // runs nor have its fixture state clobbered).
+  const prior = await pool.query(
+    'select "banned", "banReason", "banExpires" from "user" where email = $1',
+    [localnetUsers.secondUser.email],
+  )
+  const priorRow = prior.rows[0]
+  try {
+    // Establish the unbanned precondition before asserting the read.
+    await pool.query(
+      'update "user" set "banned" = false, "banReason" = null, "banExpires" = null where email = $1',
+      [localnetUsers.secondUser.email],
+    )
+    const before = await session.get(pagePath)
+    expect(before.status(), 'unbanned secondUser may read a default page').toBe(200)
+
+    await pool.query(
+      'update "user" set "banned" = true, "banReason" = $1, "banExpires" = null where email = $2',
+      ['e2e-ban-session-test', localnetUsers.secondUser.email],
+    )
+    const after = await session.get(pagePath)
+    expect(after.status(), 'banned session must not read a default page').toBe(401)
+  } finally {
+    await pool.query(
+      'update "user" set "banned" = $1, "banReason" = $2, "banExpires" = $3 where email = $4',
+      [priorRow.banned, priorRow.banReason, priorRow.banExpires, localnetUsers.secondUser.email],
+    )
+  }
+})
+
+test('expired device-flow rows are swept by auth entry points (F-33)', async ({ baseURL }) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const identifier = 'cli:device:consent:sweep-test'
+  await pool.query(
+    `insert into "verification" (id, identifier, value, "expiresAt", "createdAt", "updatedAt")
+     values ($1, $2, $3, now() - interval '1 day', now(), now())
+     on conflict (id) do update set "expiresAt" = excluded."expiresAt"`,
+    ['sweep-test-row', identifier, JSON.stringify({ kind: 'cli-device-consent', userId: 'x' })],
+  )
+
+  // Invoke a real auth-flow entry point (device start) rather than the sweep helper,
+  // so this floor fails if the endpoints ever stop invoking cleanup.
+  const start = await api.post('/api/cli/device/start', {
+    headers: { 'content-type': 'application/json' },
+    data: { challenge: 'a'.repeat(32) },
+  })
+  expect(start.status(), await start.text()).toBe(200)
+
+  const remaining = await pool.query('select 1 from "verification" where identifier = $1', [
+    identifier,
+  ])
+  expect(remaining.rows.length, 'the device-start endpoint should have swept the expired row').toBe(
+    0,
+  )
+})
+
+test('mutation endpoints reject oversized JSON bodies (F-34)', async ({ baseURL }) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-mut-body-limit`
+  const fileSlug = 'index.html'
+
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Body</title>',
+  })
+  expect(publish.status(), await publish.text()).toBe(200)
+
+  const oversized = await api.patch(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { title: 'x'.repeat(2 * 1024 * 1024) },
+  })
+  expect(oversized.status(), await oversized.text()).toBe(413)
+})

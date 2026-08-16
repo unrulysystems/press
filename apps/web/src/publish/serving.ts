@@ -1,16 +1,12 @@
-import { createReadStream } from 'node:fs'
-import { stat } from 'node:fs/promises'
-import { Readable } from 'node:stream'
-
 import { decideAcl, parseCollectionSlug, parseFileSlug } from '@press/core'
 import { and, eq, isNull } from 'drizzle-orm'
 
+import { authenticatedViewerForSession } from '../auth/sessionViewer'
 import { auth } from '../auth/server'
 import { db, dbConfig } from '../db/client'
 import { collection, page, pageRedirect, user } from '../db/schema'
 import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
-import { roleForEmail } from '../auth/role'
-import { pageBlobPath } from './storage'
+import { openPageBlobForRead } from './storage'
 import {
   acceptsHtml,
   deniedAclResponse,
@@ -29,7 +25,6 @@ import { verifyPagePassword } from './passwords'
 
 import type {
   AclViewer,
-  AuthenticatedViewer,
   BasicPasswordVerification,
   CollectionAcl,
   CollectionDefaultVisibility,
@@ -123,17 +118,6 @@ function parseServedPath(request: Request): ServedRoute | null {
   }
 }
 
-function authenticatedViewer(
-  row: Pick<InferSelectModel<typeof user>, 'id' | 'email' | 'role'>,
-): AuthenticatedViewer {
-  return {
-    kind: 'authenticated',
-    userId: row.id,
-    email: row.email,
-    role: row.role,
-  }
-}
-
 function pageAcl(row: PageRow): PageAcl {
   return {
     collectionSlug: row.collectionSlug,
@@ -178,17 +162,17 @@ function parseBasicPassword(request: Request): string | null {
 
 async function verifyBasicPassword(
   request: Request,
-  passwordHash: string | null,
+  row: PageRow,
 ): Promise<BasicPasswordVerification | undefined> {
   if (!hasBasicAuthorization(request)) {
     return undefined
   }
   const password = parseBasicPassword(request)
-  if (!password || !passwordHash) {
+  if (!password || !row.passwordHash) {
     return { verified: false }
   }
   try {
-    return { verified: await verifyPagePassword(password, passwordHash) }
+    return { verified: await verifyPagePassword(password, row.passwordHash) }
   } catch {
     return { verified: false }
   }
@@ -213,7 +197,8 @@ async function resolvePagePasswordChannel(
   ) {
     return { verified: true }
   }
-  return await verifyBasicPassword(request, row.passwordHash)
+  // A valid unlock cookie never runs Argon2; the Basic channel verifies the password.
+  return await verifyBasicPassword(request, row)
 }
 
 async function viewerForRequest(request: Request, row: PageRow): Promise<AclViewer> {
@@ -224,15 +209,11 @@ async function viewerForRequest(request: Request, row: PageRow): Promise<AclView
     const dbUser = await db.query.user.findFirst({
       where: eq(user.id, session.user.id),
     })
-    if (dbUser) {
-      return viewerFromChannels({
-        authenticated: authenticatedViewer({
-          id: dbUser.id,
-          email: dbUser.email,
-          role: roleForEmail(dbUser.email, dbConfig.adminEmails),
-        }),
-        basicPassword,
-      })
+    const authenticated = dbUser
+      ? authenticatedViewerForSession(dbUser, dbConfig.adminEmails)
+      : null
+    if (authenticated) {
+      return viewerFromChannels({ authenticated, basicPassword })
     }
   }
 
@@ -277,16 +258,7 @@ async function servedPageEndpointUnchecked(request: Request): Promise<Response> 
 
   const storedCollectionSlug = parseCollectionSlug(row.page.collectionSlug)
   const storedFileSlug = parseFileSlug(row.page.fileSlug)
-  const path = pageBlobPath(dbConfig.storageDir, storedCollectionSlug, storedFileSlug)
-  await stat(path).catch((error) => {
-    throw new Error(
-      `stored page blob missing for ${row.page.collectionSlug}/${row.page.fileSlug}`,
-      {
-        cause: error,
-      },
-    )
-  })
-  const body = Readable.toWeb(createReadStream(path)) as unknown as ReadableStream<Uint8Array>
+  const body = await openPageBlobForRead(dbConfig.storageDir, storedCollectionSlug, storedFileSlug)
 
   return servedPageResponse(body)
 }

@@ -1,11 +1,13 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 
 import { db, dbConfig } from '../db/client'
 import { user, verification } from '../db/schema'
 import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
 import { mintApiTokenForUser } from './apiTokens'
+import { consumeRateLimit } from './rateLimit'
+import { sweepExpiredCliVerificationRowsBestEffort } from './verificationCleanup'
 import { auth } from './server'
 
 class HttpError extends Error {
@@ -698,6 +700,12 @@ export async function activateCliDeviceRequest(
     if (request.method === 'GET') {
       const url = new URL(request.url)
       const prefilled = url.searchParams.get('user_code') ?? ''
+      // F-32: the GET renders a fresh consent row, so it shares the activate
+      // budget with the POST — an authenticated user must not be able to grow
+      // the verification table without bound by re-rendering the page.
+      if (!(await dependencies.consumeActivateLimit(session.user.id))) {
+        throw new HttpError(429, 'rate limited')
+      }
       return await issueActivatePage(dependencies, session, prefilled)
     }
 
@@ -770,78 +778,6 @@ export async function activateCliDeviceRequest(
   }
 }
 
-export type RateLimitState = {
-  readonly count: number
-  readonly windowStart: number
-}
-
-function parseRateLimitState(value: string): RateLimitState | null {
-  try {
-    const parsed = JSON.parse(value) as unknown
-    if (!parsed || typeof parsed !== 'object') {
-      return null
-    }
-    const record = parsed as Partial<RateLimitState>
-    if (typeof record.count !== 'number' || typeof record.windowStart !== 'number') {
-      return null
-    }
-    return { count: record.count, windowStart: record.windowStart }
-  } catch {
-    return null
-  }
-}
-
-export function nextRateLimitState(
-  existing: RateLimitState | null,
-  now: number,
-  windowMs: number,
-): RateLimitState {
-  if (existing && now - existing.windowStart < windowMs) {
-    return { count: existing.count + 1, windowStart: existing.windowStart }
-  }
-  return { count: 1, windowStart: now }
-}
-
-async function consumeLimit(input: {
-  readonly identifier: string
-  readonly max: number
-  readonly windowMs: number
-  readonly now: number
-}): Promise<boolean> {
-  return await db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${input.identifier}))`)
-    const existing = await tx
-      .select()
-      .from(verification)
-      .where(eq(verification.identifier, input.identifier))
-    const row = existing[0]
-    const state = nextRateLimitState(
-      row ? parseRateLimitState(row.value) : null,
-      input.now,
-      input.windowMs,
-    )
-    const expiresAt = new Date(state.windowStart + input.windowMs)
-    if (row) {
-      await tx
-        .update(verification)
-        .set({
-          value: JSON.stringify(state),
-          expiresAt,
-          updatedAt: new Date(input.now),
-        })
-        .where(eq(verification.identifier, input.identifier))
-    } else {
-      await tx.insert(verification).values({
-        id: randomUUID(),
-        identifier: input.identifier,
-        value: JSON.stringify(state),
-        expiresAt,
-      })
-    }
-    return state.count <= input.max
-  })
-}
-
 async function insertVerificationRow(row: VerificationInsert): Promise<void> {
   await db.insert(verification).values(row)
 }
@@ -910,10 +846,12 @@ async function hasVerificationIdentifier(identifier: string): Promise<boolean> {
 }
 
 export async function cliDeviceStartEndpoint(request: Request): Promise<Response> {
+  // F-33: sweep stale cli:* rows before creating new device-flow rows.
+  await sweepExpiredCliVerificationRowsBestEffort(db)
   return await startCliDeviceRequest(request, {
     baseUrl: dbConfig.baseUrl,
     consumeStartLimit: async (key) =>
-      consumeLimit({
+      consumeRateLimit(db, {
         identifier: startLimitIdentifier(key),
         max: START_LIMIT_MAX,
         windowMs: START_LIMIT_WINDOW_MS,
@@ -953,12 +891,14 @@ export async function cliDevicePollEndpoint(request: Request): Promise<Response>
 }
 
 export async function cliDeviceActivateEndpoint(request: Request): Promise<Response> {
+  // F-33: sweep stale cli:* rows before the GET/POST can create a new consent row.
+  await sweepExpiredCliVerificationRowsBestEffort(db)
   return await activateCliDeviceRequest(request, {
     baseUrl: dbConfig.baseUrl,
     getSession: async (headers) =>
       (await auth.api.getSession({ headers })) as CliAuthorizeSession | null,
     consumeActivateLimit: async (userId) =>
-      consumeLimit({
+      consumeRateLimit(db, {
         identifier: activateLimitIdentifier(userId),
         max: ACTIVATE_LIMIT_MAX,
         windowMs: ACTIVATE_LIMIT_WINDOW_MS,
