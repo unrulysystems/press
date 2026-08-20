@@ -136,7 +136,7 @@ describe('CLI release contract', () => {
     for (const actionRef of actionRefs) {
       expect(actionRef).toMatch(/^[^@]+@[0-9a-f]{40}$/)
     }
-    expect(workflow).toContain("bun-version: '1.3.13'")
+    expect(workflow).toContain("bun-version: '1.4.0'")
     expect(workflow).toContain("nub-version: '0.4.11'")
     expect(workflow).toContain('release_core="${version%%+*}"')
     expect(workflow).toContain('if [[ "$release_core" == *-* ]]; then')
