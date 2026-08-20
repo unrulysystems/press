@@ -1,3 +1,15 @@
+# -*- mode: Python -*-
+# janitor drains a serve_cmd process group when Tilt dies ungracefully; without
+# it the dev server reparents to init and keeps holding its silo-allocated port.
+v1alpha1.extension_repo(
+    name="janitor",
+    url="https://github.com/alleneubank/janitor",
+    ref="v0.3.0",
+)
+v1alpha1.extension(name="janitor", repo_name="janitor", repo_path="tilt/janitor")
+load("ext://janitor", "janitor_local_resource")
+
+
 def _required_env(name):
     value = os.getenv(name)
     if value == None or str(value).strip() == "":
@@ -91,7 +103,7 @@ def press_localnet():
             labels=["press"],
         )
 
-    local_resource(
+    janitor_local_resource(
         "web",
         serve_cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web ' + (
             "serve:prod" if serve_mode == "prod" else "dev"
