@@ -9,7 +9,7 @@ metadata:
   name: press-daily
   namespace: press
 spec:
-  schedule: "0 0 2 * * *"
+  schedule: '0 0 2 * * *'
   backupOwnerReference: self
   cluster:
     name: press-db

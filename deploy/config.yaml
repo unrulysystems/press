@@ -25,7 +25,7 @@ data:
   PRESS_STORAGE_DIR: /data/storage
 
   # 25 MiB, matching the documented default in .env.example.
-  PRESS_MAX_UPLOAD_BYTES: "26214400"
+  PRESS_MAX_UPLOAD_BYTES: '26214400'
 
   # TODO(allen): set before merge — comma-separated email domains permitted to sign in.
   # Anyone with a Google account on these domains can reach the identity gate.

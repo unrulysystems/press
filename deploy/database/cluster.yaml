@@ -29,7 +29,7 @@ spec:
 
   backup:
     barmanObjectStore:
-      destinationPath: "s3://press-backups/"
+      destinationPath: 's3://press-backups/'
       # TODO(allen): replace REPLACE_R2_ACCOUNT_ID with the Cloudflare R2 account ID, and create the
       # `press-backups` bucket, before merge. A wrong endpoint fails WAL archiving, which CNPG
       # surfaces as a degraded cluster rather than a hard boot failure.
@@ -45,4 +45,4 @@ spec:
         compression: gzip
       data:
         compression: gzip
-    retentionPolicy: "30d"
+    retentionPolicy: '30d'
