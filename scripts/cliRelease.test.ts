@@ -136,7 +136,13 @@ describe('CLI release contract', () => {
     for (const actionRef of actionRefs) {
       expect(actionRef).toMatch(/^[^@]+@[0-9a-f]{40}$/)
     }
-    expect(workflow).toContain("bun-version: '1.4.0'")
+    expect(workflow.match(/bun-version: '1\.4\.3'/g)?.length).toBe(2)
+    expect(workflow).not.toContain("bun-version: '1.4.0'")
+    expect(workflow).not.toContain("bun-version: '1.3.13'")
+    expect(workflow).toContain('codesign --verify --strict')
+    expect(workflow).toContain('pull_request:')
+    expect(workflow).toContain('workflow_dispatch:')
+    expect(workflow).toContain("startsWith(github.ref, 'refs/tags/v')")
     expect(workflow).toContain("nub-version: '0.4.11'")
     expect(workflow).toContain('release_core="${version%%+*}"')
     expect(workflow).toContain('if [[ "$release_core" == *-* ]]; then')

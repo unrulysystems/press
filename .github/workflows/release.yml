@@ -4,6 +4,8 @@ on:
   push:
     tags:
       - 'v*'
+  pull_request:
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,10 +26,11 @@ jobs:
           nub-version: '0.4.11'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.3'
       - name: Install dependencies
         run: nub ci
       - name: Require tag/package version identity
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: bun scripts/assertCliReleaseVersion.ts "$GITHUB_REF_NAME"
       - name: Check
         run: nub run check
@@ -50,7 +53,7 @@ jobs:
             file_pattern: 'ELF 64-bit.*x86-64'
             verify_real_keychain: '0'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
@@ -58,9 +61,55 @@ jobs:
           nub-version: '0.4.11'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: '1.4.0'
+          bun-version: '1.4.3'
       - name: Install dependencies
         run: nub ci
+      # Bun 1.4.0 hashes the last partial code page zero-padded to 4096 bytes.
+      # Apple hashes that page at its real length, so codesign --verify --strict
+      # rejects the binary. 1.4.1+ hashes the unpadded page. Pull requests record
+      # the 1.4.0 failure next to the fixed build; tag releases skip it.
+      - name: Record Bun 1.4.0 signature baseline
+        if: matrix.platform == 'macos-arm64' && github.event_name != 'push'
+        run: |
+          set -euo pipefail
+          bun_dir="${RUNNER_TEMP}/bun-1.4.0"
+          mkdir -p "$bun_dir"
+          curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v1.4.0/bun-darwin-aarch64.zip" \
+            -o "$bun_dir/bun.zip"
+          unzip -qo "$bun_dir/bun.zip" -d "$bun_dir"
+          bun140="$bun_dir/bun-darwin-aarch64/bun"
+          "$bun140" --version
+          baseline="${RUNNER_TEMP}/press-bun-1.4.0"
+          "$bun140" scripts/buildCliBinary.ts --platform macos-arm64 --release --outfile "$baseline"
+          echo "=== before codesign -dvvv ==="
+          codesign -dvvv "$baseline" || true
+          echo "=== before codesign --verify --strict ==="
+          set +e
+          codesign --verify --strict --verbose=4 "$baseline"
+          verify_status=$?
+          set -e
+          echo "before_verify_status=${verify_status}"
+          if [[ "$verify_status" -eq 0 ]]; then
+            echo "Bun 1.4.0 baseline passed codesign --verify --strict" >&2
+            exit 1
+          fi
+          resign="${RUNNER_TEMP}/press-bun-1.4.0-resigned"
+          cp "$baseline" "$resign"
+          echo "=== before codesign --force --sign - ==="
+          set +e
+          codesign --force --sign - "$resign"
+          resign_status=$?
+          echo "resign_status=${resign_status}"
+          if [[ "$resign_status" -eq 0 ]]; then
+            echo "=== resigned codesign -dvvv ==="
+            codesign -dvvv "$resign" || true
+            echo "=== resigned codesign --verify --strict ==="
+            codesign --verify --strict --verbose=4 "$resign"
+            echo "resign_verify_status=$?"
+            "$resign" --version
+            echo "resign_version_status=$?"
+          fi
+          set -e
       - name: Build native standalone executable
         run: bun scripts/buildCliBinary.ts --platform "${{ matrix.platform }}" --release
       - name: Verify standalone behavior and release rehearsal
@@ -71,8 +120,42 @@ jobs:
         run: |
           file artifacts/cli/press
           file artifacts/cli/press | grep -E "${{ matrix.file_pattern }}"
+      - name: Show built macOS code signature
+        if: matrix.platform == 'macos-arm64'
+        run: |
+          set -euo pipefail
+          echo "=== built codesign -dvvv ==="
+          codesign -dvvv artifacts/cli/press
+          echo "=== built codesign --verify --strict ==="
+          codesign --verify --strict --verbose=4 artifacts/cli/press
       - name: Package release archive and checksum
         run: bun scripts/packageCliRelease.ts --platform "${{ matrix.platform }}"
+      - name: Gate packaged macOS code signature
+        if: matrix.platform == 'macos-arm64'
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(artifacts/release/*.tar.gz)
+          if [[ "${#archives[@]}" -ne 1 ]]; then
+            echo "expected one release archive" >&2
+            exit 1
+          fi
+          stage="${RUNNER_TEMP}/press-packaged"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          tar -xzf "${archives[0]}" -C "$stage"
+          echo "=== packaged codesign -dvvv ==="
+          codesign -dvvv "$stage/press"
+          echo "=== packaged codesign --verify --strict ==="
+          codesign --verify --strict --verbose=4 "$stage/press"
+          echo "=== packaged press --version ==="
+          actual="$("$stage/press" --version)"
+          printf '%s' "$actual"
+          expected="$(bun -e 'import pkg from "./packages/cli/package.json" with { type: "json" }; process.stdout.write(pkg.version + "\n")')"
+          if [[ "$actual" != "$expected" ]]; then
+            printf 'packaged press --version was %q, package version was %q\n' "$actual" "$expected" >&2
+            exit 1
+          fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: press-${{ matrix.platform }}
@@ -83,6 +166,7 @@ jobs:
 
   release:
     name: Publish matching GitHub Release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
