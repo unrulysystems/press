@@ -1,5 +1,11 @@
 # @press/cli
 
+## 0.5.1
+
+### Patch Changes
+
+- 1568db2: Fix the macOS arm64 release binary signature. Release builds use Bun 1.4.3, and the release workflow fails the tag unless the packaged artifact passes `codesign --verify --strict` and `press --version`.
+
 ## 0.5.0
 
 ### Minor Changes
