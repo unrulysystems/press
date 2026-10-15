@@ -31,6 +31,13 @@ jobs:
         with:
           bun-version: '1.4.3'
 
+      # The One server runs under Node, and page passwords need node:crypto
+      # argon2 (Node 24.7+). The runner's default Node is older.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        timeout-minutes: 5
+        with:
+          node-version-file: .node-version
+
       # `bun run e2e` boots an isolated localnet via silo + Tilt (k3d disabled), so the
       # runner needs both on PATH. Docker + the compose plugin are preinstalled
       # system-wide on ubuntu-latest, so the compose CLI is discoverable here (unlike a
