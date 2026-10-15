@@ -19,7 +19,7 @@ cannot attack their readers or each other.
 ## Architecture
 
 - **Monorepo** (this repo, from typescript-template): `apps/web` = One app
-  (server + UI), `packages/cli` = the `press` CLI. Bun workspaces, nub runner,
+  (server + UI), `packages/cli` = the `press` CLI. Bun workspaces and runner,
   tsgo/oxlint/oxfmt gates.
 - **apps/web**: One file-based routes. UI routes (`/`, `/c/:collection`,
   `/login`) render the magazine surface. API routes (`+api.ts`, plain
@@ -391,7 +391,7 @@ The e2e ACL matrix (run against localnet; see `BRIEF.md` floors):
 - [ ] The packaged macOS arm64 and Linux x64 executables report the release
       version, run `doctor --json` without Bun or a checkout on `PATH`, and are
       shipped as one-root-file archives with matching SHA-256 checksums
-- [ ] `nub run e2e` and `nub run walkthrough` spawn the compiled executable,
+- [ ] `bun run e2e` and `bun run walkthrough` spawn the compiled executable,
       not `packages/cli/src/index.ts`
 - [ ] `visibility=password` publish returns a password exactly once; hash-only
       in DB

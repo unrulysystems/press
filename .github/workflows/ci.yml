@@ -26,13 +26,19 @@ jobs:
       - uses: actions/checkout@v4
         timeout-minutes: 5
 
-      - uses: nubjs/setup-nub@v0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         timeout-minutes: 5
+        with:
+          bun-version: '1.4.3'
 
-      - uses: oven-sh/setup-bun@v2
+      # The One server runs under Node, and page passwords need node:crypto
+      # argon2 (Node 24.7+). The runner's default Node is older.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         timeout-minutes: 5
+        with:
+          node-version-file: .node-version
 
-      # `nub run e2e` boots an isolated localnet via silo + Tilt (k3d disabled), so the
+      # `bun run e2e` boots an isolated localnet via silo + Tilt (k3d disabled), so the
       # runner needs both on PATH. Docker + the compose plugin are preinstalled
       # system-wide on ubuntu-latest, so the compose CLI is discoverable here (unlike a
       # HOME-overridden sandbox). Pinned to the versions used locally.
@@ -50,7 +56,7 @@ jobs:
         timeout-minutes: 5
 
       - name: Install dependencies
-        run: nub ci
+        run: bun install --frozen-lockfile
         timeout-minutes: 10
 
       - name: Install Playwright browser
@@ -58,21 +64,21 @@ jobs:
         timeout-minutes: 10
 
       - name: Check
-        run: nub run check
+        run: bun run check
         timeout-minutes: 10
 
       - name: Unit tests
-        run: nub run test
+        run: bun run test
         timeout-minutes: 10
 
       - name: E2E
-        run: nub run e2e
+        run: bun run e2e
         timeout-minutes: 15
 
       - name: Build web
-        run: nub run build:web
+        run: bun run build:web
         timeout-minutes: 15
 
       - name: Image smoke
-        run: nub run smoke:image
+        run: bun run smoke:image
         timeout-minutes: 30

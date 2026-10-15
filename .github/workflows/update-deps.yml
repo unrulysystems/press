@@ -20,7 +20,9 @@ jobs:
 
       - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
 
-      - uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: '1.4.3'
 
       - name: Update .node-version to latest LTS
         run: |
@@ -30,18 +32,18 @@ jobs:
           echo "$LATEST_LTS" > .node-version
 
       - name: Update npm packages
-        run: nub update
+        run: bun update
 
       - name: Update Nix flake inputs
         run: nix flake update
 
       - name: Install and verify
         run: |
-          nub install
-          nub run check
+          bun install
+          bun run check
 
       - name: Build
-        run: nub run build
+        run: bun run build
 
       - name: Open dependency update pull request
         uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
@@ -53,12 +55,12 @@ jobs:
 
             Changed inputs may include:
             - `.node-version` latest LTS
-            - npm packages from `nub update`
+            - npm packages from `bun update`
             - Nix flake inputs from `nix flake update`
 
             Verification run before opening this PR:
-            - `nub install`
-            - `nub run check`
-            - `nub run build`
+            - `bun install`
+            - `bun run check`
+            - `bun run build`
           branch: chore/weekly-dependency-updates
           delete-branch: true

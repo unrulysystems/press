@@ -1,26 +1,28 @@
+FROM oven/bun:1.4.3 AS bun
+
 FROM node:24-bookworm-slim AS toolchain
 
 ENV NPM_CONFIG_CACHE=/tmp/npm-cache
 ENV PATH=/app/apps/web/node_modules/.bin:/app/node_modules/.bin:/usr/local/bin:$PATH
-RUN npm install --global bun@1.3.13 @nubjs/nub@0.2.5
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 
 FROM toolchain AS build
 
 COPY . .
-RUN nub install --frozen-lockfile
-RUN nub run --filter @press/core build
+RUN bun install --frozen-lockfile
+RUN bun run --filter @press/core build
 RUN cd apps/web && bun src/buildWeb.ts
 
 FROM toolchain AS runtime-deps
 
-COPY .npmrc package.json lock.yaml ./
+COPY bunfig.toml package.json bun.lock ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/core/package.json packages/core/package.json
 COPY packages/cli/package.json packages/cli/package.json
 COPY packages/utils/package.json packages/utils/package.json
-RUN nub install --prod --frozen-lockfile
+RUN bun install --prod --frozen-lockfile && mkdir -p apps/web/node_modules
 
 FROM node:24-bookworm-slim AS runtime
 
@@ -29,7 +31,7 @@ ENV NODE_ENV=production \
     PATH=/app/apps/web/node_modules/.bin:/app/node_modules/.bin:/usr/local/bin:$PATH \
     PRESS_PORT=4174
 
-RUN npm install --global bun@1.3.13
+COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
 

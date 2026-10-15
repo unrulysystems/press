@@ -143,7 +143,6 @@ describe('CLI release contract', () => {
     expect(workflow).toContain('pull_request:')
     expect(workflow).toContain('workflow_dispatch:')
     expect(workflow).toContain("startsWith(github.ref, 'refs/tags/v')")
-    expect(workflow).toContain("nub-version: '0.4.11'")
     expect(workflow).toContain('release_core="${version%%+*}"')
     expect(workflow).toContain('if [[ "$release_core" == *-* ]]; then')
     expect(workflow).toContain('release_metadata+=(--prerelease --latest=false)')

@@ -356,7 +356,7 @@ async function main(): Promise<number> {
 
   let exitCode = 1
   try {
-    await runRequired('nub', ['run', '--filter', '@press/core', 'build'], bootstrapEnv)
+    await runRequired('bun', ['run', '--filter', '@press/core', 'build'], bootstrapEnv)
     await runRequired('silo', ['env', e2eInstanceName, '--force'], bootstrapEnv)
 
     const siloEnv = await readSiloEnv()

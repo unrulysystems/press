@@ -11,14 +11,6 @@
     # Uncomment for overlays that require unfree packages (e.g., atlas-overlay)
     # nixpkgs-unfree.url = "github:numtide/nixpkgs-unfree/nixos-26.05";
     # nixpkgs-unfree.inputs.nixpkgs.follows = "nixpkgs";
-    # nub-overlay supplies nub from the official prebuilt release tarballs. It
-    # preserves nub's bin/ + runtime/ sibling layout, so TypeScript execution
-    # works the same way inside and outside Nix.
-    nub-overlay = {
-      url = "github:alleneubank/nub-overlay";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.flake-utils.follows = "flake-utils";
-    };
     tilt-overlay = {
       url = "github:alleneubank/tilt-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -35,14 +27,12 @@
     self,
     nixpkgs,
     flake-utils,
-    nub-overlay,
     tilt-overlay,
     ...
   } @ inputs: let
     # Official-binary overlays shadow nixpkgs packages for tools where upstream
     # release artifacts are the source of truth.
     overlays = [
-      nub-overlay.overlays.default
       tilt-overlay.overlays.default
     ];
 
@@ -62,17 +52,20 @@
         devShells.default = pkgs.mkShell {
           name = "ts-dev";
           nativeBuildInputs = [
-            pkgs.nub
+            pkgs.nodejs_24
             pkgs.jq
             pkgs.ripgrep
             pkgs.coreutils
             pkgs.tilt
             pkgs.lefthook
           ];
-          # nub auto-provisions Node from .node-version on first run, so there is
-          # no version-manager shell hook (fnm/corepack are gone).
+          # Bun 1.4.3 comes from the official installer (README Quickstart),
+          # independently of the nixpkgs release channel.
           shellHook =
-            (pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
+            ''
+              export PATH="''${BUN_INSTALL:-$HOME/.bun}/bin:$PATH"
+            ''
+            + (pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
             '')
             + (pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isDarwin ''

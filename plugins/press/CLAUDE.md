@@ -42,7 +42,7 @@ Visibility values: `public`, `default`, `password`, `private`.
 - `PRESS_TOKEN` — bearer token for non-interactive/agent use. Never pass a token on
   the command line; export it in the environment.
 
-For localnet testing, `nub run dev:share` writes `.dev/agent.env` containing
+For localnet testing, `bun run dev:share` writes `.dev/agent.env` containing
 `PRESS_TOKEN` and `PRESS_URL`. Map it for the CLI with
 `export PRESS_HOST="$PRESS_URL"` (the CLI reads `PRESS_HOST`, not `PRESS_URL`).
 

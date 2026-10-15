@@ -18,12 +18,12 @@ unrulysystems. Built from typescript-template.
 
 ## Commands
 
-- `nub install` — install workspace deps.
-- `nub run check` — tsgo typecheck + oxlint + oxfmt (must stay green).
-- `nub run test` — Bun unit/integration tests.
-- `nub run localnet` — boot the silo/Tilt `main` localnet with Postgres,
+- `bun install` — install workspace deps.
+- `bun run check` — tsgo typecheck + oxlint + oxfmt (must stay green).
+- `bun run test` — Bun unit/integration tests.
+- `bun run localnet` — boot the silo/Tilt `main` localnet with Postgres,
   migrations, seed data, and the One dev server.
-- `nub run e2e` — Playwright acceptance suite against localnet only.
+- `bun run e2e` — Playwright acceptance suite against localnet only.
 - `bun scripts/capture-oracle-shots.ts` — capture blind-oracle screenshots into
   `artifacts/oracle/`.
 

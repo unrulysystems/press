@@ -1,7 +1,5 @@
 # Dependencies
 node_modules/
-.nub-cache/
-.nub-data/
 apps/*/.tamagui/
 
 # Build output

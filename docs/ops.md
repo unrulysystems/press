@@ -9,7 +9,7 @@
 - Blob storage: the HTML files under
   `$PRESS_STORAGE_DIR/<collection>/<file>`.
 
-The executable proof for this procedure is `nub run drill:backup-restore`,
+The executable proof for this procedure is `bun run drill:backup-restore`,
 implemented in `scripts/backupRestoreDrill.ts`. The drill allocates an isolated
 silo instance, migrates and seeds it, records a page row, hashes the matching
 blob, probes ACL behavior, takes a backup, destroys Postgres volumes and

@@ -26,7 +26,7 @@ environment — never on the command line.
 - **Localnet testing.** Mint a seeded owner token:
 
   ```
-  nub run dev:share
+  bun run dev:share
   ```
 
   This writes `.dev/agent.env` with `PRESS_TOKEN` and `PRESS_URL`. Load it and map

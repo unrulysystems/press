@@ -1,4 +1,4 @@
-#!/usr/bin/env -S nub
+#!/usr/bin/env -S bun
 
 import { readdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -9,7 +9,7 @@ const OLD_SCOPE = ['@', 'template'].join('')
 
 async function prompt(question: string): Promise<string> {
   // node:readline/promises replaces Bun's `for await (const line of console)`
-  // stdin iterator — stock-Node API, works under nub.
+  // stdin iterator — stock-Node API, works under bun.
   const rl = createInterface({ input: process.stdin, output: process.stdout })
   try {
     const answer = await rl.question(question)
@@ -92,8 +92,8 @@ async function main(): Promise<void> {
   console.log(`\nDone! Updated ${count} files.`)
   console.log('\nNext steps:')
   console.log('  1. Update root package.json "name" field')
-  console.log('  2. Run: nub install')
-  console.log('  3. Run: nub run check')
+  console.log('  2. Run: bun install')
+  console.log('  3. Run: bun run check')
 }
 
 main()

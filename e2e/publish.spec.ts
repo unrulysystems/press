@@ -222,7 +222,7 @@ async function expectMovedSourceMutationNotFound(input: {
 
 async function runLocalnetSeed(): Promise<{ readonly code: number; readonly stderr: string }> {
   return await new Promise((resolve, reject) => {
-    const child = spawn('nub', ['run', '--filter', '@press/web', 'db:seed'], {
+    const child = spawn('bun', ['run', '--filter', '@press/web', 'db:seed'], {
       cwd: process.cwd(),
       env: process.env,
       stdio: ['ignore', 'ignore', 'pipe'],
