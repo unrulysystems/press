@@ -1,5 +1,11 @@
 # @press/cli
 
+## 0.5.2
+
+### Patch Changes
+
+- Build and release with Bun 1.4.3 only; nub is removed from the toolchain.
+
 ## 0.5.1
 
 ### Patch Changes
