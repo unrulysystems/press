@@ -4,10 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "nub src/buildWeb.ts",
-    "db:generate": "node node_modules/drizzle-kit/bin.cjs generate --config drizzle.config.ts",
-    "db:migrate": "nub src/db/migrate.ts",
-    "db:seed": "nub src/auth/seedLocalnet.ts",
+    "build": "bun src/buildWeb.ts",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
+    "db:migrate": "bun src/db/migrate.ts",
+    "db:seed": "bun src/auth/seedLocalnet.ts",
     "dev": "one dev --host 127.0.0.1 --port ${PRESS_PORT:-4174}",
     "serve:prod": "one serve --host 127.0.0.1 --port ${PRESS_PORT:-4174}"
   },

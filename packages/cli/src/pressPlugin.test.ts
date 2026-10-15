@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
 // The plugin lives at the repo root under plugins/press. This test is colocated in
-// packages/cli only because `nub run test` globs `packages apps/web/src`; it validates
+// packages/cli only because `bun run test` globs `packages apps/web/src`; it validates
 // the plugin structure and that the skills cite only real `press` subcommands. Paths and
 // reads use Bun globals (this package's tsconfig has no node type declarations).
 const pluginRoot = `${import.meta.dir}/../../../plugins/press`

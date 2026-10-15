@@ -21,21 +21,18 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
-        with:
-          nub-version: '0.4.11'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: '1.4.3'
       - name: Install dependencies
-        run: nub ci
+        run: bun install --frozen-lockfile
       - name: Require tag/package version identity
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         run: bun scripts/assertCliReleaseVersion.ts "$GITHUB_REF_NAME"
       - name: Check
-        run: nub run check
+        run: bun run check
       - name: Unit tests
-        run: nub run test
+        run: bun run test
 
   build:
     name: Build ${{ matrix.platform }}
@@ -56,14 +53,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
-        with:
-          nub-version: '0.4.11'
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: '1.4.3'
       - name: Install dependencies
-        run: nub ci
+        run: bun install --frozen-lockfile
       # Bun 1.4.0 hashes the last partial code page zero-padded to 4096 bytes.
       # Apple hashes that page at its real length, so codesign --verify --strict
       # rejects the binary. 1.4.1+ hashes the unpadded page. Pull requests record
@@ -115,7 +109,7 @@ jobs:
       - name: Verify standalone behavior and release rehearsal
         env:
           PRESS_VERIFY_REAL_KEYCHAIN: ${{ matrix.verify_real_keychain }}
-        run: nub run test:cli:binary
+        run: bun run test:cli:binary
       - name: Verify advertised architecture
         run: |
           file artifacts/cli/press

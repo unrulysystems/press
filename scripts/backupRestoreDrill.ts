@@ -214,7 +214,7 @@ async function dockerCompose(
 }
 
 function startPressServer(env: DrillEnv): ChildProcess {
-  const child = spawn('nub', ['run', '--filter', '@press/web', 'dev'], {
+  const child = spawn('bun', ['run', '--filter', '@press/web', 'dev'], {
     cwd: root,
     detached: process.platform !== 'win32',
     env,
@@ -409,8 +409,8 @@ async function startEmptyPostgres(env: DrillEnv): Promise<void> {
 
 async function migrateAndSeed(env: DrillEnv, storageDir: string): Promise<void> {
   await mkdir(storagePath(storageDir), { recursive: true })
-  await runCapturedRequired('nub', ['run', '--filter', '@press/web', 'db:migrate'], env, 60_000)
-  await runCapturedRequired('nub', ['run', '--filter', '@press/web', 'db:seed'], env, 60_000)
+  await runCapturedRequired('bun', ['run', '--filter', '@press/web', 'db:migrate'], env, 60_000)
+  await runCapturedRequired('bun', ['run', '--filter', '@press/web', 'db:seed'], env, 60_000)
 }
 
 async function destroyState(env: DrillEnv, storageDir: string): Promise<void> {

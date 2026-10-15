@@ -100,7 +100,7 @@ async function startIsolatedRateLimitServer(input: {
   const port = await getFreePort()
   const baseURL = `http://127.0.0.1:${port}`
   let stderr = ''
-  const child = spawn('nub', ['run', '--filter', '@press/web', 'serve:prod'], {
+  const child = spawn('bun', ['run', '--filter', '@press/web', 'serve:prod'], {
     cwd: root,
     env: {
       ...process.env,

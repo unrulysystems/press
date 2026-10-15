@@ -3,5 +3,5 @@ node_modules
 build
 coverage
 *.d.ts
-lock.yaml
+bun.lock
 AUDIT.md

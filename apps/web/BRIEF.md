@@ -27,7 +27,7 @@ Reference exemplars (ratified): Stripe Press, Increment magazine, iA, the
 Linear and Vercel blogs. Anti-exemplars: admin dashboards, Bootstrap-default
 looks, news portals with competing sidebars/tickers.
 
-## Floors (gate, not ceiling — measured in `nub run e2e` design checks)
+## Floors (gate, not ceiling — measured in `bun run e2e` design checks)
 
 | Floor                                      | Measured by                                                                                                |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |

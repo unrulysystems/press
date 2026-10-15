@@ -41,7 +41,7 @@ Global flags: `--host <url>` (or `PRESS_HOST`), `--json`. Visibility values:
 - `PRESS_TOKEN` — bearer token for non-interactive/agent use. Export it in the
   environment; never pass a token as a command-line argument.
 
-For localnet testing, `nub run dev:share` writes `.dev/agent.env` with
+For localnet testing, `bun run dev:share` writes `.dev/agent.env` with
 `PRESS_TOKEN` and `PRESS_URL`. Map it for the CLI with
 `export PRESS_HOST="$PRESS_URL"` (the CLI reads `PRESS_HOST`, not `PRESS_URL`).
 

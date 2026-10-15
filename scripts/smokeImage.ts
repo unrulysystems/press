@@ -254,7 +254,7 @@ async function composeUpPostgres(env: SmokeEnv): Promise<void> {
 // itself on boot. This is the faithful check for the image's boot-time migration: no host
 // `db:migrate` runs, so a missing/broken in-image migration makes /healthz never come up.
 async function seedDatabase(env: SmokeEnv): Promise<void> {
-  await run('nub', ['run', '--filter', '@press/web', 'db:seed'], {
+  await run('bun', ['run', '--filter', '@press/web', 'db:seed'], {
     env,
     timeoutMs: 60_000,
     inherit: true,

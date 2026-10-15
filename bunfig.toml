@@ -1,0 +1,3 @@
+[install]
+# One and workspace packages expect a flat node_modules tree.
+linker = "hoisted"

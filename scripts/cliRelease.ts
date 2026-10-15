@@ -61,9 +61,8 @@ export function cliWorkspaceSourcePlugin(): Bun.BunPlugin {
     name: 'press-cli-workspace-sources',
     setup(build) {
       // A standalone release must not depend on an installer's workspace-link
-      // layout. Nub can validly install every external dependency while a
-      // concurrent clean CI install omits the @press/core symlink, so resolve
-      // the CLI's own package boundary to its canonical source explicitly.
+      // layout. Resolve the CLI's own package boundary to its canonical source
+      // explicitly so compilation does not require generated workspace links.
       build.onResolve({ filter: /^@press\/core$/ }, () => ({ path: coreSource }))
     },
   }
@@ -161,7 +160,10 @@ export async function buildCliBinary(
     },
     // Hermetic test/e2e binaries keep the file-backed keychain seam (F-16);
     // release binaries compile it out so PRESS_E2E_KEYCHAIN_FILE has no effect.
-    define: { 'process.env.PRESS_TEST_BUILD': input.testBuild === false ? '"0"' : '"1"' },
+    define: {
+      'process.env.PRESS_TEST_BUILD': input.testBuild === false ? '"0"' : '"1"',
+      PRESS_COMPILED_VERSION: JSON.stringify(CLI_PACKAGE_VERSION),
+    },
     minify: true,
     packages: 'bundle',
     plugins: [cliWorkspaceSourcePlugin()],

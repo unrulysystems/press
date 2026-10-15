@@ -12,7 +12,7 @@ const OWNED_TILTFILES = ['Tiltfile', 'tilt/localnet.Tiltfile'] as const
 describe('Starlark serve_cmd scanning', () => {
   test('flags a bare local_resource that serves', () => {
     const found = findUnsupervisedServeResources(
-      "local_resource('web', serve_cmd='nub run dev', labels=['press'])",
+      "local_resource('web', serve_cmd='bun run dev', labels=['press'])",
     )
     expect(found).toHaveLength(1)
     expect(found[0]).toMatchObject({ callee: 'local_resource', name: 'web', line: 1 })
@@ -20,12 +20,12 @@ describe('Starlark serve_cmd scanning', () => {
 
   test('accepts a janitor-wrapped serve resource', () => {
     expect(
-      findUnsupervisedServeResources("janitor_local_resource('web', serve_cmd='nub run dev')"),
+      findUnsupervisedServeResources("janitor_local_resource('web', serve_cmd='bun run dev')"),
     ).toEqual([])
   })
 
   test('ignores one-shot resources that only run cmd', () => {
-    expect(findServeResources("local_resource('migrate', cmd='nub run db:migrate')")).toEqual([])
+    expect(findServeResources("local_resource('migrate', cmd='bun run db:migrate')")).toEqual([])
   })
 
   test('does not read serve_cmd out of a string or a comment', () => {

@@ -37,21 +37,29 @@ audit ledger.
 
 ## Quickstart (local development)
 
-Prerequisites: [Bun](https://bun.sh), Docker, [Tilt](https://tilt.dev), and
-[nub](https://github.com/nubjs/nub) for the workspace runner.
+Prerequisites: [Bun 1.4.3](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3),
+Node 24, Docker, [Tilt](https://tilt.dev), and [silo](https://github.com/0xbigboss/silo).
+The Nix dev shell (including the `shell.nix` fallback) provides Node and the
+development tools; Bun is installed separately from the official release:
 
 ```sh
-nub install          # install workspace deps (frozen lockfile)
-nub run localnet     # boot Postgres + dev server with seeded users
+curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"
+export PATH="${BUN_INSTALL:-$HOME/.bun}/bin:$PATH"
+bun --version        # must print 1.4.3
 ```
 
-`nub run localnet` boots the silo/Tilt stack and prints the base URL, seeded
+```sh
+bun install --frozen-lockfile # install the locked workspace dependencies
+bun run localnet     # boot Postgres + dev server with seeded users
+```
+
+`bun run localnet` boots the silo/Tilt stack and prints the base URL, seeded
 users, collections, and example page URLs. In another shell:
 
 ```sh
-nub run check        # typecheck + lint + format gates
-nub run test         # unit/integration tests
-nub run e2e          # full Playwright acceptance suite (localnet only)
+bun run check        # typecheck + lint + format gates
+bun run test         # unit/integration tests
+bun run e2e          # full Playwright acceptance suite (localnet only)
 ```
 
 ## CLI

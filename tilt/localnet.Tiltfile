@@ -78,7 +78,7 @@ def press_localnet():
 
     local_resource(
         "migrate",
-        cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web db:migrate',
+        cmd='mkdir -p "$PRESS_STORAGE_DIR" && bun run --filter @press/web db:migrate',
         env=env,
         resource_deps=["db-ready"],
         labels=["press"],
@@ -86,7 +86,7 @@ def press_localnet():
 
     local_resource(
         "seed",
-        cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web db:seed',
+        cmd='mkdir -p "$PRESS_STORAGE_DIR" && bun run --filter @press/web db:seed',
         env=env,
         resource_deps=["migrate"],
         labels=["press"],
@@ -95,7 +95,7 @@ def press_localnet():
     if serve_mode == "prod":
         local_resource(
             "build-web",
-            cmd="nub run build:web",
+            cmd="bun run build:web",
             env={
                 "NODE_ENV": "production",
                 "PRESS_ENABLE_CREDENTIAL_AUTH": "0",
@@ -105,7 +105,7 @@ def press_localnet():
 
     janitor_local_resource(
         "web",
-        serve_cmd='mkdir -p "$PRESS_STORAGE_DIR" && nub run --filter @press/web ' + (
+        serve_cmd='mkdir -p "$PRESS_STORAGE_DIR" && bun run --filter @press/web ' + (
             "serve:prod" if serve_mode == "prod" else "dev"
         ),
         serve_env=env,
