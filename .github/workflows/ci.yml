@@ -26,34 +26,10 @@ jobs:
       - uses: actions/checkout@v4
         timeout-minutes: 5
 
-      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
         timeout-minutes: 5
         with:
-          bun-version: '1.4.3'
-
-      # The One server runs under Node, and page passwords need node:crypto
-      # argon2 (Node 24.7+). The runner's default Node is older.
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        timeout-minutes: 5
-        with:
-          node-version-file: .node-version
-
-      # `bun run e2e` boots an isolated localnet via silo + Tilt (k3d disabled), so the
-      # runner needs both on PATH. Docker + the compose plugin are preinstalled
-      # system-wide on ubuntu-latest, so the compose CLI is discoverable here (unlike a
-      # HOME-overridden sandbox). Pinned to the versions used locally.
-      - name: Install silo + Tilt (localnet orchestration for e2e)
-        run: |
-          set -euo pipefail
-          bun add -g @0xbigboss/silo@0.5.9
-          # Extract the tilt binary straight into a PATH dir. Upstream's install.sh unpacks
-          # `tilt` into the checkout CWD, which collides on the runner
-          # (`tar: tilt: Cannot open: File exists`) and fails the job before any step runs.
-          mkdir -p "$HOME/.local/bin"
-          curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v0.36.0/tilt.0.36.0.linux.x86_64.tar.gz" \
-            | tar -xz -C "$HOME/.local/bin" tilt
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        timeout-minutes: 5
+          version: '2026.10.4'
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
