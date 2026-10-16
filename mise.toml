@@ -1,0 +1,50 @@
+[settings]
+lockfile = true
+lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
+
+[tools]
+bun = "1.4.3"
+"github:tilt-dev/tilt" = { version = "0.36.0", exe = "tilt" }
+"aqua:evilmartians/lefthook" = "2.2.2"
+"aqua:jqlang/jq" = "1.8.2"
+"aqua:BurntSushi/ripgrep" = "15.2.0"
+"aqua:uutils/coreutils" = "0.12.0"
+"github:alleneubank/janitor" = { version = "0.3.1", exe = "janitor" }
+
+# Node distributes binaries on nodejs.org, not as GitHub assets. The Aqua recipe
+# omits checksums; these pins come from the release's official SHASUMS256.txt.
+# Update the version and all four digests together.
+# Node runs One and package tooling with node shebangs (Playwright, zshy,
+# drizzle-kit, Changesets); Bun is the only package manager.
+[tools."github:nodejs/node"]
+version = "24.18.0"
+strip_components = 1
+bin_path = "bin"
+
+[tools."github:nodejs/node".platforms]
+linux-x64 = { url = "https://nodejs.org/dist/v{{ version }}/node-v{{ version }}-linux-x64.tar.gz", checksum = "sha256:783130984963db7ba9cbd01089eaf2c2efb055c7c1693c943174b967b3050cb8" }
+linux-arm64 = { url = "https://nodejs.org/dist/v{{ version }}/node-v{{ version }}-linux-arm64.tar.gz", checksum = "sha256:6b4484c2190274175df9aa8f28e2d758a819cb1c1fe6ab481e2f95b463ab8508" }
+macos-x64 = { url = "https://nodejs.org/dist/v{{ version }}/node-v{{ version }}-darwin-x64.tar.gz", checksum = "sha256:dfd0dbd3e721503434df7b7205e719f61b3a3a31b2bcf9729b8b91fea240f080" }
+macos-arm64 = { url = "https://nodejs.org/dist/v{{ version }}/node-v{{ version }}-darwin-arm64.tar.gz", checksum = "sha256:e1a97e14c99c803e96c7339403282ea05a499c32f8d83defe9ef5ec66f979ed1" }
+
+# silo publishes a self-contained Bun bundle to npm, with no GitHub release
+# assets. The GitHub backend's URL override downloads that same upstream bundle;
+# its published checksum pins it and no npm installer or global package is needed.
+[tools."github:0xbigboss/silo"]
+version = "0.5.9"
+# npm's published dist.integrity (SHA-512), shared by every platform. Update
+# with the version; this URL override has no GitHub asset digest to discover.
+checksum = "sha512:5026085b797e0f83c7dee85f866743c68c866b37b804c353cc918e0052331f6b366595bc3d0351396eaf40578378e748d769e0df8424e9b7f42e084af2f189cd"
+format = "tar.gz"
+strip_components = 1
+bin_path = "dist"
+rename_exe = { "cli.js" = "silo" }
+
+[tools."github:0xbigboss/silo".platforms]
+linux-x64 = { url = "https://registry.npmjs.org/@0xbigboss/silo/-/silo-{{ version }}.tgz" }
+linux-arm64 = { url = "https://registry.npmjs.org/@0xbigboss/silo/-/silo-{{ version }}.tgz" }
+macos-x64 = { url = "https://registry.npmjs.org/@0xbigboss/silo/-/silo-{{ version }}.tgz" }
+macos-arm64 = { url = "https://registry.npmjs.org/@0xbigboss/silo/-/silo-{{ version }}.tgz" }
+
+[env]
+PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS = "{% if os() == 'linux' %}true{% else %}{{ get_env(name='PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS', default='') }}{% endif %}"

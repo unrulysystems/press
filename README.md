@@ -37,21 +37,30 @@ audit ledger.
 
 ## Quickstart (local development)
 
-Prerequisites: [Bun 1.4.3](https://github.com/oven-sh/bun/releases/tag/bun-v1.4.3),
-Node 24, Docker, [Tilt](https://tilt.dev), and [silo](https://github.com/0xbigboss/silo).
-The Nix dev shell (including the `shell.nix` fallback) provides Node and the
-development tools; Bun is installed separately from the official release:
+Prerequisites: [mise](https://mise.jdx.dev) and Docker with Compose.
+`mise.toml` and `mise.lock` pin Bun 1.4.3, Node for One and package tooling, Tilt,
+silo, janitor, and the development utilities. CI installs the same lockfile.
 
 ```sh
-curl -fsSL https://bun.sh/install | bash -s "bun-v1.4.3"
-export PATH="${BUN_INSTALL:-$HOME/.bun}/bin:$PATH"
-bun --version        # must print 1.4.3
+mise trust
+mise install --locked
+mise exec -- bun --version # must print 1.4.3
+mise exec -- bun install --frozen-lockfile
+mise exec -- bun run localnet # boot Postgres + dev server with seeded users
 ```
 
-```sh
-bun install --frozen-lockfile # install the locked workspace dependencies
-bun run localnet     # boot Postgres + dev server with seeded users
-```
+For interactive shells, activate mise or review `.envrc` and run `direnv allow`.
+The direnv integration retains the optional `.env`, `.env.local`, and private
+overrides. Linux skips Playwright's host requirement validation as before.
+The former Darwin SDK and PATH overrides only avoided toolchain paths injected
+by Nix; mise downloads upstream binaries, so those overrides are unnecessary.
+Core utilities come from uutils; the Nix-only formatter is no longer needed.
+silo uses its published Bun bundle via a GitHub-backend URL override because
+its releases have no binary assets. To update silo, change its version and
+published npm `dist.integrity` checksum together in `mise.toml`, then run
+`mise lock`. Node's URL overrides similarly pin the four official archive hashes
+from `SHASUMS256.txt`; update them with the version. Weekly mise upgrades leave
+these two manually checksummed tools pinned.
 
 `bun run localnet` boots the silo/Tilt stack and prints the base URL, seeded
 users, collections, and example page URLs. In another shell:

@@ -18,6 +18,9 @@ unrulysystems. Built from typescript-template.
 
 ## Commands
 
+- `mise install --locked` — install the shared local/CI toolchain; use
+  `mise exec -- <command>` without shell activation. Bun 1.4.3 is the only
+  package manager. Docker with Compose is a host prerequisite.
 - `bun install` — install workspace deps.
 - `bun run check` — tsgo typecheck + oxlint + oxfmt (must stay green).
 - `bun run test` — Bun unit/integration tests.

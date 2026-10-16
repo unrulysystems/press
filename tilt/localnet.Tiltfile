@@ -4,7 +4,7 @@
 v1alpha1.extension_repo(
     name="janitor",
     url="https://github.com/alleneubank/janitor",
-    ref="v0.3.0",
+    ref="v0.3.1",
 )
 v1alpha1.extension(name="janitor", repo_name="janitor", repo_path="tilt/janitor")
 load("ext://janitor", "janitor_local_resource")

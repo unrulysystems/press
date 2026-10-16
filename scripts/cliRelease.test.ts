@@ -136,7 +136,7 @@ describe('CLI release contract', () => {
     for (const actionRef of actionRefs) {
       expect(actionRef).toMatch(/^[^@]+@[0-9a-f]{40}$/)
     }
-    expect(workflow.match(/bun-version: '1\.4\.3'/g)?.length).toBe(2)
+    expect(workflow.match(/uses: jdx\/mise-action@[0-9a-f]{40}/g)?.length).toBe(2)
     expect(workflow).not.toContain("bun-version: '1.4.0'")
     expect(workflow).not.toContain("bun-version: '1.3.13'")
     expect(workflow).toContain('codesign --verify --strict')

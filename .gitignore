@@ -41,8 +41,7 @@ test-results/
 .press/
 artifacts/
 
-# Nix
-result
+# Direnv
 .direnv/
 
 # Logs
