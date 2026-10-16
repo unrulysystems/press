@@ -41,6 +41,11 @@ Prerequisites: [mise](https://mise.jdx.dev) and Docker with Compose.
 `mise.toml` and `mise.lock` pin Bun 1.4.3, Node for One and package tooling, Tilt,
 silo, janitor, and the development utilities. CI installs the same lockfile.
 
+The web server (One) runs on Node: `bun --bun one build` and `one dev` fail
+under Bun 1.4.3 while loading the Vite config (`callSite.getFileName is not a
+function` in `depd`, via `@react-native/dev-middleware`). Playwright,
+drizzle-kit, zshy, and Changesets also run on Node.
+
 ```sh
 mise trust
 mise install --locked
