@@ -304,7 +304,14 @@ async function captureViewport(input: {
         // oxlint-disable-next-line no-await-in-loop -- Oracle stills must not capture hover state.
         await page.mouse.move(0, 0)
         // oxlint-disable-next-line no-await-in-loop -- Let hover/focus paints settle before capture.
-        await Bun.sleep(100)
+        await page.evaluate(
+          () =>
+            new Promise<void>((resolveFrame) => {
+              requestAnimationFrame(() => {
+                requestAnimationFrame(() => resolveFrame())
+              })
+            }),
+        )
         // oxlint-disable-next-line no-await-in-loop -- Full-page capture is the oracle artifact.
         await page.screenshot({
           path: resolve(outputDir, `${target.name}-${input.scheme}-${input.width}.png`),
