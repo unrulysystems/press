@@ -1834,8 +1834,17 @@ test('banned user session cannot read protected pages', async ({ baseURL }) => {
     await expect(whoamiAfter.json()).resolves.toEqual({ authenticated: false })
     const authorizeAfter = await session.get(
       `/cli/authorize?port=4567&challenge=${'a'.repeat(32)}&state=${'s'.repeat(32)}`,
+      { maxRedirects: 0 },
     )
     expect(authorizeAfter.status(), 'banned session must not start CLI authorization').toBe(403)
+    const approveAfter = await session.post('/cli/approve', {
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      data: `consent=${'c'.repeat(32)}`,
+      maxRedirects: 0,
+    })
+    expect(approveAfter.status(), 'banned session must not approve CLI authorization').toBe(403)
+    const activateAfter = await session.get('/cli/activate', { maxRedirects: 0 })
+    expect(activateAfter.status(), 'banned session must not activate device login').toBe(403)
   } finally {
     await pool.query(
       'update "user" set "banned" = $1, "banReason" = $2, "banExpires" = $3 where email = $4',

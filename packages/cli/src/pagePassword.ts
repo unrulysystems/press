@@ -64,20 +64,26 @@ async function promptHidden(prompt: string): Promise<string> {
     return await new Promise<string>((resolve, reject) => {
       let value = ''
       const onData = (chunk: Buffer): void => {
-        const char = chunk.toString('utf8')
-        if (char === KEY_ENTER || char === KEY_NEWLINE || char === KEY_EOT) {
-          stdin.removeListener('data', onData)
-          resolve(value)
-        } else if (char === KEY_INTERRUPT) {
-          stdin.removeListener('data', onData)
-          reject(new Error('cancelled'))
-        } else if (char === KEY_BACKSPACE || char === '\b') {
-          value = value.slice(0, -1)
-        } else {
+        for (const char of chunk.toString('utf8')) {
+          if (char === KEY_ENTER || char === KEY_NEWLINE || char === KEY_EOT) {
+            stdin.removeListener('data', onData)
+            resolve(value)
+            return
+          }
+          if (char === KEY_INTERRUPT) {
+            stdin.removeListener('data', onData)
+            reject(new Error('cancelled'))
+            return
+          }
+          if (char === KEY_BACKSPACE || char === '\b') {
+            value = value.slice(0, -1)
+            continue
+          }
           value += char
           if (Buffer.byteLength(value, 'utf8') > MAX_PAGE_PASSWORD_BYTES) {
             stdin.removeListener('data', onData)
             reject(new Error(`page password exceeds ${MAX_PAGE_PASSWORD_BYTES} bytes`))
+            return
           }
         }
       }

@@ -174,12 +174,36 @@ function parseBasicPassword(request: Request): string | null {
   return separator === -1 ? '' : decoded.slice(separator + 1)
 }
 
+class PagePasswordRateLimitError extends Error {
+  constructor() {
+    super('too many attempts')
+    this.name = 'PagePasswordRateLimitError'
+  }
+}
+
+async function consumePagePasswordAttempt(pageId: string): Promise<boolean> {
+  const config = getDbConfig()
+  return await consumeRateLimit(getDb(), {
+    identifier: `cli:page-pw:${pageId}`,
+    max:
+      config.nodeEnv === 'production'
+        ? PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX
+        : NON_PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX,
+    windowMs: PASSWORD_UNLOCK_RATE_WINDOW_MS,
+    now: Date.now(),
+  })
+}
+
 async function verifyBasicPassword(
   request: Request,
   row: PageRow,
 ): Promise<BasicPasswordVerification | undefined> {
   if (!hasBasicAuthorization(request)) {
     return undefined
+  }
+  const allowed = await consumePagePasswordAttempt(row.id)
+  if (!allowed) {
+    throw new PagePasswordRateLimitError()
   }
   const password = parseBasicPassword(request)
   if (!password || !row.passwordHash) {
@@ -266,6 +290,9 @@ export async function servedPageEndpoint(request: Request): Promise<Response> {
   try {
     return await servedPageEndpointUnchecked(request)
   } catch (error) {
+    if (error instanceof PagePasswordRateLimitError) {
+      return servedPageResponse('too many attempts', { status: 429 })
+    }
     logServerError('servedPageEndpoint', error, request)
     return servedPageResponse('internal server error', { status: 500 })
   }
@@ -292,15 +319,7 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
     return notFound()
   }
   const config = getDbConfig()
-  const allowed = await consumeRateLimit(getDb(), {
-    identifier: `cli:page-pw:${row.page.id}`,
-    max:
-      config.nodeEnv === 'production'
-        ? PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX
-        : NON_PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX,
-    windowMs: PASSWORD_UNLOCK_RATE_WINDOW_MS,
-    now: Date.now(),
-  })
+  const allowed = await consumePagePasswordAttempt(row.page.id)
   if (!allowed) {
     return passwordGateResponse({
       title: row.page.title,
@@ -351,7 +370,10 @@ export async function servedPagePasswordEndpoint(request: Request): Promise<Resp
     return await servedPagePasswordUnlock(request, route)
   } catch (error) {
     if (error instanceof BodyTooLargeError) {
-      return servedPageResponse(error.message, { status: 413 })
+      return servedPageResponse(error.message, {
+        status: 413,
+        headers: { connection: 'close' },
+      })
     }
     logServerError('servedPagePasswordEndpoint', error, request)
     return servedPageResponse('internal server error', { status: 500 })

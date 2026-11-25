@@ -8,7 +8,7 @@ import {
   parseCollectionSlug,
   parseFileSlug,
 } from '@press/core'
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 
 import { verifyApiToken } from '../auth/apiTokens'
@@ -1187,6 +1187,7 @@ export async function collectionsIndexEndpoint(request: Request): Promise<Respon
       .from(page)
       .innerJoin(collection, eq(page.collectionSlug, collection.slug))
       .where(isNull(page.archivedAt))
+      .orderBy(desc(page.updatedAt), asc(page.id))
       .limit(MAX_LIST_ROWS + 1)
 
     const hasMore = rows.length > MAX_LIST_ROWS
@@ -1250,7 +1251,7 @@ async function listCollectionPages(
 
   const rows = await db.query.page.findMany({
     where: and(eq(page.collectionSlug, collectionSlug), isNull(page.archivedAt)),
-    orderBy: (fields, { desc }) => [desc(fields.publishedAt)],
+    orderBy: (fields) => [desc(fields.publishedAt)],
     limit: MAX_LIST_ROWS + 1,
   })
   const hasMore = rows.length > MAX_LIST_ROWS

@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import cliPackage from '../package.json' with { type: 'json' }
 
 import {
+  assertNoExtraArgs,
   buildDoctorReport,
   CLI_VERSION,
   createLoopbackCallbackHandler,
@@ -117,6 +118,17 @@ describe('parseLoginArguments', () => {
 
   test('rejects unknown flags loudly', () => {
     expect(() => parseLoginArguments(['--devic'])).toThrow('unknown option: --devic')
+  })
+})
+
+describe('assertNoExtraArgs', () => {
+  test('allows empty argument lists and rejects unknown flags or positional args', () => {
+    expect(() => assertNoExtraArgs('logout', [])).not.toThrow()
+    expect(() => assertNoExtraArgs('logout', ['--dry-run'])).toThrow('unknown option: --dry-run')
+    expect(() => assertNoExtraArgs('whoami', ['--bogus'])).toThrow('unknown option: --bogus')
+    expect(() => assertNoExtraArgs('doctor', ['extra'])).toThrow(
+      'doctor does not accept arguments: extra',
+    )
   })
 })
 

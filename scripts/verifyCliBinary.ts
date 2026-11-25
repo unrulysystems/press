@@ -255,6 +255,7 @@ try {
   })
   await copyFile(builtBinary, binary)
   await chmod(binary, 0o755)
+  await chmod(releaseBinary, 0o755)
 
   const env = {
     ...process.env,
@@ -308,7 +309,7 @@ try {
   }
 
   if (process.env.PRESS_VERIFY_REAL_KEYCHAIN === '1') {
-    await verifyMacKeychainRoundTrip(binary, isolated, env)
+    await verifyMacKeychainRoundTrip(releaseBinary, isolated, env)
   }
 
   // Only the hermetic test build may honor PRESS_E2E_KEYCHAIN_FILE; release binaries must ignore it.

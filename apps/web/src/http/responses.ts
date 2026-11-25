@@ -13,8 +13,8 @@ export class HttpError extends Error {
   }
 }
 
-export function jsonResponse(body: unknown, status = 200): Response {
-  return Response.json(body, { status })
+export function jsonResponse(body: unknown, status = 200, headers?: HeadersInit): Response {
+  return Response.json(body, headers ? { status, headers } : { status })
 }
 
 function safeRequestPath(request?: Request): string | undefined {
@@ -67,7 +67,9 @@ export function jsonErrorResponse(operation: string, error: unknown, request?: R
     return jsonResponse({ error: error.message }, error.status)
   }
   if (error instanceof BodyTooLargeError) {
-    return jsonResponse({ error: error.message }, error.status)
+    // Signal connection closure when rejecting an unread oversized body so
+    // HTTP/1.1 clients do not reuse a half-closed keep-alive socket (RFC 9112 §9.6).
+    return jsonResponse({ error: error.message }, error.status, { connection: 'close' })
   }
   if (error instanceof SlugValidationError) {
     return jsonResponse({ error: error.message }, 400)

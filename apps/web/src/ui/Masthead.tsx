@@ -26,14 +26,17 @@ export function Masthead({
   readonly loginNext: string
 }) {
   const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
 
   async function signOut() {
+    setSignOutError(null)
     setSigningOut(true)
     // Reload to "/" after the session cookie is cleared so the masthead
     // re-derives from real session state rather than optimistic local state.
     const ok = await postSignOut()
     if (!ok) {
       setSigningOut(false)
+      setSignOutError('Sign-out failed. Please try again.')
       return
     }
     window.location.assign('/')
@@ -56,6 +59,11 @@ export function Masthead({
             >
               {signingOut ? 'Signing out' : 'Sign out'}
             </button>
+            {signOutError ? (
+              <span className="press-account-error" role="alert">
+                {signOutError}
+              </span>
+            ) : null}
           </span>
         ) : (
           <a

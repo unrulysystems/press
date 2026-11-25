@@ -198,12 +198,21 @@ export async function installBlob(
     }
   }
 
+  let replaced = false
   try {
     await rename(tempPath, targetPath)
+    replaced = true
     await fsyncPath(targetPath)
     await fsyncPath(directory)
   } catch (error) {
-    if (hadExisting) {
+    if (replaced) {
+      if (hadExisting) {
+        await rename(rollbackPath, targetPath).catch(() => undefined)
+      } else {
+        await rm(targetPath, { force: true }).catch(() => undefined)
+      }
+      await fsyncPath(directory).catch(() => undefined)
+    } else if (hadExisting) {
       await rm(rollbackPath, { force: true }).catch(() => undefined)
     }
     throw error

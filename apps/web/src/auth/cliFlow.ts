@@ -267,8 +267,11 @@ export async function loadActiveCliSession(headers: Headers): Promise<CliAuthori
   const dbUser = await getDb().query.user.findFirst({
     where: eq(user.id, session.user.id),
   })
-  if (!dbUser || isUserActivelyBanned({ banned: dbUser.banned, banExpires: dbUser.banExpires })) {
+  if (!dbUser) {
     return null
+  }
+  if (isUserActivelyBanned({ banned: dbUser.banned, banExpires: dbUser.banExpires })) {
+    throw new HttpError(403, 'account is suspended')
   }
   return session
 }

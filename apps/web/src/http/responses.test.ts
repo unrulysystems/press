@@ -21,6 +21,7 @@ describe('jsonErrorResponse', () => {
 
       const bodyRes = jsonErrorResponse('testOp', new BodyTooLargeError(1024))
       expect(bodyRes.status).toBe(413)
+      expect(bodyRes.headers.get('connection')).toBe('close')
 
       const slugRes = jsonErrorResponse(
         'testOp',

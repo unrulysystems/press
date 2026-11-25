@@ -323,8 +323,8 @@ async function mintAgentToken(baseUrl: string, env: Record<string, string>): Pro
   tokenDb = dbModule.getDb()
   closeTokenDb = dbModule.closeDb
 
-  const userId = await findUserIdByEmail(dbModule.db, localnetUsers.owner.email)
-  const minted = await mintApiTokenRecordForUser(dbModule.db, { userId, name: tokenName() })
+  const userId = await findUserIdByEmail(tokenDb, localnetUsers.owner.email)
+  const minted = await mintApiTokenRecordForUser(tokenDb, { userId, name: tokenName() })
   agentTokenId = minted.id
   await writeAgentEnv(baseUrl, minted.token)
   console.log('')

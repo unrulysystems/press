@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { loginAffordances } from './loginAffordances'
+import { loginAffordances, safeNext } from './loginAffordances'
 
 describe('loginAffordances (REQ-AUTH-008)', () => {
   test('both providers enabled: form + Google, seeded hint (credential ⇒ localnet)', () => {
@@ -46,5 +46,26 @@ describe('loginAffordances (REQ-AUTH-008)', () => {
         expect(view.credentialForm || view.google || view.unavailable).toBe(true)
       }
     }
+  })
+})
+
+describe('safeNext', () => {
+  test('allows safe relative paths including query and hash', () => {
+    expect(safeNext('/p/reports/q1.html')).toBe('/p/reports/q1.html')
+    expect(safeNext('/cli/authorize?port=4567&state=abc#top')).toBe(
+      '/cli/authorize?port=4567&state=abc#top',
+    )
+  })
+
+  test('rejects protocol-relative, external, backslash, and control-char open-redirect payloads', () => {
+    expect(safeNext(null)).toBe('/')
+    expect(safeNext('')).toBe('/')
+    expect(safeNext('https://evil.example/phish')).toBe('/')
+    expect(safeNext('//evil.example/phish')).toBe('/')
+    expect(safeNext('/\\evil.example/phish')).toBe('/')
+    expect(safeNext('/\t/evil.example/phish')).toBe('/')
+    expect(safeNext('/\r/evil.example/phish')).toBe('/')
+    expect(safeNext('/\n/evil.example/phish')).toBe('/')
+    expect(safeNext('/ok\u0000bad')).toBe('/')
   })
 })

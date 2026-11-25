@@ -19,3 +19,26 @@ export function loginAffordances(input: {
     seededHint: input.credentialEnabled,
   }
 }
+
+const SAFE_NEXT_SENTINEL_ORIGIN = 'https://press.invalid'
+
+export function safeNext(raw: string | null): string {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) {
+    return '/'
+  }
+  for (let index = 0; index < raw.length; index += 1) {
+    const code = raw.charCodeAt(index)
+    if (code <= 0x1f || code === 0x7f) {
+      return '/'
+    }
+  }
+  try {
+    const parsed = new URL(raw, SAFE_NEXT_SENTINEL_ORIGIN)
+    if (parsed.origin !== SAFE_NEXT_SENTINEL_ORIGIN) {
+      return '/'
+    }
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`
+  } catch {
+    return '/'
+  }
+}

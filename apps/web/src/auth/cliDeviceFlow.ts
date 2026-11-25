@@ -806,20 +806,24 @@ async function hasVerificationIdentifier(identifier: string): Promise<boolean> {
 }
 
 export async function cliDeviceStartEndpoint(request: Request): Promise<Response> {
-  const db = getDb()
-  await sweepExpiredCliVerificationRowsBestEffort(db)
-  return await startCliDeviceRequest(request, {
-    baseUrl: getDbConfig().baseUrl,
-    consumeStartLimit: async (key) =>
-      consumeRateLimit(db, {
-        identifier: startLimitIdentifier(key),
-        max: START_LIMIT_MAX,
-        windowMs: START_LIMIT_WINDOW_MS,
-        now: Date.now(),
-      }),
-    insertRows: insertVerificationRows,
-    hasIdentifier: hasVerificationIdentifier,
-  })
+  try {
+    const db = getDb()
+    await sweepExpiredCliVerificationRowsBestEffort(db)
+    return await startCliDeviceRequest(request, {
+      baseUrl: getDbConfig().baseUrl,
+      consumeStartLimit: async (key) =>
+        consumeRateLimit(db, {
+          identifier: startLimitIdentifier(key),
+          max: START_LIMIT_MAX,
+          windowMs: START_LIMIT_WINDOW_MS,
+          now: Date.now(),
+        }),
+      insertRows: insertVerificationRows,
+      hasIdentifier: hasVerificationIdentifier,
+    })
+  } catch (error) {
+    return jsonErrorResponse('cliDeviceStartEndpoint', error, request)
+  }
 }
 
 export async function cliDevicePollEndpoint(request: Request): Promise<Response> {
@@ -858,21 +862,25 @@ export async function cliDevicePollEndpoint(request: Request): Promise<Response>
 }
 
 export async function cliDeviceActivateEndpoint(request: Request): Promise<Response> {
-  const db = getDb()
-  await sweepExpiredCliVerificationRowsBestEffort(db)
-  return await activateCliDeviceRequest(request, {
-    baseUrl: getDbConfig().baseUrl,
-    getSession: loadActiveCliSession,
-    consumeActivateLimit: async (userId) =>
-      consumeRateLimit(db, {
-        identifier: activateLimitIdentifier(userId),
-        max: ACTIVATE_LIMIT_MAX,
-        windowMs: ACTIVATE_LIMIT_WINDOW_MS,
-        now: Date.now(),
-      }),
-    insertRow: insertVerificationRow,
-    consumeRow: consumeVerificationRow,
-    loadRow: loadVerificationRow,
-    saveRow: saveVerificationRow,
-  })
+  try {
+    const db = getDb()
+    await sweepExpiredCliVerificationRowsBestEffort(db)
+    return await activateCliDeviceRequest(request, {
+      baseUrl: getDbConfig().baseUrl,
+      getSession: loadActiveCliSession,
+      consumeActivateLimit: async (userId) =>
+        consumeRateLimit(db, {
+          identifier: activateLimitIdentifier(userId),
+          max: ACTIVATE_LIMIT_MAX,
+          windowMs: ACTIVATE_LIMIT_WINDOW_MS,
+          now: Date.now(),
+        }),
+      insertRow: insertVerificationRow,
+      consumeRow: consumeVerificationRow,
+      loadRow: loadVerificationRow,
+      saveRow: saveVerificationRow,
+    })
+  } catch (error) {
+    return jsonErrorResponse('cliDeviceActivateEndpoint', error, request)
+  }
 }

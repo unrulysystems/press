@@ -573,23 +573,6 @@ async function commandLogin(ctx: CliContext, args: readonly string[]): Promise<v
   }
 
   const authorizeUrl = `${ctx.host}/cli/authorize?port=${server.port}&challenge=${encodeURIComponent(challenge)}&state=${encodeURIComponent(state)}`
-  if (noOpen) {
-    if (ctx.json) {
-      console.log(
-        JSON.stringify({ ok: true, data: { status: 'authorization-required', authorizeUrl } }),
-      )
-    } else {
-      console.log(authorizeUrl)
-    }
-  } else {
-    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
-    Bun.spawn([opener, authorizeUrl], {
-      stdin: 'ignore',
-      stdout: 'ignore',
-      stderr: 'ignore',
-    }).unref()
-  }
-
   let timeoutId: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
     timeoutId = setTimeout(() => reject(new CliError('login timed out')), 120_000)
@@ -597,6 +580,32 @@ async function commandLogin(ctx: CliContext, args: readonly string[]): Promise<v
   })
 
   try {
+    if (noOpen) {
+      if (ctx.json) {
+        console.log(
+          JSON.stringify({ ok: true, data: { status: 'authorization-required', authorizeUrl } }),
+        )
+      } else {
+        console.log(authorizeUrl)
+      }
+    } else {
+      const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
+      try {
+        Bun.spawn([opener, authorizeUrl], {
+          stdin: 'ignore',
+          stdout: 'ignore',
+          stderr: 'ignore',
+        }).unref()
+      } catch {
+        if (ctx.json) {
+          console.log(
+            JSON.stringify({ ok: true, data: { status: 'authorization-required', authorizeUrl } }),
+          )
+        } else {
+          console.log(authorizeUrl)
+        }
+      }
+    }
     const code = await Promise.race([codePromise, timeout])
     const exchanged = (await apiFetch(ctx, '/api/cli/exchange', {
       method: 'POST',
@@ -620,7 +629,15 @@ async function commandLogin(ctx: CliContext, args: readonly string[]): Promise<v
   }
 }
 
-async function commandWhoami(ctx: CliContext): Promise<void> {
+export function assertNoExtraArgs(command: string, args: readonly string[]): void {
+  assertKnownOptions(args, [], [])
+  if (args.length > 0) {
+    throw new CliError(`${command} does not accept arguments: ${args.join(' ')}`)
+  }
+}
+
+async function commandWhoami(ctx: CliContext, args: readonly string[]): Promise<void> {
+  assertNoExtraArgs('whoami', args)
   const source = await requireToken(ctx)
   const body = (await apiFetch(ctx, '/api/cli/whoami', { token: source.token })) as JsonRecord
   printSuccess(ctx, {
@@ -632,7 +649,8 @@ async function commandWhoami(ctx: CliContext): Promise<void> {
   })
 }
 
-async function commandDoctor(ctx: CliContext): Promise<void> {
+async function commandDoctor(ctx: CliContext, args: readonly string[]): Promise<void> {
+  assertNoExtraArgs('doctor', args)
   const source = await resolveToken(ctx.host)
   const tokenSource = source?.kind ?? 'none'
   let whoami: WhoamiProbe | null = null
@@ -666,7 +684,8 @@ async function commandDoctor(ctx: CliContext): Promise<void> {
   }
 }
 
-async function commandLogout(ctx: CliContext): Promise<void> {
+async function commandLogout(ctx: CliContext, args: readonly string[]): Promise<void> {
+  assertNoExtraArgs('logout', args)
   const source = await requireToken(ctx)
   await apiFetch(ctx, '/api/cli/logout', {
     method: 'POST',
@@ -872,13 +891,13 @@ async function run(argv: readonly string[]): Promise<void> {
       await commandLogin(ctx, presentStrings([subcommand, ...rest]))
       return
     case 'logout':
-      await commandLogout(ctx)
+      await commandLogout(ctx, presentStrings([subcommand, ...rest]))
       return
     case 'whoami':
-      await commandWhoami(ctx)
+      await commandWhoami(ctx, presentStrings([subcommand, ...rest]))
       return
     case 'doctor':
-      await commandDoctor(ctx)
+      await commandDoctor(ctx, presentStrings([subcommand, ...rest]))
       return
     case 'publish':
       await commandPublish(ctx, presentStrings([subcommand, ...rest]))
