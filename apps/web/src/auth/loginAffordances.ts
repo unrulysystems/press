@@ -1,8 +1,6 @@
-// What the /login identity gate shows, derived purely from which providers are enabled
-// (REQ-AUTH-008 / F5). The gate must never be a copy-only dead-end: when no provider is
-// enabled it presents an explicit unavailable notice instead of an empty panel. Credential
-// auth is production-refused (INV-5), so it only ever runs on localnet — hence the seeded
-// account hint is gated on it.
+// What the /login identity gate shows, derived purely from enabled providers
+// (REQ-AUTH-008). Credential auth is production-refused (INV-5), so the seeded
+// account hint appears only when credential auth is enabled.
 export type LoginAffordances = {
   readonly credentialForm: boolean
   readonly google: boolean

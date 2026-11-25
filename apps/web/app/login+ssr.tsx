@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useLoader } from 'one'
 
-import { dbConfig } from '@press/web/db/client'
+import { getDbConfig } from '@press/web/db/client'
 import { loginAffordances } from '@press/web/auth/loginAffordances'
 import { localnetUsers } from '@press/web/auth/localnetFixtures'
 
@@ -17,19 +17,22 @@ type LoginData = {
   readonly seeded?: { readonly email: string; readonly password: string }
 }
 
+const AUTH_REQUEST_TIMEOUT_MS = 15_000
+
 function safeNext(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) {
+  if (!raw || !raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\')) {
     return '/'
   }
   return raw
 }
 
 export function loader({ request }: LoaderProps): LoginData {
-  const url = new URL(request?.url ?? dbConfig.baseUrl)
-  const credentialEnabled = dbConfig.credentialAuthEnabled
+  const config = getDbConfig()
+  const url = new URL(request?.url ?? config.baseUrl)
+  const credentialEnabled = config.credentialAuthEnabled
   return {
     credentialEnabled,
-    googleEnabled: Boolean(dbConfig.googleClientId && dbConfig.googleClientSecret),
+    googleEnabled: Boolean(config.google),
     next: safeNext(url.searchParams.get('next')),
     ...(credentialEnabled
       ? { seeded: { email: localnetUsers.owner.email, password: localnetUsers.owner.password } }
@@ -48,23 +51,29 @@ export function LoginPage() {
   async function continueWithGoogle(): Promise<void> {
     setError(null)
     setSubmitting(true)
-    const response = await fetch('/api/auth/sign-in/social', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ provider: 'google', callbackURL: data.next }),
-    })
-    if (!response.ok) {
+    try {
+      const response = await fetch('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'google', callbackURL: data.next }),
+        signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+      })
+      if (!response.ok) {
+        setSubmitting(false)
+        setError('Could not start Google sign-in. Please try again.')
+        return
+      }
+      const body = (await response.json()) as { readonly url?: string }
+      if (!body.url) {
+        setSubmitting(false)
+        setError('Google sign-in did not return a redirect URL.')
+        return
+      }
+      window.location.assign(body.url)
+    } catch {
       setSubmitting(false)
-      setError('Could not start Google sign-in. Please try again.')
-      return
+      setError('Could not reach the sign-in service. Please try again.')
     }
-    const body = (await response.json()) as { readonly url?: string }
-    if (!body.url) {
-      setSubmitting(false)
-      setError('Google sign-in did not return a redirect URL.')
-      return
-    }
-    window.location.assign(body.url)
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -75,19 +84,25 @@ export function LoginPage() {
     const form = new FormData(event.currentTarget)
     const email = String(form.get('email') ?? '')
     const password = String(form.get('password') ?? '')
-    const response = await fetch('/api/auth/sign-in/email', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password, rememberMe: true }),
-    })
+    try {
+      const response = await fetch('/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, rememberMe: true }),
+        signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+      })
 
-    if (!response.ok) {
+      if (!response.ok) {
+        setSubmitting(false)
+        setError('The email and password did not match a localnet account.')
+        return
+      }
+
+      window.location.assign(data.next)
+    } catch {
       setSubmitting(false)
-      setError('The email and password did not match a localnet account.')
-      return
+      setError('Could not reach the sign-in service. Please try again.')
     }
-
-    window.location.assign(data.next)
   }
 
   return (
@@ -118,11 +133,6 @@ export function LoginPage() {
                 <span>Password</span>
                 <input name="password" type="password" autoComplete="current-password" required />
               </label>
-              {error ? (
-                <p className="press-form-error" role="alert">
-                  {error}
-                </p>
-              ) : null}
               <button type="submit" disabled={submitting}>
                 {submitting ? 'Signing in' : 'Sign in'}
               </button>
@@ -138,6 +148,12 @@ export function LoginPage() {
             >
               Continue with Google
             </button>
+          ) : null}
+
+          {error ? (
+            <p className="press-form-error" role="alert">
+              {error}
+            </p>
           ) : null}
 
           {view.unavailable ? (

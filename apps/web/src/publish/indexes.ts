@@ -1,24 +1,20 @@
 import { decideAcl, parseCollectionSlug } from '@press/core'
 import { and, desc, eq, isNull } from 'drizzle-orm'
 
-import { auth } from '../auth/server'
-import { authenticatedViewerForSession } from '../auth/sessionViewer'
-import { db, dbConfig } from '../db/client'
+import { getAuth } from '../auth/server'
+import { loadActiveViewerForUserId } from '../auth/sessionViewer'
+import { getDb, getDbConfig } from '../db/client'
 import { collection, page, user } from '../db/schema'
+import { assertCollectionDefaultVisibility } from './serveAcl'
 
-import type {
-  AclViewer,
-  CollectionAcl,
-  CollectionDefaultVisibility,
-  CollectionSlug,
-  PageAcl,
-  PageVisibility,
-} from '@press/core'
+import type { AclViewer, CollectionAcl, CollectionSlug, PageAcl, PageVisibility } from '@press/core'
 import type { InferSelectModel } from 'drizzle-orm'
 
 type CollectionRow = InferSelectModel<typeof collection>
 type PageRow = InferSelectModel<typeof page>
 type UserRow = InferSelectModel<typeof user>
+
+export const MAX_FEED_ENTRIES = 500
 
 export type MagazineViewer = {
   readonly authenticated: boolean
@@ -64,17 +60,16 @@ async function viewerForRequest(request: Request | undefined): Promise<AclViewer
     return { kind: 'anonymous' }
   }
 
-  const session = await auth.api.getSession({ headers: request.headers })
+  const session = await getAuth().api.getSession({ headers: request.headers })
   if (!session) {
     return { kind: 'anonymous' }
   }
 
-  const dbUser = await db.query.user.findFirst({
-    where: eq(user.id, session.user.id),
-  })
-  return dbUser
-    ? (authenticatedViewerForSession(dbUser, dbConfig.adminEmails) ?? { kind: 'anonymous' })
-    : { kind: 'anonymous' }
+  return (
+    (await loadActiveViewerForUserId(getDb(), session.user.id, getDbConfig().adminEmails)) ?? {
+      kind: 'anonymous',
+    }
+  )
 }
 
 function pageAcl(row: PageRow): PageAcl {
@@ -91,14 +86,12 @@ function collectionAcl(row: CollectionRow): CollectionAcl {
   return {
     slug: row.slug,
     ownerId: row.ownerId,
-    defaultVisibility: row.defaultVisibility as CollectionDefaultVisibility,
+    defaultVisibility: assertCollectionDefaultVisibility(row.defaultVisibility),
   }
 }
 
 function resolvedVisibility(row: PageRow, collectionRow: CollectionRow): PageVisibility {
-  return (
-    row.visibility ?? (collectionRow.defaultVisibility as CollectionDefaultVisibility) ?? 'default'
-  )
+  return row.visibility ?? assertCollectionDefaultVisibility(collectionRow.defaultVisibility)
 }
 
 function canListPasswordPage(viewer: AclViewer, pageRow: PageRow, collectionRow: CollectionRow) {
@@ -116,13 +109,13 @@ function canListPasswordPage(viewer: AclViewer, pageRow: PageRow, collectionRow:
     defaultVisibility: 'default',
   }
   return decideAcl(viewer, orgGatePage, orgGateCollection, {
-    allowedDomains: dbConfig.allowedDomains,
+    allowedDomains: getDbConfig().allowedDomains,
   }).allowed
 }
 
 function canListPage(viewer: AclViewer, pageRow: PageRow, collectionRow: CollectionRow): boolean {
   const decision = decideAcl(viewer, pageAcl(pageRow), collectionAcl(collectionRow), {
-    allowedDomains: dbConfig.allowedDomains,
+    allowedDomains: getDbConfig().allowedDomains,
   })
   if (decision.allowed) {
     return true
@@ -166,7 +159,7 @@ async function readableRows(viewer: AclViewer, collectionSlug?: CollectionSlug) 
     ? and(eq(page.collectionSlug, collectionSlug), isNull(page.archivedAt))
     : isNull(page.archivedAt)
 
-  const rows = await db
+  const rows = await getDb()
     .select({
       page,
       collection,
@@ -177,6 +170,7 @@ async function readableRows(viewer: AclViewer, collectionSlug?: CollectionSlug) 
     .innerJoin(user, eq(page.publishedBy, user.id))
     .where(where)
     .orderBy(desc(page.publishedAt), desc(page.updatedAt))
+    .limit(MAX_FEED_ENTRIES)
 
   return rows.filter((row) => canListPage(viewer, row.page, row.collection))
 }
@@ -201,7 +195,7 @@ export async function loadMagazineCollection(
     return null
   }
 
-  const collectionRow = await db.query.collection.findFirst({
+  const collectionRow = await getDb().query.collection.findFirst({
     where: eq(collection.slug, collectionSlug),
   })
   if (!collectionRow) {

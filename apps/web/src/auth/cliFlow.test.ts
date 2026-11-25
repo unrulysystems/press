@@ -1,20 +1,7 @@
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
-type CliFlowModule = typeof import('./cliFlow')
-
-let cliFlow: CliFlowModule
-
-beforeAll(async () => {
-  process.env.NODE_ENV = 'development'
-  process.env.PRESS_BASE_URL = 'http://press.test'
-  process.env.PRESS_ALLOWED_DOMAINS = 'send.it'
-  process.env.PRESS_ADMIN_EMAILS = 'admin@send.it'
-  process.env.DATABASE_URL = 'postgres://press:press@127.0.0.1:54329/press'
-  process.env.PRESS_STORAGE_DIR = '.press/test/storage'
-  process.env.BETTER_AUTH_SECRET = 'test-secret-at-least-32-bytes-long'
-  process.env.PRESS_ENABLE_CREDENTIAL_AUTH = '1'
-  cliFlow = await import('./cliFlow')
-})
+import { HttpError } from '../http/responses'
+import * as cliFlow from './cliFlow'
 
 function authorizeUrl(extra = ''): string {
   return `http://press.test/cli/authorize?port=4567&challenge=${'a'.repeat(32)}${extra}`
@@ -41,7 +28,7 @@ const pendingForOwner = {
   state: 's'.repeat(32),
 } as const
 
-describe('authorizeCliRequest (B-1 consent step)', () => {
+describe('authorizeCliRequest (consent step)', () => {
   test('rejects impersonated sessions without storing a pending record', async () => {
     const pendingInserts: unknown[] = []
     const response = await cliFlow.authorizeCliRequest(new Request(authorizeUrl()), {
@@ -89,7 +76,7 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
     expect(response.headers.get('content-type')).toContain('text/html')
     // The form-action policy must permit the server's loopback redirect or a
     // real browser blocks the post-approval navigation and the CLI never
-    // receives its code (B-1 review round 4 floor).
+    // receives its code.
     expect(response.headers.get('content-security-policy')).toContain(
       "form-action 'self' http://127.0.0.1:*",
     )
@@ -169,9 +156,29 @@ describe('authorizeCliRequest (B-1 consent step)', () => {
     await expect(response.json()).resolves.toEqual({ error: 'state is required' })
     expect(pendingInserts).toEqual([])
   })
+
+  test('rejects suspended accounts without storing a pending record', async () => {
+    const pendingInserts: unknown[] = []
+    const response = await cliFlow.authorizeCliRequest(
+      new Request(authorizeUrl(`&state=${'s'.repeat(32)}`)),
+      {
+        baseUrl: 'http://press.test',
+        async getSession() {
+          throw new HttpError(403, 'account is suspended')
+        },
+        async insertPending(row) {
+          pendingInserts.push(row)
+        },
+      },
+    )
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({ error: 'account is suspended' })
+    expect(pendingInserts).toEqual([])
+  })
 })
 
-describe('approveCliRequest (B-1 consent POST)', () => {
+describe('approveCliRequest (consent POST)', () => {
   test('rejects non-POST requests', async () => {
     const response = await cliFlow.approveCliRequest(new Request('http://press.test/cli/approve'), {
       async getSession() {
@@ -221,10 +228,10 @@ describe('approveCliRequest (B-1 consent POST)', () => {
     })
   })
 
-  // The reviewer-found gap (B-1 round 1, major): a hostile same-site page can
-  // choose its own state and forge the approve POST with the session cookie.
-  // The CSRF secret is the server-generated consent token, so a forged POST
-  // (valid session, consent the server never issued) must fail closed.
+  // A hostile same-site page can choose its own state and forge the approve
+  // POST with the session cookie. The CSRF secret is the server-generated
+  // consent token, so a forged POST (valid session, consent the server never
+  // issued) must fail closed.
   test('rejects a forged POST whose consent token the server never issued', async () => {
     // Well-formed shape, but the server never issued it: consumePending finds
     // no record, so the code must never be minted.
@@ -316,5 +323,24 @@ describe('approveCliRequest (B-1 consent POST)', () => {
       challenge: 'a'.repeat(32),
     })
     expect(code.expiresAt.getTime()).toBe(5 * 60 * 1000)
+  })
+
+  test('rejects suspended accounts without minting a code', async () => {
+    const insertedCodes: unknown[] = []
+    const response = await cliFlow.approveCliRequest(approveRequest('c'.repeat(32)), {
+      async getSession() {
+        throw new HttpError(403, 'account is suspended')
+      },
+      async consumePending() {
+        return pendingForOwner
+      },
+      async insertVerification(row) {
+        insertedCodes.push(row)
+      },
+    })
+
+    expect(response.status).toBe(403)
+    await expect(response.json()).resolves.toEqual({ error: 'account is suspended' })
+    expect(insertedCodes).toEqual([])
   })
 })

@@ -4,7 +4,7 @@ import { eq, sql } from 'drizzle-orm'
 
 import { verification } from '../db/schema'
 
-import type { db as dbClient } from '../db/client'
+import type { PressDb } from '../db/client'
 
 export type RateLimitState = {
   readonly count: number
@@ -44,7 +44,7 @@ export function nextRateLimitState(
 // Fetch Request has no trusted peer address). Returns false once `max` attempts have
 // been counted inside the window.
 export async function consumeRateLimit(
-  db: typeof dbClient,
+  db: PressDb,
   input: {
     readonly identifier: string
     readonly max: number

@@ -10,7 +10,7 @@ import type { APIRequestContext, APIResponse } from '@playwright/test'
 
 import { findUserIdByEmail, mintApiTokenForUser } from '../apps/web/src/auth/apiTokens'
 import { localnetDemoPages, localnetUsers } from '../apps/web/src/auth/localnetFixtures'
-import { closeDb, db, pool } from '../apps/web/src/db/client'
+import { closeDb, getDb, getPool } from '../apps/web/src/db/client'
 import {
   findCollection,
   findMatchingAuditEvent,
@@ -24,6 +24,8 @@ import { moveBlob } from '../apps/web/src/publish/storage'
 import { newE2EAPIContext } from './api'
 
 const runSlug = `pub-${Date.now().toString(36)}`
+const db = getDb()
+const pool = getPool()
 
 type SeedActor = {
   readonly id: string
@@ -383,18 +385,23 @@ test('publish endpoint enforces bearer auth, validation, storage, overwrite, and
   })
   expect(cookieOnly.status()).toBe(401)
 
-  for (const invalidFileSlug of ['a..b.html', '..%2Fevil.html', 'reports%2Fevil.html']) {
-    const invalidSlug = await api.put(`/api/pages/${collectionSlug}/${invalidFileSlug}`, {
-      headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-      data: body,
-    })
-    expect(invalidSlug.status(), `${invalidFileSlug} rejected`).toBe(400)
-  }
+  const invalidFileSlugs = ['a..b.html', '..%2Fevil.html', 'reports%2Fevil.html'] as const
+  await Promise.all(
+    invalidFileSlugs.map(async (invalidFileSlug) => {
+      const invalidSlug = await api.put(`/api/pages/${collectionSlug}/${invalidFileSlug}`, {
+        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+        data: body,
+      })
+      expect(invalidSlug.status(), `${invalidFileSlug} rejected`).toBe(400)
+    }),
+  )
   expect(await blobDirectoryEntries(collectionSlug)).toEqual([])
-  for (const invalidFileSlug of ['a..b.html', '..%2Fevil.html', 'reports%2Fevil.html']) {
-    const traversalServe = await api.get(`/p/${collectionSlug}/${invalidFileSlug}`)
-    expect(traversalServe.status(), `${invalidFileSlug} not served`).toBe(404)
-  }
+  await Promise.all(
+    invalidFileSlugs.map(async (invalidFileSlug) => {
+      const traversalServe = await api.get(`/p/${collectionSlug}/${invalidFileSlug}`)
+      expect(traversalServe.status(), `${invalidFileSlug} not served`).toBe(404)
+    }),
+  )
 
   const invalidType = await api.put(`/api/pages/${collectionSlug}/wrong-type.html`, {
     headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
@@ -1064,7 +1071,7 @@ test('transaction rollback restores the previous blob when audit insert fails', 
   expect((await findPage(db, collectionSlug, fileSlug))?.title).toBe('Original')
 })
 
-test('password gate: branded HTML entry, form+cookie unlock, Basic for programmatic (F1)', async ({
+test('password gate: branded HTML entry, form+cookie unlock, Basic for programmatic', async ({
   baseURL,
   page,
 }) => {
@@ -1139,9 +1146,7 @@ test('password gate: branded HTML entry, form+cookie unlock, Basic for programma
   await expect(page.locator('body')).toContainText(bodyMarker)
 })
 
-test('malformed percent-encoding in mutation paths returns 400, not 500 (M-2)', async ({
-  baseURL,
-}) => {
+test('malformed percent-encoding in mutation paths returns 400, not 500', async ({ baseURL }) => {
   const api = await newE2EAPIContext({ baseURL })
   // %E0%A4%A is a truncated UTF-8 sequence: it is syntactically valid
   // percent-encoding (so it survives URL parsing) but decodeURIComponent rejects
@@ -1175,7 +1180,7 @@ test('malformed percent-encoding in mutation paths returns 400, not 500 (M-2)', 
   }
 })
 
-test('anonymous endpoint bodies are byte-capped (M-3)', async ({ baseURL }) => {
+test('anonymous endpoint bodies are byte-capped', async ({ baseURL }) => {
   const api = await newE2EAPIContext({ baseURL })
   // /api/cli/exchange is unauthenticated: an oversized JSON body must 413 before
   // any buffering or code/verifier validation (no memory-exhaustion vector).
@@ -1202,10 +1207,7 @@ test('anonymous endpoint bodies are byte-capped (M-3)', async ({ baseURL }) => {
   expect(unlock.status()).toBe(413)
 })
 
-test('password reroll invalidates a previously issued unlock cookie (F-15/19)', async ({
-  baseURL,
-  page,
-}) => {
+test('password reroll invalidates a previously issued unlock cookie', async ({ baseURL, page }) => {
   if (!baseURL) {
     throw new Error('Playwright baseURL missing')
   }
@@ -1661,7 +1663,7 @@ test('localnet seeding restores a moved demo page without stale redirects or blo
   expect(await exists(blobPath(destinationCollection, destinationFile))).toBe(false)
   expect(await findPageRedirect(db, demoPage.collectionSlug, demoPage.fileSlug)).toBeUndefined()
 })
-test('republish after unpublish starts neutral — stale ACL and password never resurrect (F-18)', async ({
+test('republish after unpublish starts neutral — stale ACL and password never resurrect', async ({
   baseURL,
 }) => {
   const api = await newE2EAPIContext({ baseURL })
@@ -1757,36 +1759,41 @@ test('republish after unpublish starts neutral — stale ACL and password never 
   })
 })
 
-test('concurrent first publishes to a brand-new collection never 500 (M-1)', async ({
-  baseURL,
-}) => {
+test('concurrent first publishes to a brand-new collection never 500', async ({ baseURL }) => {
   const api = await newE2EAPIContext({ baseURL })
   // The race window is between each transaction's collection findFirst and its
   // insert. Firing both PUTs concurrently across several brand-new collections
   // forces the interleave often enough to make the pre-fix unique-violation 500
   // observable; the hard invariant this guards is "never 500", which the fixed
   // onConflictDoNothing + re-read makes deterministic for any interleave.
-  for (let round = 0; round < 4; round += 1) {
-    const collectionSlug = `${runSlug}-first-publish-race-${round}`
-    const [first, second] = await Promise.all([
-      api.put(`/api/pages/${collectionSlug}/a.html`, {
-        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-        data: '<!doctype html><title>A</title>',
-      }),
-      api.put(`/api/pages/${collectionSlug}/b.html`, {
-        headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
-        data: '<!doctype html><title>B</title>',
-      }),
-    ])
-    expect(first.status(), await first.text()).not.toBe(500)
-    expect(second.status(), await second.text()).not.toBe(500)
-    expect(await findPage(db, collectionSlug, 'a.html')).toBeDefined()
-    expect(await findPage(db, collectionSlug, 'b.html')).toBeDefined()
-    expect(await findCollection(db, collectionSlug)).toBeDefined()
-  }
+  await Promise.all(
+    [0, 1, 2, 3].map(async (round) => {
+      const collectionSlug = `${runSlug}-first-publish-race-${round}`
+      const [first, second] = await Promise.all([
+        api.put(`/api/pages/${collectionSlug}/a.html`, {
+          headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+          data: '<!doctype html><title>A</title>',
+        }),
+        api.put(`/api/pages/${collectionSlug}/b.html`, {
+          headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+          data: '<!doctype html><title>B</title>',
+        }),
+      ])
+      expect(first.status(), await first.text()).not.toBe(500)
+      expect(second.status(), await second.text()).not.toBe(500)
+      const [pageA, pageB, createdCollection] = await Promise.all([
+        findPage(db, collectionSlug, 'a.html'),
+        findPage(db, collectionSlug, 'b.html'),
+        findCollection(db, collectionSlug),
+      ])
+      expect(pageA).toBeDefined()
+      expect(pageB).toBeDefined()
+      expect(createdCollection).toBeDefined()
+    }),
+  )
 })
 
-test('banned user session cannot read protected pages (F-29)', async ({ baseURL }) => {
+test('banned user session cannot read protected pages', async ({ baseURL }) => {
   // The bearer-token path already rejects bans (verifyApiToken); the session path
   // must match. secondUser (send.it) may read the seeded default page while
   // unbanned and must be denied once banned, even though the session is still live.
@@ -1809,6 +1816,12 @@ test('banned user session cannot read protected pages (F-29)', async ({ baseURL 
     )
     const before = await session.get(pagePath)
     expect(before.status(), 'unbanned secondUser may read a default page').toBe(200)
+    const whoamiBefore = await session.get('/api/whoami')
+    expect(whoamiBefore.status()).toBe(200)
+    await expect(whoamiBefore.json()).resolves.toMatchObject({
+      authenticated: true,
+      user: { email: localnetUsers.secondUser.email, role: 'user' },
+    })
 
     await pool.query(
       'update "user" set "banned" = true, "banReason" = $1, "banExpires" = null where email = $2',
@@ -1816,6 +1829,13 @@ test('banned user session cannot read protected pages (F-29)', async ({ baseURL 
     )
     const after = await session.get(pagePath)
     expect(after.status(), 'banned session must not read a default page').toBe(401)
+    const whoamiAfter = await session.get('/api/whoami')
+    expect(whoamiAfter.status(), 'banned session must be rejected by /api/whoami').toBe(401)
+    await expect(whoamiAfter.json()).resolves.toEqual({ authenticated: false })
+    const authorizeAfter = await session.get(
+      `/cli/authorize?port=4567&challenge=${'a'.repeat(32)}&state=${'s'.repeat(32)}`,
+    )
+    expect(authorizeAfter.status(), 'banned session must not start CLI authorization').toBe(403)
   } finally {
     await pool.query(
       'update "user" set "banned" = $1, "banReason" = $2, "banExpires" = $3 where email = $4',
@@ -1824,7 +1844,7 @@ test('banned user session cannot read protected pages (F-29)', async ({ baseURL 
   }
 })
 
-test('expired device-flow rows are swept by auth entry points (F-33)', async ({ baseURL }) => {
+test('expired device-flow rows are swept by auth entry points', async ({ baseURL }) => {
   const api = await newE2EAPIContext({ baseURL })
   const identifier = 'cli:device:consent:sweep-test'
   await pool.query(
@@ -1850,7 +1870,7 @@ test('expired device-flow rows are swept by auth entry points (F-33)', async ({ 
   )
 })
 
-test('mutation endpoints reject oversized JSON bodies (F-34)', async ({ baseURL }) => {
+test('mutation endpoints reject oversized JSON bodies', async ({ baseURL }) => {
   const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-mut-body-limit`
   const fileSlug = 'index.html'
@@ -1866,4 +1886,49 @@ test('mutation endpoints reject oversized JSON bodies (F-34)', async ({ baseURL 
     data: { title: 'x'.repeat(2 * 1024 * 1024) },
   })
   expect(oversized.status(), await oversized.text()).toBe(413)
+})
+
+test('PATCH page supports atomic custom password and clears passwordHash on visibility reset', async ({
+  baseURL,
+}) => {
+  const api = await newE2EAPIContext({ baseURL })
+  const collectionSlug = `${runSlug}-patch-pw-atomic`
+  const fileSlug = 'atomic.html'
+  const customPassword = 'atomic-patch-secret-1776'
+
+  const publish = await api.put(`/api/pages/${collectionSlug}/${fileSlug}?visibility=public`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'text/html' }),
+    data: '<!doctype html><title>Atomic Patch</title><p>body</p>',
+  })
+  expect(publish.status(), await publish.text()).toBe(200)
+
+  const setPassword = await api.patch(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, {
+      'content-type': 'application/json',
+      'x-press-page-password': customPassword,
+    }),
+    data: { visibility: 'password' },
+  })
+  expect(setPassword.status(), await setPassword.text()).toBe(200)
+  await expect(setPassword.json()).resolves.toMatchObject({
+    visibility: 'password',
+    password: customPassword,
+  })
+  expect(
+    (
+      await api.get(`/p/${collectionSlug}/${fileSlug}`, {
+        headers: { authorization: basicAuth(customPassword) },
+      })
+    ).status(),
+  ).toBe(200)
+
+  // Resetting visibility to null (inherit collection default) must clear the stored hash.
+  const reset = await api.patch(`/api/pages/${collectionSlug}/${fileSlug}`, {
+    headers: authHeaders(actors.owner.token, { 'content-type': 'application/json' }),
+    data: { visibility: null },
+  })
+  expect(reset.status(), await reset.text()).toBe(200)
+  const rowAfterReset = await findPage(db, collectionSlug, fileSlug)
+  expect(rowAfterReset?.visibility).toBeNull()
+  expect(rowAfterReset?.passwordHash).toBeNull()
 })

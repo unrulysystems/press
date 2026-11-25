@@ -21,8 +21,10 @@ describe('auth provider config', () => {
   test('pins Google to identity-only scopes without offline access', () => {
     const google = buildAuthProviderConfig({
       ...baseConfig,
-      googleClientId: 'google-client-id',
-      googleClientSecret: 'google-client-secret',
+      google: {
+        clientId: 'google-client-id',
+        clientSecret: 'google-client-secret',
+      },
     }).socialProviders?.google
 
     expect(google?.scope).toEqual(['openid', 'email', 'profile'])
@@ -33,23 +35,11 @@ describe('auth provider config', () => {
     expect(google).not.toHaveProperty('prompt')
   })
 
-  test('omits social providers unless both Google credential values are present', () => {
+  test('omits social providers when Google credentials are absent', () => {
     expect(buildAuthProviderConfig(baseConfig).socialProviders).toBeUndefined()
-    expect(
-      buildAuthProviderConfig({
-        ...baseConfig,
-        googleClientId: 'google-client-id',
-      }).socialProviders,
-    ).toBeUndefined()
-    expect(
-      buildAuthProviderConfig({
-        ...baseConfig,
-        googleClientSecret: 'google-client-secret',
-      }).socialProviders,
-    ).toBeUndefined()
   })
 
-  test('keeps credential provider settings unchanged', () => {
+  test('reflects credential auth enablement in provider settings', () => {
     expect(buildAuthProviderConfig(baseConfig).emailAndPassword).toEqual({
       enabled: true,
       minPasswordLength: 8,

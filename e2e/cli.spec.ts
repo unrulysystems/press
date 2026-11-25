@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 
@@ -7,7 +7,7 @@ import { expect, test } from '@playwright/test'
 
 import { localnetUsers } from '../apps/web/src/auth/localnetFixtures'
 import { findUserIdByEmail } from '../apps/web/src/auth/apiTokens'
-import { db } from '../apps/web/src/db/client'
+import { getDb } from '../apps/web/src/db/client'
 import { findMatchingAuditEvent, findPage } from '../apps/web/src/publish/e2eSupport'
 import { newE2EAPIContext } from './api'
 import { pressCliExecutable } from '../scripts/pressCliExecutable'
@@ -15,6 +15,43 @@ import { pressCliExecutable } from '../scripts/pressCliExecutable'
 const root = resolve(import.meta.dirname, '..')
 const pressBin = pressCliExecutable()
 const runSlug = `cli-${Date.now().toString(36)}`
+const db = getDb()
+const createdTempDirs: string[] = []
+const CLI_COMMAND_TIMEOUT_MS = 30_000
+
+async function makeTempDir(prefix: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), prefix))
+  createdTempDirs.push(dir)
+  return dir
+}
+
+test.afterAll(async () => {
+  await Promise.all(
+    createdTempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })),
+  )
+})
+
+function waitForExitBounded(
+  exitResult: Promise<PressResult>,
+  label: string,
+  timeoutMs = CLI_COMMAND_TIMEOUT_MS,
+): Promise<PressResult> {
+  let timeout: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([
+    exitResult,
+    new Promise<never>((_, reject) => {
+      timeout = setTimeout(
+        () => reject(new Error(`${label} did not exit within ${timeoutMs}ms`)),
+        timeoutMs,
+      )
+      timeout.unref()
+    }),
+  ]).finally(() => {
+    if (timeout) {
+      clearTimeout(timeout)
+    }
+  })
+}
 
 type PressResult = {
   readonly code: number
@@ -52,7 +89,7 @@ function countOccurrences(haystack: string, needle: string): number {
 }
 
 async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
-  const dir = await mkdtemp(join(tmpdir(), `press-cli-${label}-`))
+  const dir = await makeTempDir(`press-cli-${label}-`)
   const keychainFile = join(dir, 'keychain.json')
   return {
     ...baseProcessEnv(),
@@ -63,7 +100,7 @@ async function makePressEnv(baseURL: string, label: string): Promise<PressEnv> {
 }
 
 async function makePressTokenEnv(baseURL: string, label: string, token: string): Promise<PressEnv> {
-  const dir = await mkdtemp(join(tmpdir(), `press-cli-${label}-`))
+  const dir = await makeTempDir(`press-cli-${label}-`)
   return {
     ...baseProcessEnv(),
     PATH: dir,
@@ -82,14 +119,23 @@ function runPress(args: readonly string[], env: PressEnv): Promise<PressResult> 
     })
     let stdout = ''
     let stderr = ''
+    const timeout = setTimeout(() => {
+      child.kill('SIGTERM')
+      reject(new Error(`press ${args.join(' ')} timed out after ${CLI_COMMAND_TIMEOUT_MS}ms`))
+    }, CLI_COMMAND_TIMEOUT_MS)
+    timeout.unref()
     child.stdout.on('data', (chunk) => {
       stdout += String(chunk)
     })
     child.stderr.on('data', (chunk) => {
       stderr += String(chunk)
     })
-    child.on('error', reject)
+    child.on('error', (error) => {
+      clearTimeout(timeout)
+      reject(error)
+    })
     child.on('close', (code) => {
+      clearTimeout(timeout)
       resolveRun({ code: code ?? 1, stdout, stderr })
     })
   })
@@ -121,81 +167,95 @@ async function loginViaLoopback(
     child.on('error', reject)
     child.on('close', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
   })
-  const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
-    child.stdout.on('data', (chunk) => {
-      stdout += String(chunk)
-      const match = /(http:\/\/127\.0\.0\.1:\d+\/cli\/authorize\?[^\s]+)/.exec(stdout)
-      if (match?.[1]) {
-        resolveUrl(match[1])
+  try {
+    const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('press login did not print authorize URL')),
+        10_000,
+      )
+      timeout.unref()
+      const finish = (fn: () => void) => {
+        clearTimeout(timeout)
+        fn()
       }
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+        const match = /(http:\/\/127\.0\.0\.1:\d+\/cli\/authorize\?[^\s]+)/.exec(stdout)
+        if (match?.[1]) {
+          finish(() => resolveUrl(match[1]))
+        }
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+      child.on('error', (error) => finish(() => reject(error)))
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          finish(() => reject(new Error(`press login exited ${code}: ${stderr || stdout}`)))
+        }
+      })
     })
-    child.stderr.on('data', (chunk) => {
-      stderr += String(chunk)
+
+    const browserSession = await newE2EAPIContext({ baseURL })
+    const signIn = await browserSession.post('/api/auth/sign-in/email', {
+      headers: { 'content-type': 'application/json' },
+      data: {
+        email: localnetUsers[userKey].email,
+        password: localnetUsers[userKey].password,
+        rememberMe: true,
+      },
     })
-    child.on('error', reject)
-    child.on('exit', (code) => {
-      if (code !== 0) {
-        reject(new Error(`press login exited ${code}: ${stderr || stdout}`))
-      }
+    expect(signIn.status()).toBe(200)
+
+    // Consent flow: the authorize URL renders a same-origin approval page,
+    // and the loopback code is minted only after the user approves. The form's
+    // CSRF secret is a server-generated consent token, never the client state.
+    const page = await browserSession.get(authorizeUrl)
+    expect(page.status()).toBe(200)
+    const pageHtml = await page.text()
+    expect(pageHtml).toContain('Approve CLI sign-in?')
+    expect(pageHtml).toContain('action="/cli/approve"')
+    const authorizeState = new URL(authorizeUrl).searchParams.get('state')
+    expect(authorizeState).toBeTruthy()
+    expect(pageHtml).not.toContain('name="state"')
+    const consentMatch = /name="consent" value="([A-Za-z0-9_-]{32,128})"/.exec(pageHtml)
+    expect(consentMatch?.[1]).toBeTruthy()
+
+    const approved = await browserSession.post('/cli/approve', {
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      data: `consent=${encodeURIComponent(consentMatch![1])}`,
+      maxRedirects: 0,
     })
-    setTimeout(() => reject(new Error('press login did not print authorize URL')), 10_000).unref()
-  })
+    expect(approved.status()).toBe(302)
+    const callback = new URL(approved.headers().location ?? '', 'http://127.0.0.1')
+    expect(callback.hostname).toBe('127.0.0.1')
+    expect(callback.searchParams.get('code')).toBeTruthy()
+    expect(callback.searchParams.get('state')).toBe(authorizeState)
 
-  const browserSession = await newE2EAPIContext({ baseURL })
-  const signIn = await browserSession.post('/api/auth/sign-in/email', {
-    headers: { 'content-type': 'application/json' },
-    data: {
-      email: localnetUsers[userKey].email,
-      password: localnetUsers[userKey].password,
-      rememberMe: true,
-    },
-  })
-  expect(signIn.status()).toBe(200)
+    // A real browser follows the loopback redirect; delivering the callback lets
+    // the CLI's local listener resolve the code and finish `press login`.
+    const callbackDelivery = await browserSession.get(callback.toString())
+    expect(callbackDelivery.status()).toBe(200)
 
-  // B-1 consent flow: the authorize URL renders a same-origin approval page,
-  // and the loopback code is minted only after the user approves. The form's
-  // CSRF secret is a server-generated consent token, never the client state.
-  const page = await browserSession.get(authorizeUrl)
-  expect(page.status()).toBe(200)
-  const pageHtml = await page.text()
-  expect(pageHtml).toContain('Approve CLI sign-in?')
-  expect(pageHtml).toContain('action="/cli/approve"')
-  const authorizeState = new URL(authorizeUrl).searchParams.get('state')
-  expect(authorizeState).toBeTruthy()
-  expect(pageHtml).not.toContain('name="state"')
-  const consentMatch = /name="consent" value="([A-Za-z0-9_-]{32,128})"/.exec(pageHtml)
-  expect(consentMatch?.[1]).toBeTruthy()
+    // Non-POST methods reach the endpoint's 405 branch through the real route.
+    const wrongMethod = await browserSession.get('/cli/approve')
+    expect(wrongMethod.status()).toBe(405)
 
-  const approved = await browserSession.post('/cli/approve', {
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    data: `consent=${encodeURIComponent(consentMatch![1])}`,
-    maxRedirects: 0,
-  })
-  expect(approved.status()).toBe(302)
-  const callback = new URL(approved.headers().location ?? '', 'http://127.0.0.1')
-  expect(callback.hostname).toBe('127.0.0.1')
-  expect(callback.searchParams.get('code')).toBeTruthy()
-  expect(callback.searchParams.get('state')).toBe(authorizeState)
-
-  // A real browser follows the loopback redirect; delivering the callback lets
-  // the CLI's local listener resolve the code and finish `press login`.
-  const callbackDelivery = await browserSession.get(callback.toString())
-  expect(callbackDelivery.status()).toBe(200)
-
-  // Non-POST methods reach the endpoint's 405 branch through the real route.
-  const wrongMethod = await browserSession.get('/cli/approve')
-  expect(wrongMethod.status()).toBe(405)
-
-  const result = await exitResult
-  expect(result.code).toBe(0)
-  expect(result.stdout).toContain(`logged in as ${localnetUsers[userKey].email}`)
+    const result = await waitForExitBounded(exitResult, 'press login (loopback)')
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(`logged in as ${localnetUsers[userKey].email}`)
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+    }
+  }
 }
 
-// Real-browser B-1 floor: the consent POST and its loopback redirect must
+// Real-browser CSP floor: the consent POST and its loopback redirect must
 // survive actual Chromium CSP enforcement (form-action governs the redirect
 // that follows a form submission), or the CLI never receives its code. The
 // API-context helpers above bypass CSP, so this test drives a real page.
-test('press CLI login completes through a real-browser consent click (B-1 CSP floor)', async ({
+test('press CLI login completes through a real-browser consent click (CSP floor)', async ({
   baseURL,
   page,
 }) => {
@@ -215,47 +275,61 @@ test('press CLI login completes through a real-browser consent click (B-1 CSP fl
     child.on('error', reject)
     child.on('close', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
   })
-  const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
-    child.stdout.on('data', (chunk) => {
-      stdout += String(chunk)
-      const match = /(http:\/\/127\.0\.0\.1:\d+\/cli\/authorize\?[^\s]+)/.exec(stdout)
-      if (match?.[1]) {
-        resolveUrl(match[1])
+  try {
+    const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('press login did not print authorize URL')),
+        10_000,
+      )
+      timeout.unref()
+      const finish = (fn: () => void) => {
+        clearTimeout(timeout)
+        fn()
       }
+      child.stdout.on('data', (chunk) => {
+        stdout += String(chunk)
+        const match = /(http:\/\/127\.0\.0\.1:\d+\/cli\/authorize\?[^\s]+)/.exec(stdout)
+        if (match?.[1]) {
+          finish(() => resolveUrl(match[1]))
+        }
+      })
+      child.stderr.on('data', (chunk) => {
+        stderr += String(chunk)
+      })
+      child.on('error', (error) => finish(() => reject(error)))
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          finish(() => reject(new Error(`press login exited ${code}: ${stderr || stdout}`)))
+        }
+      })
     })
-    child.stderr.on('data', (chunk) => {
-      stderr += String(chunk)
-    })
-    child.on('error', reject)
-    child.on('exit', (code) => {
-      if (code !== 0) {
-        reject(new Error(`press login exited ${code}: ${stderr || stdout}`))
-      }
-    })
-    setTimeout(() => reject(new Error('press login did not print authorize URL')), 10_000).unref()
-  })
 
-  await page.goto('/login?next=/')
-  await page.getByLabel('Email').fill(localnetUsers.owner.email)
-  await page.getByLabel('Password').fill(localnetUsers.owner.password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL('/')
+    await page.goto('/login?next=/')
+    await page.getByLabel('Email').fill(localnetUsers.owner.email)
+    await page.getByLabel('Password').fill(localnetUsers.owner.password)
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page).toHaveURL('/')
 
-  const approvalResponse = await page.goto(authorizeUrl)
-  expect(approvalResponse?.status()).toBe(200)
-  await expect(page.getByRole('heading', { name: 'Approve CLI sign-in?' })).toBeVisible()
+    const approvalResponse = await page.goto(authorizeUrl)
+    expect(approvalResponse?.status()).toBe(200)
+    await expect(page.getByRole('heading', { name: 'Approve CLI sign-in?' })).toBeVisible()
 
-  // The browser POSTs the consent form and must follow the server's loopback
-  // redirect to the CLI's local listener.
-  await page.getByRole('button', { name: 'Approve' }).click()
+    // The browser POSTs the consent form and must follow the server's loopback
+    // redirect to the CLI's local listener.
+    await page.getByRole('button', { name: 'Approve' }).click()
 
-  const result = await exitResult
-  expect(result.code).toBe(0)
-  expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
+    const result = await waitForExitBounded(exitResult, 'press login (browser consent)')
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
 
-  // Revoke the minted token so the localnet token table stays clean.
-  const logout = await runPress(['logout'], env)
-  expect(logout.code).toBe(0)
+    // Revoke the minted token so the localnet token table stays clean.
+    const logout = await runPress(['logout'], env)
+    expect(logout.code).toBe(0)
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+    }
+  }
 })
 
 test('press CLI device login completes through a real-browser consent click', async ({
@@ -279,67 +353,80 @@ test('press CLI device login completes through a real-browser consent click', as
     child.on('error', reject)
     child.on('close', (code) => resolveRun({ code: code ?? 1, stdout, stderr }))
   })
-  const started = await new Promise<{ readonly url: string; readonly userCode: string }>(
-    (resolveStart, reject) => {
-      child.stdout.on('data', (chunk) => {
-        stdout += String(chunk)
-        const match =
-          /Visit (https?:\/\/\S+\/cli\/activate) and enter code ([A-Z2-9]{4}-[A-Z2-9]{4})/.exec(
-            stdout,
-          )
-        if (match?.[1] && match[2]) {
-          resolveStart({ url: match[1], userCode: match[2] })
+  try {
+    const started = await new Promise<{ readonly url: string; readonly userCode: string }>(
+      (resolveStart, reject) => {
+        const timeout = setTimeout(
+          () => reject(new Error('press login --device did not print a verification URI')),
+          10_000,
+        )
+        timeout.unref()
+        const finish = (fn: () => void) => {
+          clearTimeout(timeout)
+          fn()
         }
-      })
-      child.stderr.on('data', (chunk) => {
-        stderr += String(chunk)
-      })
-      child.on('error', reject)
-      child.on('exit', (code) => {
-        if (code !== 0) {
-          reject(new Error(`press login --device exited ${code}: ${stderr || stdout}`))
-        }
-      })
-      setTimeout(
-        () => reject(new Error('press login --device did not print a verification URI')),
-        10_000,
-      ).unref()
-    },
-  )
+        child.stdout.on('data', (chunk) => {
+          stdout += String(chunk)
+          const match =
+            /Visit (https?:\/\/\S+\/cli\/activate) and enter code ([A-Z2-9]{4}-[A-Z2-9]{4})/.exec(
+              stdout,
+            )
+          if (match?.[1] && match[2]) {
+            finish(() => resolveStart({ url: match[1], userCode: match[2] }))
+          }
+        })
+        child.stderr.on('data', (chunk) => {
+          stderr += String(chunk)
+        })
+        child.on('error', (error) => finish(() => reject(error)))
+        child.on('exit', (code) => {
+          if (code !== 0) {
+            finish(() =>
+              reject(new Error(`press login --device exited ${code}: ${stderr || stdout}`)),
+            )
+          }
+        })
+      },
+    )
 
-  expect(stdout).toContain('/cli/activate')
-  expect(stdout).not.toContain('device_code')
-  expect(stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+    expect(stdout).toContain('/cli/activate')
+    expect(stdout).not.toContain('device_code')
+    expect(stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
 
-  const beforeApprove = await runPress(['whoami'], env)
-  expect(beforeApprove.code).toBe(2)
+    const beforeApprove = await runPress(['whoami'], env)
+    expect(beforeApprove.code).toBe(2)
 
-  await page.goto('/login?next=/')
-  await page.getByLabel('Email').fill(localnetUsers.owner.email)
-  await page.getByLabel('Password').fill(localnetUsers.owner.password)
-  await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page).toHaveURL('/')
+    await page.goto('/login?next=/')
+    await page.getByLabel('Email').fill(localnetUsers.owner.email)
+    await page.getByLabel('Password').fill(localnetUsers.owner.password)
+    await page.getByRole('button', { name: 'Sign in' }).click()
+    await expect(page).toHaveURL('/')
 
-  const activateResponse = await page.goto(`${started.url}?user_code=${started.userCode}`)
-  expect(activateResponse?.status()).toBe(200)
-  await expect(page.getByRole('heading', { name: 'Approve CLI sign-in?' })).toBeVisible()
-  await expect(page.getByLabel('User code')).toHaveValue(started.userCode)
-  await page.getByRole('button', { name: 'Approve' }).click()
-  await expect(page.getByRole('heading', { name: 'CLI sign-in approved' })).toBeVisible()
+    const activateResponse = await page.goto(`${started.url}?user_code=${started.userCode}`)
+    expect(activateResponse?.status()).toBe(200)
+    await expect(page.getByRole('heading', { name: 'Approve CLI sign-in?' })).toBeVisible()
+    await expect(page.getByLabel('User code')).toHaveValue(started.userCode)
+    await page.getByRole('button', { name: 'Approve' }).click()
+    await expect(page.getByRole('heading', { name: 'CLI sign-in approved' })).toBeVisible()
 
-  const result = await exitResult
-  expect(result.code).toBe(0)
-  expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
-  expect(result.stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
-  expect(result.stderr).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+    const result = await waitForExitBounded(exitResult, 'press login --device')
+    expect(result.code).toBe(0)
+    expect(result.stdout).toContain(`logged in as ${localnetUsers.owner.email}`)
+    expect(result.stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+    expect(result.stderr).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
 
-  const whoami = await runPress(['whoami'], env)
-  expect(whoami.code).toBe(0)
-  expect(whoami.stdout).toContain(localnetUsers.owner.email)
-  expect(whoami.stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
+    const whoami = await runPress(['whoami'], env)
+    expect(whoami.code).toBe(0)
+    expect(whoami.stdout).toContain(localnetUsers.owner.email)
+    expect(whoami.stdout).not.toMatch(/press_[A-Za-z0-9_-]{16,}/)
 
-  const logout = await runPress(['logout'], env)
-  expect(logout.code).toBe(0)
+    const logout = await runPress(['logout'], env)
+    expect(logout.code).toBe(0)
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+    }
+  }
 })
 
 test('press CLI loopback login, publish, list, page set, unpublish, and logout', async ({
@@ -353,7 +440,7 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
   const secondEnv = await makePressEnv(baseURL, 'second')
   const api = await newE2EAPIContext({ baseURL })
   const collectionSlug = `${runSlug}-flow`
-  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  const reportPath = join(await makeTempDir('press-report-'), 'report.html')
   await writeFile(reportPath, '<!doctype html><title>CLI Report</title><h1>CLI</h1>')
 
   await loginViaLoopback(baseURL, ownerEnv, 'owner')
@@ -521,7 +608,7 @@ test('press CLI loopback login, publish, list, page set, unpublish, and logout',
   expect(jsonLine(unauthenticated.stdout)).toMatchObject({ ok: false })
 })
 
-test('press publish --password: custom password (PRESS_PAGE_PASSWORD) unlocks; weak rejected (F3)', async ({
+test('press publish --password: custom password (PRESS_PAGE_PASSWORD) unlocks; weak rejected', async ({
   baseURL,
 }) => {
   if (!baseURL) {
@@ -529,7 +616,7 @@ test('press publish --password: custom password (PRESS_PAGE_PASSWORD) unlocks; w
   }
   const env = await makePressEnv(baseURL, 'custom-pw')
   const collectionSlug = `${runSlug}-custompw`
-  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  const reportPath = join(await makeTempDir('press-report-'), 'report.html')
   await writeFile(reportPath, '<!doctype html><title>Custom PW</title><h1>x</h1>')
   await loginViaLoopback(baseURL, env, 'owner')
   const api = await newE2EAPIContext({ baseURL })
@@ -561,7 +648,7 @@ test('press publish --password: custom password (PRESS_PAGE_PASSWORD) unlocks; w
   expect(jsonLine(weak.stdout)).toMatchObject({ ok: false })
 })
 
-test('press publish human output: password guidance + private allowlist echo (F2/F4)', async ({
+test('press publish human output: password guidance + private allowlist echo', async ({
   baseURL,
 }) => {
   if (!baseURL) {
@@ -569,7 +656,7 @@ test('press publish human output: password guidance + private allowlist echo (F2
   }
   const env = await makePressEnv(baseURL, 'human-out')
   const collectionSlug = `${runSlug}-humanout`
-  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  const reportPath = join(await makeTempDir('press-report-'), 'report.html')
   await writeFile(reportPath, '<!doctype html><title>Human Out</title><h1>x</h1>')
   await loginViaLoopback(baseURL, env, 'owner')
 
@@ -642,7 +729,7 @@ test('press move reports canonical URLs and redirect mode in JSON and human outp
   }
   const env = await makePressEnv(baseURL, 'move')
   const collectionSlug = `${runSlug}-move`
-  const reportPath = join(await mkdtemp(join(tmpdir(), 'press-report-')), 'report.html')
+  const reportPath = join(await makeTempDir('press-report-'), 'report.html')
   await writeFile(reportPath, '<!doctype html><title>CLI Move</title><h1>stable bytes</h1>')
   await loginViaLoopback(baseURL, env, 'owner')
   const api = await newE2EAPIContext({ baseURL })

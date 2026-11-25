@@ -19,7 +19,7 @@ function body(visibility: PageVisibility, allowlist?: readonly string[], passwor
 }
 
 describe('publishResponseBody', () => {
-  test('echoes the resolved allowlist for private pages (REQ-PUB-004 / F4)', () => {
+  test('echoes the resolved allowlist for private pages (REQ-PUB-004)', () => {
     const result = body('private', ['a@send.it', 'b@send.it'])
     expect(result.allow).toEqual(['a@send.it', 'b@send.it'])
   })

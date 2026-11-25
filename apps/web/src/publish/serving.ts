@@ -1,14 +1,17 @@
-import { decideAcl, parseCollectionSlug, parseFileSlug } from '@press/core'
+import { SlugValidationError, decideAcl, parseCollectionSlug, parseFileSlug } from '@press/core'
 import { and, eq, isNull } from 'drizzle-orm'
 
-import { authenticatedViewerForSession } from '../auth/sessionViewer'
-import { auth } from '../auth/server'
-import { db, dbConfig } from '../db/client'
-import { collection, page, pageRedirect, user } from '../db/schema'
+import { consumeRateLimit } from '../auth/rateLimit'
+import { getAuth } from '../auth/server'
+import { loadActiveViewerForUserId } from '../auth/sessionViewer'
+import { getDb, getDbConfig } from '../db/client'
+import { collection, page, pageRedirect } from '../db/schema'
 import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
+import { logServerError } from '../http/responses'
 import { openPageBlobForRead } from './storage'
 import {
   acceptsHtml,
+  assertCollectionDefaultVisibility,
   deniedAclResponse,
   passwordGateResponse,
   servedPageResponse,
@@ -27,7 +30,6 @@ import type {
   AclViewer,
   BasicPasswordVerification,
   CollectionAcl,
-  CollectionDefaultVisibility,
   CollectionSlug,
   FileSlug,
   PageAcl,
@@ -42,6 +44,11 @@ type ServedRoute = {
   readonly fileSlug: FileSlug
 }
 
+const PASSWORD_UNLOCK_BODY_LIMIT_BYTES = 16 * 1024
+const PASSWORD_UNLOCK_RATE_WINDOW_MS = 60 * 1000
+const PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX = 30
+const NON_PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX = 10_000
+
 function notFound(): Response {
   return servedPageResponse('not found', { status: 404 })
 }
@@ -53,7 +60,7 @@ function servedPagePath(route: ServedRoute): string {
 async function loadServedRow(
   route: ServedRoute,
 ): Promise<{ readonly page: PageRow; readonly collection: CollectionRow } | null> {
-  const rows = await db
+  const rows = await getDb()
     .select({ page, collection })
     .from(page)
     .innerJoin(collection, eq(page.collectionSlug, collection.slug))
@@ -69,7 +76,7 @@ async function loadServedRow(
 }
 
 async function redirectResponse(route: ServedRoute): Promise<Response | null> {
-  const rows = await db
+  const rows = await getDb()
     .select({ page })
     .from(pageRedirect)
     .innerJoin(page, eq(pageRedirect.targetPageId, page.id))
@@ -102,19 +109,30 @@ async function redirectResponse(route: ServedRoute): Promise<Response | null> {
 }
 
 function parseServedPath(request: Request): ServedRoute | null {
+  let segments: string[]
   try {
     const path = new URL(request.url).pathname
     const raw = path.slice('/p/'.length)
-    const segments = raw.split('/').map((segment) => decodeURIComponent(segment))
-    if (segments.length !== 2) {
+    segments = raw.split('/').map((segment) => decodeURIComponent(segment))
+  } catch (error) {
+    if (error instanceof URIError) {
       return null
     }
+    throw error
+  }
+  if (segments.length !== 2) {
+    return null
+  }
+  try {
     return {
       collectionSlug: parseCollectionSlug(segments[0] ?? ''),
       fileSlug: parseFileSlug(segments[1] ?? ''),
     }
-  } catch {
-    return null
+  } catch (error) {
+    if (error instanceof SlugValidationError) {
+      return null
+    }
+    throw error
   }
 }
 
@@ -132,7 +150,7 @@ function collectionAcl(row: CollectionRow): CollectionAcl {
   return {
     slug: row.slug,
     ownerId: row.ownerId,
-    defaultVisibility: row.defaultVisibility as CollectionDefaultVisibility,
+    defaultVisibility: assertCollectionDefaultVisibility(row.defaultVisibility),
   }
 }
 
@@ -151,13 +169,9 @@ function parseBasicPassword(request: Request): string | null {
   if (!encoded) {
     return null
   }
-  try {
-    const decoded = Buffer.from(encoded, 'base64').toString('utf8')
-    const separator = decoded.indexOf(':')
-    return separator === -1 ? '' : decoded.slice(separator + 1)
-  } catch {
-    return null
-  }
+  const decoded = Buffer.from(encoded, 'base64').toString('utf8')
+  const separator = decoded.indexOf(':')
+  return separator === -1 ? '' : decoded.slice(separator + 1)
 }
 
 async function verifyBasicPassword(
@@ -171,47 +185,33 @@ async function verifyBasicPassword(
   if (!password || !row.passwordHash) {
     return { verified: false }
   }
-  try {
-    return { verified: await verifyPagePassword(password, row.passwordHash) }
-  } catch {
-    return { verified: false }
-  }
+  return { verified: await verifyPagePassword(password, row.passwordHash) }
 }
 
-// A valid unlock cookie (browser reader who already entered the password) or Basic
-// credentials (programmatic client) both satisfy the password channel. The cookie is
-// checked first so browsers do not re-submit the password on every request.
 async function resolvePagePasswordChannel(
   request: Request,
   row: PageRow,
 ): Promise<BasicPasswordVerification | undefined> {
+  const config = getDbConfig()
   const cookie = readCookieValue(request.headers.get('cookie'), pagePasswordCookieName(row.id))
   if (
-    verifyPagePasswordCookie(
-      dbConfig.betterAuthSecret,
-      row.id,
-      cookie,
-      Date.now(),
-      row.passwordHash,
-    )
+    verifyPagePasswordCookie(config.betterAuthSecret, row.id, cookie, Date.now(), row.passwordHash)
   ) {
     return { verified: true }
   }
-  // A valid unlock cookie never runs Argon2; the Basic channel verifies the password.
   return await verifyBasicPassword(request, row)
 }
 
 async function viewerForRequest(request: Request, row: PageRow): Promise<AclViewer> {
   const basicPassword =
     row.visibility === 'password' ? await resolvePagePasswordChannel(request, row) : undefined
-  const session = await auth.api.getSession({ headers: request.headers })
+  const session = await getAuth().api.getSession({ headers: request.headers })
   if (session) {
-    const dbUser = await db.query.user.findFirst({
-      where: eq(user.id, session.user.id),
-    })
-    const authenticated = dbUser
-      ? authenticatedViewerForSession(dbUser, dbConfig.adminEmails)
-      : null
+    const authenticated = await loadActiveViewerForUserId(
+      getDb(),
+      session.user.id,
+      getDbConfig().adminEmails,
+    )
     if (authenticated) {
       return viewerFromChannels({ authenticated, basicPassword })
     }
@@ -235,13 +235,12 @@ async function servedPageEndpointUnchecked(request: Request): Promise<Response> 
     return (await redirectResponse(route)) ?? notFound()
   }
 
+  const config = getDbConfig()
   const viewer = await viewerForRequest(request, row.page)
   const decision = decideAcl(viewer, pageAcl(row.page), collectionAcl(row.collection), {
-    allowedDomains: dbConfig.allowedDomains,
+    allowedDomains: config.allowedDomains,
   })
   if (!decision.allowed) {
-    // A browser reader of a locked password page gets the branded entry page (200 with
-    // no body leak); programmatic clients keep the Basic challenge (REQ-ACL-002 / SRV-004).
     if (
       (decision.reason === 'password-required' || decision.reason === 'password-invalid') &&
       acceptsHtml(request)
@@ -258,7 +257,7 @@ async function servedPageEndpointUnchecked(request: Request): Promise<Response> 
 
   const storedCollectionSlug = parseCollectionSlug(row.page.collectionSlug)
   const storedFileSlug = parseFileSlug(row.page.fileSlug)
-  const body = await openPageBlobForRead(dbConfig.storageDir, storedCollectionSlug, storedFileSlug)
+  const body = await openPageBlobForRead(config.storageDir, storedCollectionSlug, storedFileSlug)
 
   return servedPageResponse(body)
 }
@@ -266,7 +265,8 @@ async function servedPageEndpointUnchecked(request: Request): Promise<Response> 
 export async function servedPageEndpoint(request: Request): Promise<Response> {
   try {
     return await servedPageEndpointUnchecked(request)
-  } catch {
+  } catch (error) {
+    logServerError('servedPageEndpoint', error, request)
     return servedPageResponse('internal server error', { status: 500 })
   }
 }
@@ -280,27 +280,35 @@ function serializeUnlockCookie(pageId: string, value: string, path: string): str
     'HttpOnly',
     'SameSite=Lax',
   ]
-  // Secure in production; localnet is plain http so the cookie must still be sent.
-  if (dbConfig.nodeEnv === 'production') {
+  if (getDbConfig().nodeEnv === 'production') {
     parts.push('Secure')
   }
   return parts.join('; ')
 }
 
-// POST /p/:collection/:file — the branded gate's form target. This is a read-side
-// unlock (it sets a page-scoped cookie), NOT a page mutation: INV-1 (mutations are
-// Bearer-only) is unaffected because it never changes page state.
 async function servedPagePasswordUnlock(request: Request, route: ServedRoute): Promise<Response> {
   const row = await loadServedRow(route)
   if (!row || row.page.visibility !== 'password') {
-    // The unlock endpoint only applies to password pages; do not reveal others.
     return notFound()
   }
-  // The branded gate posts application/x-www-form-urlencoded; parse without FormData.
-  // A genuine body-read failure propagates to the endpoint's 500 handler rather than
-  // being masked as a wrong password — an empty body still parses to no password (401).
-  // The body is capped so a public POST can never make the server buffer unboundedly (M-3).
-  const PASSWORD_UNLOCK_BODY_LIMIT_BYTES = 16 * 1024
+  const config = getDbConfig()
+  const allowed = await consumeRateLimit(getDb(), {
+    identifier: `cli:page-pw:${row.page.id}`,
+    max:
+      config.nodeEnv === 'production'
+        ? PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX
+        : NON_PRODUCTION_PASSWORD_UNLOCK_LIMIT_MAX,
+    windowMs: PASSWORD_UNLOCK_RATE_WINDOW_MS,
+    now: Date.now(),
+  })
+  if (!allowed) {
+    return passwordGateResponse({
+      title: row.page.title,
+      actionPath: servedPagePath(route),
+      error: 'Too many attempts. Please try again in a minute.',
+      status: 429,
+    })
+  }
   const bodyText = await readCappedBodyText(request, PASSWORD_UNLOCK_BODY_LIMIT_BYTES)
   const password = new URLSearchParams(bodyText).get('password') ?? ''
   const actionPath = servedPagePath(route)
@@ -317,14 +325,11 @@ async function servedPagePasswordUnlock(request: Request, route: ServedRoute): P
   }
   const expiryMs = Date.now() + PAGE_PASSWORD_COOKIE_TTL_MS
   const value = signPagePasswordCookie(
-    dbConfig.betterAuthSecret,
+    config.betterAuthSecret,
     row.page.id,
     expiryMs,
     row.page.passwordHash,
   )
-  // The 303 is a `/p/` response that is not the entry page, so it carries the sandbox
-  // CSP + security headers of REQ-SRV-002 / INV-2 (via servedPageResponse), plus the
-  // redirect Location and the page-scoped unlock cookie.
   return servedPageResponse(null, {
     status: 303,
     headers: {
@@ -348,6 +353,7 @@ export async function servedPagePasswordEndpoint(request: Request): Promise<Resp
     if (error instanceof BodyTooLargeError) {
       return servedPageResponse(error.message, { status: 413 })
     }
+    logServerError('servedPagePasswordEndpoint', error, request)
     return servedPageResponse('internal server error', { status: 500 })
   }
 }

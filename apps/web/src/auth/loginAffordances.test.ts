@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { loginAffordances } from './loginAffordances'
 
-describe('loginAffordances (REQ-AUTH-008 / F5)', () => {
+describe('loginAffordances (REQ-AUTH-008)', () => {
   test('both providers enabled: form + Google, seeded hint (credential ⇒ localnet)', () => {
     expect(loginAffordances({ credentialEnabled: true, googleEnabled: true })).toEqual({
       credentialForm: true,

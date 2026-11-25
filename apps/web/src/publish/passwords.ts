@@ -1,12 +1,9 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 
-// Minimum length for a publisher-supplied custom page password (REQ-PUB-005 / F3).
-// Security > ergonomics: a memorable password still may not be trivially short.
-// Server-generated passwords are always well above this.
+// Minimum length for a publisher-supplied custom page password (REQ-PUB-005).
 export const MIN_PAGE_PASSWORD_LENGTH = 8
 
-// Pure strength check for a publisher-supplied password. Trimmed length only —
-// surrounding whitespace does not count toward the minimum.
+// Surrounding whitespace does not count toward the minimum length.
 export function isStrongPagePassword(password: string): boolean {
   return password.trim().length >= MIN_PAGE_PASSWORD_LENGTH
 }
@@ -130,9 +127,7 @@ export async function hashPagePassword(password: string): Promise<string> {
 export async function verifyPagePassword(password: string, hash: string): Promise<boolean> {
   if (typeof Bun !== 'undefined') {
     try {
-      if (await Bun.password.verify(password, hash)) {
-        return true
-      }
+      return await Bun.password.verify(password, hash)
     } catch {
       return false
     }
@@ -149,9 +144,6 @@ export async function verifyPagePassword(password: string, hash: string): Promis
     passes: parsed.passes,
     parallelism: parsed.parallelism,
     tagLength: parsed.tag.byteLength,
-  }).catch(() => null)
-  if (!candidate) {
-    return false
-  }
+  })
   return candidate.byteLength === parsed.tag.byteLength && timingSafeEqual(candidate, parsed.tag)
 }

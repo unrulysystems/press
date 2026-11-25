@@ -1,5 +1,3 @@
-export const VERSION = '0.0.0'
-
 const DEFAULT_MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 const DEFAULT_MAX_METADATA_BYTES = 1024 * 1024
 
@@ -255,6 +253,11 @@ export function decideAcl(
   return decideMutationAcl(viewer, collection, operation, resolvedVisibility)
 }
 
+export type GoogleOAuthConfig = {
+  readonly clientId: string
+  readonly clientSecret: string
+}
+
 export type PressConfig = {
   readonly nodeEnv: string
   readonly baseUrl: string
@@ -266,8 +269,7 @@ export type PressConfig = {
   readonly credentialAuthEnabled: boolean
   readonly maxUploadBytes: number
   readonly maxMetadataBytes: number
-  readonly googleClientId?: string
-  readonly googleClientSecret?: string
+  readonly google?: GoogleOAuthConfig
 }
 
 export type PressEnv = Record<string, string | undefined>
@@ -414,33 +416,27 @@ function parseMaxMetadataBytes(env: PressEnv): number {
   return value
 }
 
-function parseGoogleConfig(
-  env: PressEnv,
-  nodeEnv: string,
-): Pick<PressConfig, 'googleClientId' | 'googleClientSecret'> {
-  const googleClientId = readOptional(env, 'GOOGLE_CLIENT_ID')
-  const googleClientSecret = readOptional(env, 'GOOGLE_CLIENT_SECRET')
+function parseGoogleConfig(env: PressEnv, nodeEnv: string): Pick<PressConfig, 'google'> {
+  const clientId = readOptional(env, 'GOOGLE_CLIENT_ID')
+  const clientSecret = readOptional(env, 'GOOGLE_CLIENT_SECRET')
 
   if (nodeEnv === 'production') {
-    if (!googleClientId) {
+    if (!clientId) {
       fail('GOOGLE_CLIENT_ID', 'required in production')
     }
-    if (!googleClientSecret) {
+    if (!clientSecret) {
       fail('GOOGLE_CLIENT_SECRET', 'required in production')
     }
   }
 
-  if (googleClientId && !googleClientSecret) {
+  if (clientId && !clientSecret) {
     fail('GOOGLE_CLIENT_SECRET', 'required when GOOGLE_CLIENT_ID is set')
   }
-  if (googleClientSecret && !googleClientId) {
+  if (clientSecret && !clientId) {
     fail('GOOGLE_CLIENT_ID', 'required when GOOGLE_CLIENT_SECRET is set')
   }
 
-  return {
-    ...(googleClientId ? { googleClientId } : {}),
-    ...(googleClientSecret ? { googleClientSecret } : {}),
-  }
+  return clientId && clientSecret ? { google: { clientId, clientSecret } } : {}
 }
 
 export function parseConfig(env: PressEnv): PressConfig {

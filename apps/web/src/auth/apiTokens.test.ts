@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
 import { isUserActivelyBanned, mintApiTokenForUser, verifyApiToken } from './apiTokens'
-import { roleForEmail } from './role'
 
 const ADMIN: readonly string[] = ['admin@send.it']
 
@@ -109,29 +108,30 @@ describe('verifyApiToken ban handling', () => {
   })
 
   test('accepts expired bans and records successful use', async () => {
+    const now = new Date('2026-06-01T00:00:00.000Z')
     const user: FakeUser = {
       id: 'user-expired-ban',
       email: 'expired@send.it',
       role: 'user',
       banned: true,
-      banExpires: new Date(Date.now() - 1_000),
+      banExpires: new Date('2026-05-31T23:59:59.000Z'),
     }
     const fake = createFakeTokenDb(user)
     const token = await mintApiTokenForUser(fake.db, { userId: user.id, name: 'test-token' })
 
-    await expect(verifyApiToken(fake.db, bearer(token), ADMIN)).resolves.toEqual({
+    await expect(verifyApiToken(fake.db, bearer(token), ADMIN, now)).resolves.toEqual({
       tokenId: expect.any(String),
       user: {
         id: user.id,
         email: user.email,
-        role: roleForEmail(user.email, ADMIN),
+        role: 'user',
       },
     })
     expect(fake.updates).toHaveLength(1)
-    expect(fake.updates[0]?.lastUsedAt).toBeInstanceOf(Date)
+    expect(fake.updates[0]?.lastUsedAt).toEqual(now)
   })
 
-  test('token role derives from PRESS_ADMIN_EMAILS, never the stored row (B-2 / F-13)', async () => {
+  test('token role derives from PRESS_ADMIN_EMAILS, never the stored row', async () => {
     // The stored row claims 'admin' but the email is unlisted: effective role
     // must be 'user' — a config removal demotes tokens immediately.
     const staleAdmin = {

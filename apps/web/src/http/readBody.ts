@@ -1,7 +1,5 @@
-// Shared bounded request-body reader (M-3). The publish HTML path keeps its own
-// streaming reader in routes.ts (readHtmlBody, capped by PRESS_MAX_UPLOAD_BYTES);
-// this helper caps the small anonymous/JSON endpoints so no unauthenticated
-// request can make the server buffer an unbounded body.
+// Bounded request-body reader for small JSON and form endpoints so no request can
+// buffer an unbounded payload in memory.
 export class BodyTooLargeError extends Error {
   readonly status = 413
 

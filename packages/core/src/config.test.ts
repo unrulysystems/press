@@ -78,8 +78,11 @@ describe('parseConfig', () => {
         ...prodBase,
         GOOGLE_CLIENT_ID: 'google-client-id',
         GOOGLE_CLIENT_SECRET: 'google-client-secret',
-      }).googleClientId,
-    ).toBe('google-client-id')
+      }).google,
+    ).toEqual({
+      clientId: 'google-client-id',
+      clientSecret: 'google-client-secret',
+    })
   })
 
   test('refuses credential auth in production', () => {

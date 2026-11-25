@@ -7,7 +7,7 @@ import { extractTitle } from './title'
 const slug = parseFileSlug('report.html')
 
 describe('extractTitle', () => {
-  test('decodes named HTML entities in the title (issue #6)', () => {
+  test('decodes named HTML entities in the title', () => {
     expect(extractTitle('<title>SEL Quarterly &mdash; Issue No. 1</title>', slug)).toBe(
       'SEL Quarterly — Issue No. 1',
     )

@@ -51,7 +51,7 @@ async function waitForHealth(baseURL: string, child: ChildProcess, stderr: () =>
     }
     try {
       // oxlint-disable-next-line no-await-in-loop -- Bounded health polling observes one server state at a time.
-      const response = await fetch(`${baseURL}/healthz`)
+      const response = await fetch(`${baseURL}/healthz`, { signal: AbortSignal.timeout(3_000) })
       if (response.ok) {
         return
       }
@@ -164,6 +164,9 @@ test('credential sign-in is rate limited by endpoint on an isolated server', asy
     const cappedSuccess = await signIn(api, localnetUsers.owner.password)
     expectRateLimited(cappedSuccess, 'correct password inside exhausted window')
 
+    // WAIVER(Evented): Better Auth's in-process rate limiter uses wall-clock window
+    // expiry with no injectable clock, and polling would consume the bucket being
+    // verified. Permanent — Better Auth rate-limit window cannot be polled without mutation.
     await new Promise((resolveSleep) => setTimeout(resolveSleep, (windowSeconds + 1) * 1000))
 
     const restored = await signIn(api, localnetUsers.owner.password)

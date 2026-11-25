@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, test } from 'bun:test'
 import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
-import { moveBlob, openPageBlobForRead } from './storage'
+import { archiveBlob, installBlob, moveBlob, openPageBlobForRead, writeTempBlob } from './storage'
 
 const tempDirs: string[] = []
 
@@ -20,7 +20,7 @@ afterEach(async () => {
   await Promise.all(tempDirs.splice(0).map((path) => rm(path, { recursive: true, force: true })))
 })
 
-describe('openPageBlobForRead (F-22)', () => {
+describe('openPageBlobForRead', () => {
   const collection = parseCollectionSlug('readme')
   const file = parseFileSlug('page.html')
 
@@ -119,5 +119,80 @@ describe('moveBlob', () => {
     ).rejects.toThrow('destination blob already exists')
     expect(await readFile(sourcePath, 'utf8')).toBe('source bytes')
     expect(await readFile(destinationPath, 'utf8')).toBe('destination bytes')
+  })
+})
+
+describe('writeTempBlob, installBlob, and archiveBlob', () => {
+  const collection = parseCollectionSlug('reports')
+  const file = parseFileSlug('q1.html')
+
+  test('installs a fresh blob and rolls it back cleanly on failure', async () => {
+    const storageDir = await storageFixture()
+    const temp = await writeTempBlob(
+      storageDir,
+      collection,
+      file,
+      new TextEncoder().encode('fresh bytes'),
+    )
+    const installed = await installBlob(storageDir, collection, file, temp)
+    const targetPath = join(storageDir, collection, file)
+    expect(await readFile(targetPath, 'utf8')).toBe('fresh bytes')
+
+    await installed.rollback()
+    await expect(readFile(targetPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+
+  test('overwrites atomically with rollback restoring previous bytes and commit removing backup', async () => {
+    const storageDir = await storageFixture()
+    const targetPath = join(storageDir, collection, file)
+    const initialTemp = await writeTempBlob(
+      storageDir,
+      collection,
+      file,
+      new TextEncoder().encode('v1 bytes'),
+    )
+    const initialInstall = await installBlob(storageDir, collection, file, initialTemp)
+    await initialInstall.commit()
+
+    const overwriteTemp = await writeTempBlob(
+      storageDir,
+      collection,
+      file,
+      new TextEncoder().encode('v2 bytes'),
+    )
+    const overwriteInstall = await installBlob(storageDir, collection, file, overwriteTemp)
+    expect(await readFile(targetPath, 'utf8')).toBe('v2 bytes')
+
+    await overwriteInstall.rollback()
+    expect(await readFile(targetPath, 'utf8')).toBe('v1 bytes')
+
+    const committedTemp = await writeTempBlob(
+      storageDir,
+      collection,
+      file,
+      new TextEncoder().encode('v3 bytes'),
+    )
+    const committedInstall = await installBlob(storageDir, collection, file, committedTemp)
+    await committedInstall.commit()
+    expect(await readFile(targetPath, 'utf8')).toBe('v3 bytes')
+  })
+
+  test('archives a blob and restores it on rollback', async () => {
+    const storageDir = await storageFixture()
+    const targetPath = join(storageDir, collection, file)
+    const temp = await writeTempBlob(
+      storageDir,
+      collection,
+      file,
+      new TextEncoder().encode('archived bytes'),
+    )
+    const install = await installBlob(storageDir, collection, file, temp)
+    await install.commit()
+
+    const archived = await archiveBlob(storageDir, collection, file)
+    await expect(readFile(targetPath, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' })
+
+    await archived.rollback()
+    expect(await readFile(targetPath, 'utf8')).toBe('archived bytes')
   })
 })

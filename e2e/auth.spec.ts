@@ -70,7 +70,7 @@ test('signed-in reader can sign out from the masthead', async ({ page }) => {
   expect(whoami.authenticated).toBe(false)
 })
 
-test('localnet identity gate shows the seeded account hint and reader guidance (F5 / REQ-AUTH-008)', async ({
+test('localnet identity gate shows the seeded account hint and reader guidance (REQ-AUTH-008)', async ({
   page,
 }) => {
   await page.goto('/login?next=/')
@@ -80,7 +80,7 @@ test('localnet identity gate shows the seeded account hint and reader guidance (
   await expect(page.getByLabel('Email')).toBeVisible()
   await expect(page.getByLabel('Password')).toBeVisible()
 
-  // Seeded account hint answers the dogfood F5 complaint ("what were the passwords?").
+  // Seeded account hint displays the localnet test credentials directly on the gate.
   await expect(page.getByText(localnetUsers.owner.email)).toBeVisible()
   await expect(page.getByText(localnetUsers.owner.password)).toBeVisible()
 
@@ -88,9 +88,7 @@ test('localnet identity gate shows the seeded account hint and reader guidance (
   await expect(page.getByText(/access follows your organization account/i)).toBeVisible()
 })
 
-test('admin-plugin routes are unreachable after the plugin is dropped (B-3 / F-14)', async ({
-  page,
-}) => {
+test('admin-plugin routes are unreachable when the admin plugin is omitted', async ({ page }) => {
   const probes = [
     { method: 'GET', path: '/api/auth/admin/list-users' },
     { method: 'POST', path: '/api/auth/admin/set-role' },

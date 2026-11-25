@@ -1,8 +1,8 @@
-import { mkdtemp, writeFile } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
 
 import { applyMigrations, type MigrationDatabase } from './migrate'
 
@@ -10,6 +10,12 @@ type MigrationRow = {
   readonly id: string
   readonly checksum: string | null
 }
+
+const tempDirs: string[] = []
+
+afterEach(async () => {
+  await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })))
+})
 
 function queryChunks(query: unknown): readonly unknown[] {
   return (query as { readonly queryChunks?: readonly unknown[] }).queryChunks ?? []
@@ -41,16 +47,16 @@ function queryParams(query: unknown): readonly string[] {
 function createFakeMigrationDb(): {
   readonly db: MigrationDatabase
   readonly applied: Map<string, string | null>
+  readonly executedSql: string[]
 } {
   const applied = new Map<string, string | null>()
+  const executedSql: string[] = []
   const db: MigrationDatabase = {
-    async execute<Row = unknown>(query: unknown) {
+    async execute(query: unknown) {
       const text = queryText(query)
       if (text.includes('select id, checksum from "__press_migrations"')) {
         const rows = [...applied].map(([id, checksum]) => ({ id, checksum }) satisfies MigrationRow)
-        return {
-          rows: rows as Row[],
-        }
+        return { rows }
       }
       if (text.includes('insert into "__press_migrations"')) {
         const [id, migrationChecksum] = queryParams(query)
@@ -58,6 +64,14 @@ function createFakeMigrationDb(): {
           throw new Error(`insert migration query missing parameters: ${text}`)
         }
         applied.set(id, migrationChecksum)
+        return { rows: [] }
+      }
+      if (
+        !text.includes('__press_migrations') &&
+        !text.includes('pg_advisory_xact_lock') &&
+        text.trim().length > 0
+      ) {
+        executedSql.push(text.trim())
       }
       return { rows: [] }
     },
@@ -65,35 +79,58 @@ function createFakeMigrationDb(): {
       await callback(db)
     },
   }
-  return { db, applied }
+  return { db, applied, executedSql }
 }
 
-async function migrationDir(contents: string): Promise<{
-  readonly dir: string
-  readonly path: string
-}> {
+async function migrationDir(files: Record<string, string>): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'press-migrations-'))
-  const path = join(dir, '0000_init.sql')
-  await writeFile(path, contents)
-  return { dir, path }
+  tempDirs.push(dir)
+  await Promise.all(
+    Object.entries(files).map(([name, contents]) => writeFile(join(dir, name), contents)),
+  )
+  return dir
 }
 
 describe('applyMigrations', () => {
+  test('applies migrations in sorted order and is idempotent on re-run', async () => {
+    const dir = await migrationDir({
+      '0002_second.sql': 'alter table example add column name text;',
+      '0001_first.sql': 'create table example (id text primary key);',
+    })
+    const fake = createFakeMigrationDb()
+
+    await applyMigrations(fake.db, dir)
+    expect(fake.executedSql).toEqual([
+      'create table example (id text primary key);',
+      'alter table example add column name text;',
+    ])
+
+    await applyMigrations(fake.db, dir)
+    expect(fake.executedSql).toHaveLength(2)
+  })
+
   test('fails closed when an applied migration file drifts', async () => {
-    const { dir, path } = await migrationDir('create table example (id text primary key);')
+    const dir = await migrationDir({
+      '0000_init.sql': 'create table example (id text primary key);',
+    })
     const fake = createFakeMigrationDb()
 
     await applyMigrations(fake.db, dir)
     expect(fake.applied.get('0000_init.sql')).toEqual(expect.any(String))
 
-    await writeFile(path, 'create table example (id text primary key, name text);')
+    await writeFile(
+      join(dir, '0000_init.sql'),
+      'create table example (id text primary key, name text);',
+    )
     await expect(applyMigrations(fake.db, dir)).rejects.toThrow(
       /migration 0000_init\.sql checksum mismatch/,
     )
   })
 
   test('allows legacy applied rows with null checksums', async () => {
-    const { dir } = await migrationDir('create table example (id text primary key);')
+    const dir = await migrationDir({
+      '0000_init.sql': 'create table example (id text primary key);',
+    })
     const fake = createFakeMigrationDb()
     fake.applied.set('0000_init.sql', null)
 

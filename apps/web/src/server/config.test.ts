@@ -37,7 +37,7 @@ describe('server boot config', () => {
   })
 })
 
-describe('zero-provider fail-closed (REQ-CFG-002 / F5)', () => {
+describe('zero-provider fail-closed (REQ-CFG-002)', () => {
   test('refuses boot when neither credential nor Google auth is enabled', () => {
     expect(() =>
       loadServerConfig({

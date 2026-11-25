@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 
+import { HttpError } from '../http/responses'
+import * as deviceFlow from './cliDeviceFlow'
 import type {
   CliDeviceActivateDependencies,
   CliDeviceGrant,
@@ -10,22 +12,6 @@ import type {
   VerificationInsert,
 } from './cliDeviceFlow'
 import { nextRateLimitState } from './rateLimit'
-
-type DeviceFlowModule = typeof import('./cliDeviceFlow')
-
-let deviceFlow: DeviceFlowModule
-
-beforeAll(async () => {
-  process.env.NODE_ENV = 'development'
-  process.env.PRESS_BASE_URL = 'http://press.test'
-  process.env.PRESS_ALLOWED_DOMAINS = 'send.it'
-  process.env.PRESS_ADMIN_EMAILS = 'admin@send.it'
-  process.env.DATABASE_URL = 'postgres://press:press@127.0.0.1:54329/press'
-  process.env.PRESS_STORAGE_DIR = '.press/test/storage'
-  process.env.BETTER_AUTH_SECRET = 'test-secret-at-least-32-bytes-long'
-  process.env.PRESS_ENABLE_CREDENTIAL_AUTH = '1'
-  deviceFlow = await import('./cliDeviceFlow')
-})
 
 const ownerSession = {
   user: { id: 'owner-user', email: 'owner@send.it' },
@@ -112,8 +98,10 @@ function startDeps(
     async consumeStartLimit() {
       return memory.startAllowed
     },
-    async insertRow(row) {
-      memory.rows.set(row.identifier, row)
+    async insertRows(rows) {
+      for (const row of rows) {
+        memory.rows.set(row.identifier, row)
+      }
     },
     async hasIdentifier(identifier) {
       return memory.rows.has(identifier)
@@ -236,13 +224,9 @@ describe('deviceStartRateLimitKey', () => {
       headers: { 'x-forwarded-for': '198.51.100.7' },
     })
     const direct = new Request('http://press.test/api/cli/device/start')
-    expect(deviceFlow.deviceStartRateLimitKey(spoofed)).toBe(deviceFlow.DEVICE_START_RATE_LIMIT_KEY)
-    expect(deviceFlow.deviceStartRateLimitKey(other)).toBe(
-      deviceFlow.deviceStartRateLimitKey(spoofed),
-    )
-    expect(deviceFlow.deviceStartRateLimitKey(direct)).toBe(
-      deviceFlow.deviceStartRateLimitKey(spoofed),
-    )
+    expect(deviceFlow.deviceStartRateLimitKey(spoofed)).toBe('global')
+    expect(deviceFlow.deviceStartRateLimitKey(other)).toBe('global')
+    expect(deviceFlow.deviceStartRateLimitKey(direct)).toBe('global')
   })
 })
 
@@ -258,7 +242,7 @@ describe('user-code helpers', () => {
     const code = deviceFlow.generateUserCode(Uint8Array.from([0, 1, 2, 3, 4, 5, 6, 7]))
     expect(code).toHaveLength(8)
     expect(deviceFlow.isNormalizedUserCode(code)).toBe(true)
-    expect(code[0]).toBe(deviceFlow.USER_CODE_ALPHABET[0])
+    expect(code[0]).toBe('A')
   })
 })
 
@@ -274,14 +258,13 @@ describe('startCliDeviceRequest', () => {
     expect(body.verification_uri_complete).toBe(
       'http://press.test/cli/activate?user_code=ABCD-2345',
     )
-    expect(body.expires_in).toBe(deviceFlow.CLI_DEVICE_TTL_MS / 1000)
-    expect(body.interval).toBe(deviceFlow.CLI_DEVICE_INTERVAL_SECONDS)
+    expect(body.expires_in).toBe(900)
+    expect(body.interval).toBe(5)
     expect(JSON.stringify(body)).not.toContain('press_')
     expect(memory.rows.has(deviceFlow.deviceGrantIdentifier(DEVICE_CODE))).toBe(true)
     expect(memory.rows.has(deviceFlow.userCodeIdentifier(USER_CODE))).toBe(true)
     const grant = grantFromMemory(memory)
-    expect(grant.userId).toBeNull()
-    expect(grant.denied).toBe(false)
+    expect(grant.status).toBe('pending')
     expect(grant.challenge).toBe(CHALLENGE)
   })
 
@@ -323,7 +306,7 @@ describe('startCliDeviceRequest', () => {
       }),
     )
     expect(response.status).toBe(200)
-    expect(keys).toEqual([deviceFlow.DEVICE_START_RATE_LIMIT_KEY])
+    expect(keys).toEqual(['global'])
   })
 
   test('rate-limits start without creating a grant', async () => {
@@ -365,9 +348,7 @@ describe('pollCliDeviceRequest', () => {
     expect(second.status).toBe(400)
     await expect(second.json()).resolves.toEqual({ error: 'slow_down' })
     expect(memory.minted).toEqual([])
-    expect(grantFromMemory(memory).intervalSeconds).toBe(
-      deviceFlow.CLI_DEVICE_INTERVAL_SECONDS + deviceFlow.CLI_DEVICE_SLOW_DOWN_SECONDS,
-    )
+    expect(grantFromMemory(memory).intervalSeconds).toBe(10)
   })
 
   test('returns expired_token after TTL and does not mint', async () => {
@@ -426,11 +407,11 @@ describe('activateCliDeviceRequest', () => {
     expect(html).toContain('ABCD-2345')
     expect(html).toContain('owner@send.it')
     expect(html).not.toContain('press_minted-token')
-    expect(grantFromMemory(memory).userId).toBeNull()
+    expect(grantFromMemory(memory).status).toBe('pending')
     expect(memory.minted).toEqual([])
   })
 
-  test('GET is rate-limited so it cannot mint unbounded consent rows (F-32)', async () => {
+  test('GET is rate-limited so it cannot mint unbounded consent rows', async () => {
     const memory = createMemory()
     memory.activateAllowed = false
     const response = await deviceFlow.activateCliDeviceRequest(activateGet(), activateDeps(memory))
@@ -471,7 +452,7 @@ describe('activateCliDeviceRequest', () => {
     expect(response.status).toBe(200)
     const html = await response.text()
     expect(html).toContain('authorization request is invalid or expired')
-    expect(grantFromMemory(memory).userId).toBeNull()
+    expect(grantFromMemory(memory).status).toBe('pending')
     expect(memory.minted).toEqual([])
   })
 
@@ -487,7 +468,7 @@ describe('activateCliDeviceRequest', () => {
     const html = await response.text()
     expect(html).toContain('authorization request is invalid or expired')
     expect(html).not.toContain('not found')
-    expect(grantFromMemory(memory).userId).toBeNull()
+    expect(grantFromMemory(memory).status).toBe('pending')
     expect(memory.minted).toEqual([])
   })
 
@@ -505,33 +486,38 @@ describe('activateCliDeviceRequest', () => {
   })
 })
 
-describe('device grant happy path', () => {
-  function compareAndSaveAfterConcurrentApprove(
-    memory: Memory,
-  ): CliDevicePollDependencies['compareAndSaveRow'] {
-    return async ({ expectedValue, next }) => {
-      const current = memory.rows.get(next.identifier)
-      if (!current) {
-        return false
-      }
-      const approved: CliDeviceGrant = {
-        ...deviceFlow.parseDeviceGrant(current.value),
-        userId: 'owner-user',
-        denied: false,
-      }
-      memory.rows.set(next.identifier, {
-        ...current,
-        value: JSON.stringify(approved),
-      })
-      const afterApprove = memory.rows.get(next.identifier)
-      if (!afterApprove || afterApprove.value !== expectedValue) {
-        return false
-      }
-      memory.rows.set(next.identifier, next)
-      return true
+function compareAndSaveAfterConcurrentApprove(
+  memory: Memory,
+): CliDevicePollDependencies['compareAndSaveRow'] {
+  return async ({ expectedValue, next }) => {
+    const current = memory.rows.get(next.identifier)
+    if (!current) {
+      return false
     }
+    const existing = deviceFlow.parseDeviceGrant(current.value)
+    const approved: CliDeviceGrant = {
+      kind: 'cli-device',
+      challenge: existing.challenge,
+      lastPollAt: existing.lastPollAt,
+      intervalSeconds: existing.intervalSeconds,
+      userCodeIdentifier: existing.userCodeIdentifier,
+      status: 'approved',
+      userId: 'owner-user',
+    }
+    memory.rows.set(next.identifier, {
+      ...current,
+      value: JSON.stringify(approved),
+    })
+    const afterApprove = memory.rows.get(next.identifier)
+    if (!afterApprove || afterApprove.value !== expectedValue) {
+      return false
+    }
+    memory.rows.set(next.identifier, next)
+    return true
   }
+}
 
+describe('device grant happy path', () => {
   test('pending lastPollAt CAS cannot clobber a concurrent Approve', async () => {
     const memory = createMemory()
     const challenge = challengeFor(VERIFIER)
@@ -571,7 +557,7 @@ describe('device grant happy path', () => {
       pollDeps(memory, { now: () => 1000 }),
     )
     expect(pending.status).toBe(400)
-    expect(grantFromMemory(memory).userId).toBeNull()
+    expect(grantFromMemory(memory).status).toBe('pending')
 
     const raced = await deviceFlow.pollCliDeviceRequest(
       pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
@@ -607,7 +593,7 @@ describe('device grant happy path', () => {
     const approvedHtml = await approved.text()
     expect(approvedHtml).toContain('CLI sign-in approved')
     expect(approvedHtml).not.toContain('press_minted-token')
-    expect(grantFromMemory(memory).userId).toBe('owner-user')
+    expect(grantFromMemory(memory)).toMatchObject({ status: 'approved', userId: 'owner-user' })
 
     const wrongVerifier = await deviceFlow.pollCliDeviceRequest(
       pollRequest({ device_code: DEVICE_CODE, verifier: 'wrong-verifier-value-xxxx' }),
@@ -667,12 +653,18 @@ describe('device grant happy path', () => {
             return row
           }
           memory.rows.delete(requested)
+          const existing = deviceFlow.parseDeviceGrant(approved.value)
+          const deniedGrant: CliDeviceGrant = {
+            kind: 'cli-device',
+            challenge: existing.challenge,
+            lastPollAt: existing.lastPollAt,
+            intervalSeconds: existing.intervalSeconds,
+            userCodeIdentifier: existing.userCodeIdentifier,
+            status: 'denied',
+          }
           return {
             ...approved,
-            value: JSON.stringify({
-              ...deviceFlow.parseDeviceGrant(approved.value),
-              denied: true,
-            }),
+            value: JSON.stringify(deniedGrant),
           }
         },
       }),
@@ -731,6 +723,42 @@ describe('device grant happy path', () => {
     )
     expect(stolen.status).toBe(200)
     expect(await stolen.text()).toContain('authorization request is invalid or expired')
-    expect(grantFromMemory(memory).userId).toBe('owner-user')
+    expect(grantFromMemory(memory)).toMatchObject({ status: 'approved', userId: 'owner-user' })
+  })
+
+  test('suspended accounts are rejected at activation and polling without minting a token', async () => {
+    const memory = createMemory()
+    await startGrant(memory, challengeFor(VERIFIER))
+
+    const blockedActivate = await deviceFlow.activateCliDeviceRequest(
+      activateGet('ABCD-2345'),
+      activateDeps(memory, {
+        async getSession() {
+          throw new HttpError(403, 'account is suspended')
+        },
+      }),
+    )
+    expect(blockedActivate.status).toBe(403)
+    await expect(blockedActivate.json()).resolves.toEqual({ error: 'account is suspended' })
+    expect(grantFromMemory(memory).status).toBe('pending')
+
+    await deviceFlow.activateCliDeviceRequest(activateGet('ABCD-2345'), activateDeps(memory))
+    await deviceFlow.activateCliDeviceRequest(
+      activatePost({ consent: CONSENT, userCode: 'ABCD-2345', action: 'approve' }),
+      activateDeps(memory),
+    )
+
+    const blockedPoll = await deviceFlow.pollCliDeviceRequest(
+      pollRequest({ device_code: DEVICE_CODE, verifier: VERIFIER }),
+      pollDeps(memory, {
+        now: () => 20_000,
+        async mintToken() {
+          throw new HttpError(403, 'account is suspended')
+        },
+      }),
+    )
+    expect(blockedPoll.status).toBe(403)
+    await expect(blockedPoll.json()).resolves.toEqual({ error: 'account is suspended' })
+    expect(memory.minted).toEqual([])
   })
 })

@@ -5,9 +5,7 @@ import { eq } from 'drizzle-orm'
 import { apiToken, user } from '../db/schema'
 import { roleForEmail } from './role'
 
-import type { db as dbClient } from '../db/client'
-
-type PressDb = typeof dbClient
+import type { PressDb } from '../db/client'
 
 export type TokenViewer = {
   readonly id: string
@@ -72,6 +70,7 @@ export async function verifyApiToken(
   db: PressDb,
   headers: Headers,
   adminEmails: readonly string[],
+  now = new Date(),
 ): Promise<VerifiedApiToken | null> {
   const plaintext = readBearerToken(headers)
   if (!plaintext) {
@@ -99,26 +98,29 @@ export async function verifyApiToken(
   if (token.revokedAt !== null) {
     return null
   }
-  if (isUserActivelyBanned({ banned: token.banned, banExpires: token.banExpires })) {
+  if (isUserActivelyBanned({ banned: token.banned, banExpires: token.banExpires }, now)) {
     return null
   }
 
-  await db.update(apiToken).set({ lastUsedAt: new Date() }).where(eq(apiToken.id, token.tokenId))
+  await db.update(apiToken).set({ lastUsedAt: now }).where(eq(apiToken.id, token.tokenId))
 
   return {
     tokenId: token.tokenId,
     user: {
       id: token.userId,
       email: token.email,
-      // Effective role derives from PRESS_ADMIN_EMAILS at use-time (B-2): the
-      // stored role is a cache and must never outlive a config change.
+      // Effective role derives from PRESS_ADMIN_EMAILS at use-time (REQ-AUTH-007).
       role: roleForEmail(token.email, adminEmails),
     },
   }
 }
 
-export async function revokeApiToken(db: PressDb, tokenId: string): Promise<void> {
-  await db.update(apiToken).set({ revokedAt: new Date() }).where(eq(apiToken.id, tokenId))
+export async function revokeApiToken(
+  db: PressDb,
+  tokenId: string,
+  now = new Date(),
+): Promise<void> {
+  await db.update(apiToken).set({ revokedAt: now }).where(eq(apiToken.id, tokenId))
 }
 
 export async function findUserIdByEmail(db: PressDb, email: string): Promise<string> {

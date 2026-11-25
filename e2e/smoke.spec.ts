@@ -147,7 +147,7 @@ for (const colorScheme of colorSchemes) {
       }
     }
 
-    // The branded password entry page (REQ-SRV-004 / F1) is an editorial surface too:
+    // The branded password entry page (REQ-SRV-004) is an editorial surface too:
     // navigate to a seeded `password` page unauthenticated to render the gate.
     for (const width of widths) {
       test(`password gate has no horizontal scroll at ${width}px`, async ({ page }) => {
