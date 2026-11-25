@@ -1,8 +1,8 @@
-// A publisher-supplied page password must never reach argv (it would land in shell
-// history and `ps`) or a query string (server access logs), so `press ... --password`
-// is a value-less flag that acquires the password out-of-band and sends it in a
-// request header (REQ-PUB-005 / REQ-CLI-001 / INV-4). This module picks the source
-// and reads it; the pure `pagePasswordSource` selector is unit-tested.
+// A publisher-supplied page password must never reach argv or a query string (INV-4).
+// `press ... --password` is a value-less flag that acquires the password out-of-band
+// and sends it in a request header (REQ-PUB-005 / REQ-CLI-001).
+
+export const MAX_PAGE_PASSWORD_BYTES = 1024
 
 export type PagePasswordSource =
   | { readonly kind: 'env'; readonly value: string }
@@ -22,8 +22,30 @@ export function pagePasswordSource(env: string | undefined, isTTY: boolean): Pag
 }
 
 async function readStdin(): Promise<string> {
-  const text = await new Response(Bun.stdin.stream()).text()
-  return text.replace(/\r?\n$/, '')
+  const reader = Bun.stdin.stream().getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    // oxlint-disable-next-line no-await-in-loop -- stdin stream is consumed sequentially.
+    const { done, value } = await reader.read()
+    if (done) {
+      break
+    }
+    total += value.byteLength
+    if (total > MAX_PAGE_PASSWORD_BYTES) {
+      // oxlint-disable-next-line no-await-in-loop -- Cancel once at the bounded rejection point.
+      await reader.cancel('page password too long').catch(() => undefined)
+      throw new Error(`page password exceeds ${MAX_PAGE_PASSWORD_BYTES} bytes`)
+    }
+    chunks.push(value)
+  }
+  const combined = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    combined.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(combined).replace(/\r?\n$/, '')
 }
 
 const KEY_ENTER = '\r'
@@ -32,8 +54,7 @@ const KEY_EOT = String.fromCharCode(4) // ctrl-d
 const KEY_INTERRUPT = String.fromCharCode(3) // ctrl-c
 const KEY_BACKSPACE = String.fromCharCode(127) // DEL
 
-// Read one line from a TTY without echoing it, so the password is never shown or
-// scrolled into terminal history. The prompt goes to stderr so stdout stays clean.
+// Read one line from a TTY without echoing it. The prompt goes to stderr so stdout stays clean.
 async function promptHidden(prompt: string): Promise<string> {
   process.stderr.write(prompt)
   const stdin = process.stdin
@@ -54,6 +75,10 @@ async function promptHidden(prompt: string): Promise<string> {
           value = value.slice(0, -1)
         } else {
           value += char
+          if (Buffer.byteLength(value, 'utf8') > MAX_PAGE_PASSWORD_BYTES) {
+            stdin.removeListener('data', onData)
+            reject(new Error(`page password exceeds ${MAX_PAGE_PASSWORD_BYTES} bytes`))
+          }
         }
       }
       stdin.on('data', onData)
@@ -65,9 +90,6 @@ async function promptHidden(prompt: string): Promise<string> {
   }
 }
 
-// Acquire the page password from the appropriate source. Never returns an empty
-// string — the caller should surface a clear error instead of publishing a page
-// with a blank password.
 export async function readPagePassword(): Promise<string> {
   const source = pagePasswordSource(process.env.PRESS_PAGE_PASSWORD, Boolean(process.stdin.isTTY))
   const value =
@@ -78,6 +100,9 @@ export async function readPagePassword(): Promise<string> {
         : await promptHidden('Page password: ')
   if (!value) {
     throw new Error('no page password provided (set PRESS_PAGE_PASSWORD, pipe stdin, or type one)')
+  }
+  if (Buffer.byteLength(value, 'utf8') > MAX_PAGE_PASSWORD_BYTES) {
+    throw new Error(`page password exceeds ${MAX_PAGE_PASSWORD_BYTES} bytes`)
   }
   return value
 }

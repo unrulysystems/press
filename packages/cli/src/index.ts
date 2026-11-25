@@ -182,20 +182,36 @@ function printError(json: boolean, error: unknown): 1 | 2 | 3 {
   return cliError.exitCode
 }
 
+const API_REQUEST_TIMEOUT_MS = 30_000
+const PUBLISH_REQUEST_TIMEOUT_MS = 120_000
+
 async function apiFetch(
   ctx: CliContext,
   path: string,
-  init: RequestInit & { readonly token?: string } = {},
+  init: RequestInit & { readonly token?: string; readonly timeoutMs?: number } = {},
 ): Promise<unknown> {
-  const headers = new Headers(init.headers)
-  if (init.token) {
-    headers.set('authorization', `Bearer ${init.token}`)
+  const { token, timeoutMs = API_REQUEST_TIMEOUT_MS, ...fetchInit } = init
+  const headers = new Headers(fetchInit.headers)
+  if (token) {
+    headers.set('authorization', `Bearer ${token}`)
   }
   const response = await fetch(`${ctx.host}${path}`, {
-    ...init,
+    ...fetchInit,
     headers,
+    signal: fetchInit.signal ?? AbortSignal.timeout(timeoutMs),
   })
-  const body = await response.json().catch(() => ({}))
+  const text = await response.text()
+  let body: unknown = {}
+  if (text.trim().length > 0) {
+    try {
+      body = JSON.parse(text)
+    } catch {
+      if (response.ok) {
+        throw new CliError('server returned an invalid JSON response')
+      }
+      body = {}
+    }
+  }
   if (!response.ok) {
     const message =
       body && typeof body === 'object' && 'error' in body && typeof body.error === 'string'
@@ -240,6 +256,7 @@ export function parseMoveArguments(args: readonly string[]): {
   readonly destination: { readonly collection: string; readonly file: string }
   readonly redirect: PageRedirectMode
 } {
+  assertKnownOptions(args, ['--redirect'], [])
   const positional = stripOptions(args, ['--redirect'])
   if (positional.length !== 2) {
     throw new CliError('move requires <source> <destination>')
@@ -261,6 +278,29 @@ export function parseMoveArguments(args: readonly string[]): {
     source,
     destination,
     redirect: rawRedirect as PageRedirectMode,
+  }
+}
+
+function assertKnownOptions(
+  args: readonly string[],
+  valueOptions: readonly string[],
+  flags: readonly string[],
+): void {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]
+    if (!arg) {
+      continue
+    }
+    if (valueOptions.includes(arg)) {
+      index += 1
+      continue
+    }
+    if (flags.includes(arg)) {
+      continue
+    }
+    if (arg.startsWith('-')) {
+      throw new CliError(`unknown option: ${arg}`)
+    }
   }
 }
 
@@ -337,6 +377,7 @@ export function parseLoginArguments(args: readonly string[]): {
   readonly device: boolean
   readonly noOpen: boolean
 } {
+  assertKnownOptions(args, [], ['--device', '--no-open'])
   return {
     device: hasFlag(args, '--device'),
     noOpen: hasFlag(args, '--no-open') || process.env.PRESS_NO_BROWSER === '1',
@@ -398,11 +439,20 @@ async function pollDeviceOnce(
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ device_code: deviceCode, verifier }),
+    signal: AbortSignal.timeout(API_REQUEST_TIMEOUT_MS),
   })
-  const body = (await response.json().catch(() => ({}))) as {
+  const text = await response.text()
+  let body: {
     readonly token?: string
     readonly user?: { readonly email?: string; readonly id?: string; readonly role?: string }
     readonly error?: string
+  } = {}
+  if (text.trim().length > 0) {
+    try {
+      body = JSON.parse(text) as typeof body
+    } catch {
+      body = {}
+    }
   }
   if (response.ok && body.token && body.user) {
     return { ok: true, token: body.token, user: body.user }
@@ -532,15 +582,18 @@ async function commandLogin(ctx: CliContext, args: readonly string[]): Promise<v
       console.log(authorizeUrl)
     }
   } else {
-    Bun.spawn(['open', authorizeUrl], {
+    const opener = process.platform === 'darwin' ? 'open' : 'xdg-open'
+    Bun.spawn([opener, authorizeUrl], {
       stdin: 'ignore',
       stdout: 'ignore',
       stderr: 'ignore',
     }).unref()
   }
 
+  let timeoutId: ReturnType<typeof setTimeout> | undefined
   const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new CliError('login timed out')), 120_000).unref()
+    timeoutId = setTimeout(() => reject(new CliError('login timed out')), 120_000)
+    timeoutId.unref()
   })
 
   try {
@@ -560,6 +613,9 @@ async function commandLogin(ctx: CliContext, args: readonly string[]): Promise<v
       authorizeUrl,
     })
   } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId)
+    }
     server.stop(true)
   }
 }
@@ -623,9 +679,11 @@ async function commandLogout(ctx: CliContext): Promise<void> {
 }
 
 async function commandPublish(ctx: CliContext, args: readonly string[]): Promise<void> {
-  const [filePath] = stripFlags(stripOptions(args, ['--to', '--as', '--visibility', '--allow']), [
-    '--password',
-  ])
+  assertKnownOptions(args, ['--to', '--as', '--visibility', '--allow', '--title'], ['--password'])
+  const [filePath] = stripFlags(
+    stripOptions(args, ['--to', '--as', '--visibility', '--allow', '--title']),
+    ['--password'],
+  )
   if (!filePath) {
     throw new CliError('publish requires a file path')
   }
@@ -640,12 +698,16 @@ async function commandPublish(ctx: CliContext, args: readonly string[]): Promise
   // `--password` without an explicit visibility implies a password-protected page.
   const visibility = optionValue(args, '--visibility') ?? (wantsPassword ? 'password' : undefined)
   const allow = optionValue(args, '--allow')
+  const title = optionValue(args, '--title')
   const query = new URLSearchParams()
   if (visibility) {
     query.set('visibility', visibility)
   }
   if (allow) {
     query.set('allow', allow)
+  }
+  if (title) {
+    query.set('title', title)
   }
   const source = await requireToken(ctx)
   const html = await Bun.file(filePath)
@@ -664,6 +726,7 @@ async function commandPublish(ctx: CliContext, args: readonly string[]): Promise
     token: source.token,
     headers,
     body: html,
+    timeoutMs: PUBLISH_REQUEST_TIMEOUT_MS,
   })) as JsonRecord
   if (ctx.json) {
     printSuccess(ctx, body)
@@ -675,6 +738,7 @@ async function commandPublish(ctx: CliContext, args: readonly string[]): Promise
 }
 
 async function commandList(ctx: CliContext, args: readonly string[]): Promise<void> {
+  assertKnownOptions(args, [], [])
   const source = await requireToken(ctx)
   const [collection] = args
   const body = (await apiFetch(
@@ -699,43 +763,51 @@ async function commandList(ctx: CliContext, args: readonly string[]): Promise<vo
 }
 
 async function commandPageSet(ctx: CliContext, args: readonly string[]): Promise<void> {
-  const [target] = stripFlags(stripOptions(args, ['--visibility', '--allow']), ['--password'])
+  assertKnownOptions(args, ['--visibility', '--allow', '--title'], ['--password'])
+  const [target] = stripFlags(stripOptions(args, ['--visibility', '--allow', '--title']), [
+    '--password',
+  ])
   if (!target) {
     throw new CliError('page set requires <collection>/<file>')
   }
   const { collection, file } = parseTarget(target)
   const visibility = optionValue(args, '--visibility')
   const allow = optionValue(args, '--allow')
+  const title = optionValue(args, '--title')
   const wantsPassword = hasFlag(args, '--password')
-  if (!visibility && allow === undefined && !wantsPassword) {
-    throw new CliError('page set requires --visibility, --allow, or --password')
+  if (!visibility && allow === undefined && !title && !wantsPassword) {
+    throw new CliError('page set requires --visibility, --allow, --title, or --password')
   }
   const source = await requireToken(ctx)
-  let body: JsonRecord = {}
-  if (visibility || allow !== undefined) {
-    body = (await apiFetch(ctx, `/api/pages/${collection}/${file}`, {
-      method: 'PATCH',
-      token: source.token,
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        ...(visibility ? { visibility } : {}),
-        ...(allow !== undefined ? { allowlist: allow.split(',').map((item) => item.trim()) } : {}),
-      }),
-    })) as JsonRecord
-  }
-  if (wantsPassword) {
-    // Set a custom password (and flip the page to visibility=password) via the
-    // re-roll endpoint; the password travels in a header, never argv/query (INV-4).
+  let body: JsonRecord
+  if (wantsPassword && !visibility && allow === undefined && !title) {
     body = (await apiFetch(ctx, `/api/pages/${collection}/${file}/password`, {
       method: 'POST',
       token: source.token,
       headers: { 'x-press-page-password': await readPagePassword() },
+    })) as JsonRecord
+  } else {
+    const headers: Record<string, string> = { 'content-type': 'application/json' }
+    if (wantsPassword) {
+      headers['x-press-page-password'] = await readPagePassword()
+    }
+    const effectiveVisibility = visibility ?? (wantsPassword ? 'password' : undefined)
+    body = (await apiFetch(ctx, `/api/pages/${collection}/${file}`, {
+      method: 'PATCH',
+      token: source.token,
+      headers,
+      body: JSON.stringify({
+        ...(effectiveVisibility ? { visibility: effectiveVisibility } : {}),
+        ...(allow !== undefined ? { allowlist: allow.split(',').map((item) => item.trim()) } : {}),
+        ...(title ? { title } : {}),
+      }),
     })) as JsonRecord
   }
   printSuccess(ctx, { message: `${collection}/${file} updated`, ...body })
 }
 
 async function commandUnpublish(ctx: CliContext, args: readonly string[]): Promise<void> {
+  assertKnownOptions(args, [], [])
   const [target] = args
   if (!target) {
     throw new CliError('unpublish requires <collection>/<file>')
@@ -834,12 +906,8 @@ async function run(argv: readonly string[]): Promise<void> {
 }
 
 if (import.meta.main) {
-  void run(Bun.argv.slice(2))
-    .then(() => {
-      // Natural success exit so stdout/stderr flush; process.exit(0) can drop
-      // the final "logged in as" line on a pipe (device login has no finally work).
-    })
-    .catch((error) => {
-      process.exit(printError(Bun.argv.includes('--json'), error))
-    })
+  // Natural success exit lets stdout/stderr flush; only failures call process.exit.
+  void run(Bun.argv.slice(2)).catch((error) => {
+    process.exit(printError(Bun.argv.includes('--json'), error))
+  })
 }

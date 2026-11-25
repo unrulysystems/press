@@ -9,7 +9,7 @@ describe('formatPublishOutput', () => {
     ).toEqual(['https://press.test/p/c/f.html'])
   })
 
-  test('password page prints the password then reader guidance (F2 / REQ-CLI-004)', () => {
+  test('password page prints the password then reader guidance (REQ-CLI-004)', () => {
     const lines = formatPublishOutput({
       url: 'https://press.test/p/c/f.html',
       visibility: 'password',
@@ -24,7 +24,7 @@ describe('formatPublishOutput', () => {
     ).toBeDefined()
   })
 
-  test('private page echoes the resolved allowlist (F4 / REQ-PUB-004)', () => {
+  test('private page echoes the resolved allowlist (REQ-PUB-004)', () => {
     const lines = formatPublishOutput({
       url: 'https://press.test/p/c/f.html',
       visibility: 'private',

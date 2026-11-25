@@ -114,6 +114,10 @@ describe('parseLoginArguments', () => {
     expect(parseLoginArguments(['--device'])).toEqual({ device: true, noOpen: false })
     expect(parseLoginArguments(['--device', '--no-open'])).toEqual({ device: true, noOpen: true })
   })
+
+  test('rejects unknown flags loudly', () => {
+    expect(() => parseLoginArguments(['--devic'])).toThrow('unknown option: --devic')
+  })
 })
 
 describe('nextDevicePollAction', () => {
@@ -160,5 +164,8 @@ describe('parseMoveArguments', () => {
     expect(() => parseMoveArguments(['reports/old.html', 'bad-target'])).toThrow(
       'target must be <collection>/<file>',
     )
+    expect(() =>
+      parseMoveArguments(['reports/old.html', 'archive/new.html', '--redriect', 'none']),
+    ).toThrow('unknown option: --redriect')
   })
 })

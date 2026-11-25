@@ -158,10 +158,10 @@ export async function buildCliBinary(
       autoloadPackageJson: false,
       autoloadTsconfig: false,
     },
-    // Hermetic test/e2e binaries keep the file-backed keychain seam (F-16);
-    // release binaries compile it out so PRESS_E2E_KEYCHAIN_FILE has no effect.
+    // Release binaries compile out the file-backed keychain seam by default;
+    // hermetic test/e2e builds must opt in explicitly via testBuild: true.
     define: {
-      'process.env.PRESS_TEST_BUILD': input.testBuild === false ? '"0"' : '"1"',
+      'process.env.PRESS_TEST_BUILD': input.testBuild === true ? '"1"' : '"0"',
       PRESS_COMPILED_VERSION: JSON.stringify(CLI_PACKAGE_VERSION),
     },
     minify: true,
@@ -181,7 +181,11 @@ function tar(input: readonly string[], cwd = root): string {
     cwd,
     encoding: 'utf8',
     env: { ...process.env, COPYFILE_DISABLE: '1' },
+    timeout: 60_000,
   })
+  if (result.error) {
+    return fail(`tar ${input.join(' ')} failed: ${result.error.message}`)
+  }
   if (result.status !== 0) {
     return fail(`tar ${input.join(' ')} failed: ${result.stderr.trim()}`)
   }
@@ -225,8 +229,11 @@ export async function packageCliBinary(input: {
         encoding: 'utf8',
         env: process.env,
         stdio: ['ignore', archiveHandle.fd, 'pipe'],
+        timeout: 60_000,
       })
-      if (result.status !== 0) {
+      if (result.error) {
+        gzipFailure = `gzip failed: ${result.error.message}`
+      } else if (result.status !== 0) {
         gzipFailure = `gzip failed: ${result.stderr.trim()}`
       }
     } finally {

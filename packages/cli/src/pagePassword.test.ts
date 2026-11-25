@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { pagePasswordSource } from './pagePassword'
 
-describe('pagePasswordSource (REQ-CLI-001 / F3)', () => {
+describe('pagePasswordSource (REQ-CLI-001)', () => {
   test('prefers PRESS_PAGE_PASSWORD when set', () => {
     expect(pagePasswordSource('liberty-1776', true)).toEqual({ kind: 'env', value: 'liberty-1776' })
     // env wins even when a TTY is available
