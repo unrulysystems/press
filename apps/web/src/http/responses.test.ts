@@ -23,6 +23,10 @@ describe('jsonErrorResponse', () => {
       expect(bodyRes.status).toBe(413)
       expect(bodyRes.headers.get('connection')).toBe('close')
 
+      const httpTooLarge = jsonErrorResponse('testOp', new HttpError(413, 'too large'))
+      expect(httpTooLarge.status).toBe(413)
+      expect(httpTooLarge.headers.get('connection')).toBe('close')
+
       const slugRes = jsonErrorResponse(
         'testOp',
         new SlugValidationError('collection', 'invalid slug'),

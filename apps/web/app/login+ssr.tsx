@@ -68,7 +68,11 @@ export function LoginPage() {
       })
       if (!response.ok) {
         setSubmittingMode('idle')
-        setError('Could not start Google sign-in. Please try again.')
+        if (response.status === 429) {
+          setError('Too many sign-in attempts. Please wait a moment and try again.')
+        } else {
+          setError('Could not start Google sign-in. Please try again.')
+        }
         return
       }
       const body = (await response.json()) as { readonly url?: string }

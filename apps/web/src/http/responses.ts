@@ -64,7 +64,11 @@ export function logServerWarning(
 
 export function jsonErrorResponse(operation: string, error: unknown, request?: Request): Response {
   if (error instanceof HttpError) {
-    return jsonResponse({ error: error.message }, error.status)
+    return jsonResponse(
+      { error: error.message },
+      error.status,
+      error.status === 413 ? { connection: 'close' } : undefined,
+    )
   }
   if (error instanceof BodyTooLargeError) {
     // Signal connection closure when rejecting an unread oversized body so

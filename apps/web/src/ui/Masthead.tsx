@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { MagazineViewer } from '@press/web/publish/indexes'
 
@@ -27,6 +27,18 @@ export function Masthead({
 }) {
   const [signingOut, setSigningOut] = useState(false)
   const [signOutError, setSignOutError] = useState<string | null>(null)
+
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent): void {
+      if (event.persisted) {
+        setSigningOut(false)
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [])
 
   async function signOut() {
     setSignOutError(null)

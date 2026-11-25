@@ -34,7 +34,11 @@ export function safeNext(raw: string | null): string {
   }
   try {
     const parsed = new URL(raw, SAFE_NEXT_SENTINEL_ORIGIN)
-    if (parsed.origin !== SAFE_NEXT_SENTINEL_ORIGIN) {
+    if (
+      parsed.origin !== SAFE_NEXT_SENTINEL_ORIGIN ||
+      !parsed.pathname.startsWith('/') ||
+      parsed.pathname.startsWith('//')
+    ) {
       return '/'
     }
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
