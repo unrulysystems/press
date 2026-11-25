@@ -9,9 +9,6 @@
       "path": "./packages/core"
     },
     {
-      "path": "./packages/utils"
-    },
-    {
       "path": "./apps/web"
     }
   ]

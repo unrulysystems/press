@@ -2,7 +2,7 @@
   "$schema": "./node_modules/oxlint/configuration_schema.json",
   "categories": {
     "correctness": "error",
-    "suspicious": "warn",
+    "suspicious": "error",
     "pedantic": "off",
     "perf": "warn",
     "style": "off",
@@ -25,7 +25,7 @@
   },
   "overrides": [
     {
-      "files": ["scripts/**/*", "apps/**/*"],
+      "files": ["scripts/**/*", "apps/**/*", "packages/cli/**/*"],
       "rules": {
         "no-console": "off"
       }

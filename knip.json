@@ -1,26 +1,32 @@
 {
   "$schema": "https://unpkg.com/knip@5/schema.json",
+  "vite": false,
+  "ignoreBinaries": ["silo"],
+  "ignoreDependencies": [
+    "@press/cli",
+    "@fontsource/inter",
+    "@fontsource/newsreader",
+    "@tamagui/config"
+  ],
   "workspaces": {
     ".": {
-      "entry": ["scripts/*.ts"],
-      "project": ["scripts/**/*.ts"]
+      "entry": ["scripts/*.ts", "e2e/*.ts"],
+      "project": ["scripts/**/*.ts", "e2e/**/*.ts"]
     },
     "packages/*": {
-      "entry": ["src/index.ts", "src/index.tsx"],
-      "project": ["src/**/*.ts", "src/**/*.tsx"]
+      "project": ["src/**/*.ts"]
     },
-    "apps/*": {
+    "apps/web": {
       "entry": [
-        "src/index.ts",
-        "src/index.tsx",
-        "src/main.ts",
-        "src/main.tsx",
         "app/**/*.tsx",
-        "app/**/*+api.ts"
+        "app/**/*+api.ts",
+        "src/setupServer.ts",
+        "src/publish/e2eSupport.ts",
+        "vite.config.ts",
+        "tamagui.config.ts"
       ],
       "project": ["src/**/*.ts", "src/**/*.tsx", "app/**/*.ts", "app/**/*.tsx"]
     }
   },
-  "ignoreDependencies": [],
   "ignoreExportsUsedInFile": true
 }

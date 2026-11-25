@@ -62,13 +62,6 @@
       "name": "@press/core",
       "version": "0.2.0",
     },
-    "packages/utils": {
-      "name": "@press/utils",
-      "version": "0.1.1",
-      "dependencies": {
-        "@press/core": "workspace:*",
-      },
-    },
   },
   "overrides": {
     "rolldown": "1.1.8",
@@ -774,8 +767,6 @@
     "@press/cli": ["@press/cli@workspace:packages/cli"],
 
     "@press/core": ["@press/core@workspace:packages/core"],
-
-    "@press/utils": ["@press/utils@workspace:packages/utils"],
 
     "@press/web": ["@press/web@workspace:apps/web"],
 
