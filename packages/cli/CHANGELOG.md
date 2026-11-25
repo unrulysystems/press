@@ -1,5 +1,12 @@
 # @press/cli
 
+## 0.5.3
+
+### Patch Changes
+
+- Harden CLI keychain storage (atomic 0600 file writes, fail-closed reads, rooted macOS Keychain FFI buffers), request timeouts, strict unknown-flag rejection across all subcommands, atomic `press page set` password updates, Linux `xdg-open` fallback, and seam-free release binary builds by default.
+- Server and web hardening in the same release: enforce active-ban checks and `PRESS_ADMIN_EMAILS`-derived roles across `/api/whoami` and CLI auth flows, rate-limit `POST` and `GET` Basic password attempts on `/p/*`, block control-char and dot-segment open redirects in `/login`, make blob overwrites and DB boot migrations atomic/serialized, emit `Connection: close` on `413` responses, and enforce `oxlint --deny-warnings` + `knip`.
+
 ## 0.5.2
 
 ### Patch Changes
