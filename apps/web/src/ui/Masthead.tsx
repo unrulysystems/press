@@ -1,17 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { MagazineViewer } from '@press/web/publish/indexes'
 
-// Shared magazine masthead for the index and collection feeds. Both surfaces
-// render an identical wordmark + account nav; keeping it in one place means the
-// sign-out affordance can never drift between them.
+const SIGN_OUT_TIMEOUT_MS = 15_000
 
-async function postSignOut(): Promise<void> {
-  await fetch('/api/auth/sign-out', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: '{}',
-  })
+async function postSignOut(): Promise<boolean> {
+  try {
+    const response = await fetch('/api/auth/sign-out', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(SIGN_OUT_TIMEOUT_MS),
+    })
+    return response.ok
+  } catch {
+    return false
+  }
 }
 
 export function Masthead({
@@ -19,17 +23,34 @@ export function Masthead({
   loginNext,
 }: {
   readonly viewer: MagazineViewer
-  // Raw path (not URL-encoded) so the login page's safeNext startsWith('/')
-  // check accepts it; encoding "/" would fail that guard and drop the redirect.
   readonly loginNext: string
 }) {
   const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
+
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent): void {
+      if (event.persisted) {
+        setSigningOut(false)
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [])
 
   async function signOut() {
+    setSignOutError(null)
     setSigningOut(true)
     // Reload to "/" after the session cookie is cleared so the masthead
     // re-derives from real session state rather than optimistic local state.
-    await postSignOut()
+    const ok = await postSignOut()
+    if (!ok) {
+      setSigningOut(false)
+      setSignOutError('Sign-out failed. Please try again.')
+      return
+    }
     window.location.assign('/')
   }
 
@@ -50,9 +71,17 @@ export function Masthead({
             >
               {signingOut ? 'Signing out' : 'Sign out'}
             </button>
+            {signOutError ? (
+              <span className="press-account-error" role="alert">
+                {signOutError}
+              </span>
+            ) : null}
           </span>
         ) : (
-          <a className="press-meta press-nav-link" href={`/login?next=${loginNext}`}>
+          <a
+            className="press-meta press-nav-link"
+            href={`/login?next=${encodeURIComponent(loginNext)}`}
+          >
             Log in
           </a>
         )}

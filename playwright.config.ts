@@ -7,6 +7,9 @@ const baseURL =
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
+  // WAIVER(Isolated): E2E specs share one seeded localnet Postgres + storage stack
+  // (including seeded-user ban and reseed tests). Debt — removed by per-worker
+  // isolated users/collections or per-worker database schemas.
   fullyParallel: false,
   workers: 1,
   reporter: process.env.CI ? 'line' : 'list',

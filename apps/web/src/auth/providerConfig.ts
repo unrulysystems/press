@@ -34,10 +34,10 @@ export function buildAuthProviderConfig(config: PressConfig): AuthProviderConfig
       enabled: config.credentialAuthEnabled,
       minPasswordLength: 8,
     },
-    ...(config.googleClientId && config.googleClientSecret
+    ...(config.google
       ? {
           socialProviders: {
-            google: buildGoogleProviderConfig(config.googleClientId, config.googleClientSecret),
+            google: buildGoogleProviderConfig(config.google.clientId, config.google.clientSecret),
           },
         }
       : {}),

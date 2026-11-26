@@ -1,7 +1,12 @@
+import { eq } from 'drizzle-orm'
+
 import type { AuthenticatedViewer } from '@press/core'
 
+import { user } from '../db/schema'
 import { isUserActivelyBanned } from './apiTokens'
 import { roleForEmail } from './role'
+
+import type { PressDb } from '../db/client'
 
 export type SessionUserRow = {
   readonly id: string
@@ -10,16 +15,15 @@ export type SessionUserRow = {
   readonly banExpires: Date | null
 }
 
-// The single construction point for a browser-session viewer (serving + indexes).
-// A banned user's live session must not authorize reads (F-29): the bearer-token
-// path already rejects bans in verifyApiToken, and the session path must match.
-// The effective role re-derives from PRESS_ADMIN_EMAILS at use-time (REQ-AUTH-007);
-// the persisted role column is only a cache and is never read here.
+// Single construction point for a browser-session viewer. Enforces active-ban
+// rejection and re-derives the effective admin role from PRESS_ADMIN_EMAILS
+// (REQ-AUTH-007) instead of trusting the cached user.role column.
 export function authenticatedViewerForSession(
   row: SessionUserRow,
   adminEmails: readonly string[],
+  now = new Date(),
 ): AuthenticatedViewer | null {
-  if (isUserActivelyBanned({ banned: row.banned, banExpires: row.banExpires })) {
+  if (isUserActivelyBanned({ banned: row.banned, banExpires: row.banExpires }, now)) {
     return null
   }
   return {
@@ -28,4 +32,16 @@ export function authenticatedViewerForSession(
     email: row.email,
     role: roleForEmail(row.email, adminEmails),
   }
+}
+
+export async function loadActiveViewerForUserId(
+  db: PressDb,
+  userId: string,
+  adminEmails: readonly string[],
+  now = new Date(),
+): Promise<AuthenticatedViewer | null> {
+  const dbUser = await db.query.user.findFirst({
+    where: eq(user.id, userId),
+  })
+  return dbUser ? authenticatedViewerForSession(dbUser, adminEmails, now) : null
 }

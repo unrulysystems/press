@@ -1,10 +1,8 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto'
 
-// A short-lived, page-scoped unlock cookie proves a viewer entered the correct
-// password on the branded gate (REQ-SRV-004 / F1). It is HMAC-signed with the
-// server secret so it cannot be forged, carries its own expiry, and authorizes
-// exactly one page. It replaces re-sending Basic credentials on every request for
-// browser readers, while the Basic channel stays available for programmatic clients.
+// Short-lived, page-scoped unlock cookie proving a viewer entered the page password
+// on the branded gate (REQ-SRV-004). HMAC-signed with the server secret so it cannot
+// be forged, carries its own expiry, and authorizes exactly one page.
 export const PAGE_PASSWORD_COOKIE_TTL_MS = 60 * 60 * 1000 // 1 hour — short-lived
 
 export function pagePasswordCookieName(pageId: string): string {
@@ -42,10 +40,8 @@ function sign(secret: string, payload: string): string {
   return createHmac('sha256', secret).update(payload).digest('base64url')
 }
 
-// Stable digest of the page's current password hash (null-marker when the page has
-// no hash). Binding the cookie signature to this digest means a password reroll — or
-// any publish that replaces the hash — invalidates already-issued unlock cookies
-// immediately, without a schema change or a per-page rotation secret (F-15/19).
+// Stable digest of the page's current password hash so any reroll or overwrite
+// invalidates already-issued unlock cookies immediately.
 function passwordDigest(passwordHash: string | null): string {
   return createHash('sha256')
     .update(passwordHash ?? '')

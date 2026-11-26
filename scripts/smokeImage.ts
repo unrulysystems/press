@@ -3,8 +3,6 @@ import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
-import { servedPageHeaders } from '../apps/web/src/publish/serveAcl'
-
 type SmokeEnv = NodeJS.ProcessEnv & Record<string, string>
 
 type CommandResult = {
@@ -23,7 +21,7 @@ const smokeBasePort = Number(process.env.PRESS_SMOKE_PORT ?? 49174)
 const postgresPort = `${smokeBasePort + 1}`
 const webPort = `${smokeBasePort + 2}`
 const baseUrl = `http://127.0.0.1:${webPort}`
-const requiredCsp = servedPageHeaders['Content-Security-Policy']
+const requiredCsp = 'sandbox allow-scripts allow-popups'
 
 function fail(message: string): never {
   throw new Error(message)
@@ -83,7 +81,7 @@ function productionCredentialRefusalEnv(): Record<string, string> {
   }
 }
 
-function redactCommand(command: string, args: readonly string[]): string {
+function formatCommand(command: string, args: readonly string[]): string {
   return [command, ...args].join(' ')
 }
 
@@ -139,13 +137,13 @@ function run(
       }
       const result = { code: code ?? 1, stdout, stderr }
       if (timedOut) {
-        reject(new Error(`${redactCommand(command, args)} timed out after ${options.timeoutMs}ms`))
+        reject(new Error(`${formatCommand(command, args)} timed out after ${options.timeoutMs}ms`))
         return
       }
       if (!options.allowFailure && result.code !== 0) {
         reject(
           new Error(
-            `${redactCommand(command, args)} exited with ${signal ?? result.code}\n${stderr}`,
+            `${formatCommand(command, args)} exited with ${signal ?? result.code}\n${stderr}`,
           ),
         )
         return
@@ -183,7 +181,7 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<Response> {
   while (Date.now() < deadline) {
     try {
       // oxlint-disable-next-line no-await-in-loop -- Polling observes one external health state.
-      const response = await fetch(url)
+      const response = await fetch(url, { signal: AbortSignal.timeout(5_000) })
       if (response.ok) {
         return response
       }
@@ -199,7 +197,7 @@ async function waitForHttp(url: string, timeoutMs: number): Promise<Response> {
 }
 
 async function assertText(url: string, expected: readonly string[]): Promise<Response> {
-  const response = await fetch(url)
+  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) })
   if (!response.ok) {
     fail(`${url} returned HTTP ${response.status}`)
   }
@@ -291,8 +289,8 @@ async function assertContainerHttp(): Promise<void> {
 
   // `/health` is the Kubernetes probe target (see press-deploy DEPLOYMENT.spec.md); smoke it
   // against the real image so the endpoint prod depends on is covered, not just `/healthz`.
-  const health2 = await waitForHttp(`${baseUrl}/health`, 30_000)
-  if ((await health2.text()) !== 'ok\n') {
+  const k8sHealth = await waitForHttp(`${baseUrl}/health`, 30_000)
+  if ((await k8sHealth.text()) !== 'ok\n') {
     fail('/health returned unexpected body')
   }
 
@@ -374,4 +372,4 @@ async function main(): Promise<void> {
   }
 }
 
-void main()
+await main()

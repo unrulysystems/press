@@ -21,7 +21,6 @@ COPY bunfig.toml package.json bun.lock ./
 COPY apps/web/package.json apps/web/package.json
 COPY packages/core/package.json packages/core/package.json
 COPY packages/cli/package.json packages/cli/package.json
-COPY packages/utils/package.json packages/utils/package.json
 RUN bun install --prod --frozen-lockfile && mkdir -p apps/web/node_modules
 
 FROM node:24-bookworm-slim AS runtime
@@ -40,7 +39,6 @@ COPY --from=runtime-deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY package.json ./
 COPY apps/web/package.json ./apps/web/package.json
 COPY packages/core/package.json ./packages/core/package.json
-COPY packages/utils/package.json ./packages/utils/package.json
 COPY --from=build /app/packages/core/dist ./packages/core/dist
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY apps/web/src/server ./apps/web/src/server

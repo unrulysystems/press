@@ -2,22 +2,20 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 import { eq } from 'drizzle-orm'
 
-import { db, dbConfig } from '../db/client'
+import { getDb, getDbConfig } from '../db/client'
 import { apiToken, auditEvent, user, verification } from '../db/schema'
-import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
-import { auth } from './server'
-import { mintApiTokenForUser, verifyApiToken } from './apiTokens'
+import { readCappedBodyText } from '../http/readBody'
+import {
+  HttpError,
+  escapeHtml,
+  jsonErrorResponse,
+  jsonResponse,
+  readBoundedJsonObject,
+} from '../http/responses'
+import { isUserActivelyBanned, mintApiTokenForUser, verifyApiToken } from './apiTokens'
+import { roleForEmail } from './role'
+import { getAuth } from './server'
 import { sweepExpiredCliVerificationRowsBestEffort } from './verificationCleanup'
-
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'HttpError'
-  }
-}
 
 type CliVerificationValue = {
   readonly kind: 'cli-loopback'
@@ -25,7 +23,7 @@ type CliVerificationValue = {
   readonly challenge: string
 }
 
-type CliAuthorizeSession = {
+export type CliAuthorizeSession = {
   readonly user: {
     readonly id: string
     readonly email?: string | null
@@ -40,9 +38,6 @@ type CliPendingValue = {
   readonly userId: string
   readonly port: number
   readonly challenge: string
-  // Client-chosen state, bound server-side in the pending record: it is echoed
-  // in the loopback callback so the CLI's own state check passes, but it never
-  // serves as the CSRF secret (that is the server-generated consent token).
   readonly state: string
 }
 
@@ -71,19 +66,9 @@ type CliApproveDependencies = {
   readonly randomId?: () => string
 }
 
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status })
-}
-
-function errorResponse(error: unknown): Response {
-  if (error instanceof BodyTooLargeError) {
-    return json({ error: error.message }, error.status)
-  }
-  if (error instanceof HttpError) {
-    return json({ error: error.message }, error.status)
-  }
-  return json({ error: 'internal server error' }, 500)
-}
+const CLI_SMALL_BODY_LIMIT_BYTES = 8 * 1024
+const CLI_PENDING_TTL_MS = 10 * 60 * 1000
+const CLI_CODE_TTL_MS = 5 * 60 * 1000
 
 function hash(value: string): string {
   return createHash('sha256').update(value).digest('base64url')
@@ -93,19 +78,10 @@ function codeIdentifier(code: string): string {
   return `cli:${hash(code)}`
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
+function pendingIdentifier(consent: string): string {
+  return `cli:pending:${hash(consent)}`
 }
 
-// Same-origin approval page (B-1 / F-12-17): the loopback code is minted only
-// after the user clicks Approve on this page, so a bare GET from a malicious
-// page can no longer convert an ambient session into a long-lived token. Plain
-// HTML + inline styles + strict CSP — press chrome is not required here.
 const APPROVAL_PAGE_STYLE = `
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -176,11 +152,7 @@ will be issued only after you approve.</p>
 }
 
 export const cliApprovalPageHeaders = {
-  // form-action must permit the loopback: Chromium enforces form-action on the
-  // redirect that follows a form submission, so a 'self'-only policy would
-  // block the server's loopback redirect and the CLI would never receive its
-  // code. The redirect target is server-controlled (from the pending record);
-  // the page's only form is server-authored with a fixed action.
+  // form-action must permit loopback so Chromium allows the post-approval redirect.
   'Content-Security-Policy':
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' http://127.0.0.1:*; base-uri 'none'; frame-ancestors 'none'",
   'X-Content-Type-Options': 'nosniff',
@@ -211,39 +183,31 @@ function parsePort(value: string | null): number {
   return port
 }
 
-function parseChallenge(value: string | null): string {
+function parseTokenField(value: string | null, field: string): string {
   if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
-    throw new HttpError(400, 'challenge is required')
+    throw new HttpError(400, `${field} is required`)
   }
   return value
 }
 
-function parseState(value: string | null): string {
-  if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
-    throw new HttpError(400, 'state is required')
+function parseJsonObjectString(value: string, errorMessage: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch (error) {
+    throw new HttpError(400, errorMessage, { cause: error })
   }
-  return value
-}
-
-function parseConsent(value: string | null): string {
-  if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
-    throw new HttpError(400, 'consent is required')
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new HttpError(400, errorMessage)
   }
-  return value
-}
-
-// The pending record is keyed by the server-generated consent token (the CSRF
-// secret the approval page posts), never by the client-chosen state.
-function pendingIdentifier(consent: string): string {
-  return `cli:pending:${hash(consent)}`
+  return parsed as Record<string, unknown>
 }
 
 function parsePendingValue(value: string): CliPendingValue {
-  const parsed = JSON.parse(value) as unknown
-  if (!parsed || typeof parsed !== 'object') {
-    throw new HttpError(400, 'authorization request is invalid')
-  }
-  const record = parsed as Partial<CliPendingValue>
+  const record = parseJsonObjectString(
+    value,
+    'authorization request is invalid',
+  ) as Partial<CliPendingValue>
   if (
     record.kind !== 'cli-pending' ||
     typeof record.userId !== 'string' ||
@@ -262,37 +226,10 @@ function parsePendingValue(value: string): CliPendingValue {
   }
 }
 
-// Codes, verifiers, and consent states are tiny, so the small-body cap stays
-// far below PRESS_MAX_UPLOAD_BYTES (M-3).
-const CLI_SMALL_BODY_LIMIT_BYTES = 8 * 1024
-
-// The pending consent record outlives the code it guards: a human needs time
-// to read and click Approve, then the code itself stays short-lived once minted.
-const CLI_PENDING_TTL_MS = 10 * 60 * 1000
-const CLI_CODE_TTL_MS = 5 * 60 * 1000
-
-async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  // Bounded read before parse: an anonymous caller must never make the server
-  // buffer an unbounded body (M-3).
-  const text = await readCappedBodyText(request, CLI_SMALL_BODY_LIMIT_BYTES)
-  let body: unknown
-  try {
-    body = JSON.parse(text)
-  } catch {
-    throw new HttpError(400, 'request body must be JSON')
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object')
-  }
-  return body as Record<string, unknown>
-}
-
 async function readFormConsent(request: Request): Promise<string> {
-  // Same bounded read as the exchange: the approval POST is small and
-  // session-bearing, but an oversized body must still fail before buffering.
   const text = await readCappedBodyText(request, CLI_SMALL_BODY_LIMIT_BYTES)
   const params = new URLSearchParams(text)
-  return parseConsent(params.get('consent'))
+  return parseTokenField(params.get('consent'), 'consent')
 }
 
 function readString(input: Record<string, unknown>, field: string): string {
@@ -304,11 +241,10 @@ function readString(input: Record<string, unknown>, field: string): string {
 }
 
 function parseVerificationValue(value: string): CliVerificationValue {
-  const parsed = JSON.parse(value) as unknown
-  if (!parsed || typeof parsed !== 'object') {
-    throw new HttpError(400, 'authorization code is invalid')
-  }
-  const record = parsed as Partial<CliVerificationValue>
+  const record = parseJsonObjectString(
+    value,
+    'authorization code is invalid',
+  ) as Partial<CliVerificationValue>
   if (
     record.kind !== 'cli-loopback' ||
     typeof record.userId !== 'string' ||
@@ -323,13 +259,30 @@ function parseVerificationValue(value: string): CliVerificationValue {
   }
 }
 
+export async function loadActiveCliSession(headers: Headers): Promise<CliAuthorizeSession | null> {
+  const session = (await getAuth().api.getSession({ headers })) as CliAuthorizeSession | null
+  if (!session) {
+    return null
+  }
+  const dbUser = await getDb().query.user.findFirst({
+    where: eq(user.id, session.user.id),
+  })
+  if (!dbUser) {
+    return null
+  }
+  if (isUserActivelyBanned({ banned: dbUser.banned, banExpires: dbUser.banExpires })) {
+    throw new HttpError(403, 'account is suspended')
+  }
+  return session
+}
+
 export async function authorizeCliRequest(
   request: Request,
   dependencies: CliAuthorizeDependencies,
 ): Promise<Response> {
   try {
     if (request.method !== 'GET') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
     const session = await dependencies.getSession(request.headers)
     if (!session) {
@@ -347,16 +300,10 @@ export async function authorizeCliRequest(
 
     const url = new URL(request.url)
     const port = parsePort(url.searchParams.get('port'))
-    const challenge = parseChallenge(url.searchParams.get('challenge'))
-    const state = parseState(url.searchParams.get('state'))
+    const challenge = parseTokenField(url.searchParams.get('challenge'), 'challenge')
+    const state = parseTokenField(url.searchParams.get('state'), 'state')
     const now = dependencies.now?.() ?? Date.now()
 
-    // B-1 consent step: the server binds state/port/challenge to this session
-    // as a pending record and renders a same-origin approval page; the loopback
-    // code is minted only after the CSRF-protected POST below. The CSRF secret
-    // is a server-generated consent token (never the client-chosen state), so
-    // a bare GET — or a forged same-site POST without the token — can never
-    // convert an ambient session into a long-lived token.
     const consent = dependencies.randomConsent?.() ?? randomBytes(32).toString('base64url')
     await dependencies.insertPending({
       id: dependencies.randomId?.() ?? randomUUID(),
@@ -373,27 +320,21 @@ export async function authorizeCliRequest(
 
     return cliApprovalPageResponse({ consent, port, email: session.user.email })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('authorizeCliRequest', error, request)
   }
 }
 
-// B-1 consent POST: consumes the server-owned pending record and mints the
-// one-time loopback code. CSRF is defeated by the server-generated consent
-// token: the approving page is same-origin (strict CSP, no-store), the token
-// is unguessable and never exposed to other origins, and the approving session
-// must be the one that started the request — so a hostile same-site page that
-// knows the client state but not the consent token cannot forge the POST.
 export async function approveCliRequest(
   request: Request,
   dependencies: CliApproveDependencies,
 ): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
     const session = await dependencies.getSession(request.headers)
     if (!session) {
-      return json({ error: 'authentication required' }, 401)
+      return jsonResponse({ error: 'authentication required' }, 401)
     }
     const impersonatedBy = session.session?.impersonatedBy
     if (impersonatedBy !== null && impersonatedBy !== undefined) {
@@ -422,45 +363,40 @@ export async function approveCliRequest(
       expiresAt: new Date(now + CLI_CODE_TTL_MS),
     })
 
-    // Echo the server-bound client state (not the consent token) so the CLI's
-    // own callback state check passes unchanged.
     const redirectUrl = new URL(`http://127.0.0.1:${pending.port}/callback`)
     redirectUrl.searchParams.set('code', code)
     redirectUrl.searchParams.set('state', pending.state)
     return Response.redirect(redirectUrl.toString(), 302)
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('approveCliRequest', error, request)
   }
 }
 
 export async function cliAuthorizeEndpoint(request: Request): Promise<Response> {
   try {
-    // F-33: sweep stale cli:* rows before creating a new loopback pending row.
+    const db = getDb()
     await sweepExpiredCliVerificationRowsBestEffort(db)
     return await authorizeCliRequest(request, {
-      baseUrl: dbConfig.baseUrl,
-      // The admin plugin used to type session.impersonatedBy; the column is still
-      // written by Better Auth at runtime, so the read-site contract stands.
-      getSession: async (headers) =>
-        (await auth.api.getSession({ headers })) as CliAuthorizeSession | null,
+      baseUrl: getDbConfig().baseUrl,
+      getSession: loadActiveCliSession,
       insertPending: async (row) => {
         await db.insert(verification).values(row)
       },
     })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('cliAuthorizeEndpoint', error, request)
   }
 }
 
 export async function cliApproveEndpoint(request: Request): Promise<Response> {
   try {
+    const db = getDb()
     return await approveCliRequest(request, {
-      getSession: async (headers) =>
-        (await auth.api.getSession({ headers })) as CliAuthorizeSession | null,
-      consumePending: async (state) => {
+      getSession: loadActiveCliSession,
+      consumePending: async (consent) => {
         const rows = await db
           .delete(verification)
-          .where(eq(verification.identifier, pendingIdentifier(state)))
+          .where(eq(verification.identifier, pendingIdentifier(consent)))
           .returning()
         const row = rows[0]
         if (!row || row.expiresAt.getTime() < Date.now()) {
@@ -473,16 +409,18 @@ export async function cliApproveEndpoint(request: Request): Promise<Response> {
       },
     })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('cliApproveEndpoint', error, request)
   }
 }
 
 export async function cliExchangeEndpoint(request: Request): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
-    const input = await readJsonObject(request)
+    const db = getDb()
+    const config = getDbConfig()
+    const input = await readBoundedJsonObject(request, CLI_SMALL_BODY_LIMIT_BYTES)
     const code = readString(input, 'code')
     const verifier = readString(input, 'verifier')
     const rows = await db
@@ -501,51 +439,56 @@ export async function cliExchangeEndpoint(request: Request): Promise<Response> {
       throw new HttpError(400, 'authorization verifier rejected')
     }
 
-    const token = await mintApiTokenForUser(db, {
-      userId: value.userId,
-      name: `press cli ${new Date().toISOString()}`,
-    })
     const sessionUser = await db.query.user.findFirst({
       where: eq(user.id, value.userId),
     })
     if (!sessionUser) {
       throw new HttpError(400, 'authorization user not found')
     }
+    if (isUserActivelyBanned({ banned: sessionUser.banned, banExpires: sessionUser.banExpires })) {
+      throw new HttpError(403, 'account is suspended')
+    }
 
-    return json({
+    const token = await mintApiTokenForUser(db, {
+      userId: sessionUser.id,
+      name: `press cli ${new Date().toISOString()}`,
+    })
+
+    return jsonResponse({
       token,
       user: {
         id: sessionUser.id,
         email: sessionUser.email,
-        role: sessionUser.role,
+        role: roleForEmail(sessionUser.email, config.adminEmails),
       },
     })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('cliExchangeEndpoint', error, request)
   }
 }
 
 export async function cliWhoamiEndpoint(request: Request): Promise<Response> {
   try {
     if (request.method !== 'GET') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
-    const verified = await verifyApiToken(db, request.headers, dbConfig.adminEmails)
+    const verified = await verifyApiToken(getDb(), request.headers, getDbConfig().adminEmails)
     if (!verified) {
       throw new HttpError(401, 'valid bearer token required')
     }
-    return json({ user: verified.user })
+    return jsonResponse({ user: verified.user })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('cliWhoamiEndpoint', error, request)
   }
 }
 
 export async function cliLogoutEndpoint(request: Request): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
-    const verified = await verifyApiToken(db, request.headers, dbConfig.adminEmails)
+    const db = getDb()
+    const verified = await verifyApiToken(db, request.headers, getDbConfig().adminEmails)
     if (!verified) {
       throw new HttpError(401, 'valid bearer token required')
     }
@@ -561,8 +504,8 @@ export async function cliLogoutEndpoint(request: Request): Promise<Response> {
         collectionSlug: null,
       })
     })
-    return json({ ok: true })
+    return jsonResponse({ ok: true })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('cliLogoutEndpoint', error, request)
   }
 }

@@ -29,9 +29,7 @@ async function expectRelativeOrder(page: Page, expected: readonly string[]) {
   await expect
     .poll(
       async () => {
-        const feedTitles = await articleTitles(page)
-          .allTextContents()
-          .catch(() => [])
+        const feedTitles = await articleTitles(page).allTextContents()
         const positions = expected.map((title) => feedTitles.indexOf(title))
         const present = positions.every((position) => position !== -1)
         const ordered = positions.every(

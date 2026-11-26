@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test'
 import cliPackage from '../package.json' with { type: 'json' }
 
 import {
+  assertNoExtraArgs,
   buildDoctorReport,
   CLI_VERSION,
   createLoopbackCallbackHandler,
@@ -114,6 +115,21 @@ describe('parseLoginArguments', () => {
     expect(parseLoginArguments(['--device'])).toEqual({ device: true, noOpen: false })
     expect(parseLoginArguments(['--device', '--no-open'])).toEqual({ device: true, noOpen: true })
   })
+
+  test('rejects unknown flags loudly', () => {
+    expect(() => parseLoginArguments(['--devic'])).toThrow('unknown option: --devic')
+  })
+})
+
+describe('assertNoExtraArgs', () => {
+  test('allows empty argument lists and rejects unknown flags or positional args', () => {
+    expect(() => assertNoExtraArgs('logout', [])).not.toThrow()
+    expect(() => assertNoExtraArgs('logout', ['--dry-run'])).toThrow('unknown option: --dry-run')
+    expect(() => assertNoExtraArgs('whoami', ['--bogus'])).toThrow('unknown option: --bogus')
+    expect(() => assertNoExtraArgs('doctor', ['extra'])).toThrow(
+      'doctor does not accept arguments: extra',
+    )
+  })
 })
 
 describe('nextDevicePollAction', () => {
@@ -160,5 +176,8 @@ describe('parseMoveArguments', () => {
     expect(() => parseMoveArguments(['reports/old.html', 'bad-target'])).toThrow(
       'target must be <collection>/<file>',
     )
+    expect(() =>
+      parseMoveArguments(['reports/old.html', 'archive/new.html', '--redriect', 'none']),
+    ).toThrow('unknown option: --redriect')
   })
 })

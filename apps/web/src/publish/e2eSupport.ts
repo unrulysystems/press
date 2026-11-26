@@ -2,9 +2,7 @@ import { and, eq, sql } from 'drizzle-orm'
 
 import { apiToken, auditEvent, collection, page, pageRedirect } from '../db/schema'
 
-import type { db as dbClient } from '../db/client'
-
-type PressDb = typeof dbClient
+import type { PressDb } from '../db/client'
 
 export type FailingAuditTrigger = {
   readonly collectionSlug: string

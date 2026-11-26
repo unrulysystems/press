@@ -464,7 +464,7 @@ const credentialSignIn: SignInFactory = (baseUrl, user) => async (authorizeUrl) 
   if (!cookie) {
     fail('credential sign-in returned no session cookie')
   }
-  // B-1 consent step: the authorize URL renders a same-origin approval page
+  // Consent step: the authorize URL renders a same-origin approval page
   // (a bare GET never mints a code); approve the pending request with the
   // session cookie and the page's server-generated consent token, then follow
   // the loopback redirect so the CLI's local listener receives the code and
@@ -538,41 +538,68 @@ async function pressLogin(
   const exit = new Promise<CommandResult>((resolveExit) => {
     child.on('exit', (code, signal) => resolveExit({ code: code ?? (signal ? 1 : 0), signal }))
   })
-  const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
-    child.stdout?.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString()
-      const match = /(https?:\/\/[^\s]+\/cli\/authorize\?[^\s]+)/.exec(stdout)
-      if (match?.[1]) {
-        resolveUrl(match[1])
+  try {
+    const authorizeUrl = await new Promise<string>((resolveUrl, reject) => {
+      const timeout = setTimeout(
+        () => reject(new Error('press login did not print an authorize URL within 15s')),
+        15_000,
+      )
+      timeout.unref()
+      const finish = (fn: () => void) => {
+        clearTimeout(timeout)
+        fn()
       }
+      child.stdout?.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString()
+        const match = /(https?:\/\/[^\s]+\/cli\/authorize\?[^\s]+)/.exec(stdout)
+        if (match?.[1]) {
+          finish(() => resolveUrl(match[1]))
+        }
+      })
+      child.stderr?.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString()
+      })
+      child.on('error', (error) => finish(() => reject(error)))
+      child.on('exit', (code) => {
+        if (code !== 0) {
+          finish(() =>
+            reject(
+              new Error(
+                `press login exited ${code} before printing authorize URL: ${stderr || stdout}`,
+              ),
+            ),
+          )
+        }
+      })
     })
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-    })
-    child.on('error', reject)
-    child.on('exit', (code) => {
-      if (code !== 0) {
-        reject(
-          new Error(
-            `press login exited ${code} before printing authorize URL: ${stderr || stdout}`,
-          ),
+    await signIn(authorizeUrl)
+    let exitTimeout: ReturnType<typeof setTimeout> | undefined
+    const result = await Promise.race([
+      exit,
+      new Promise<never>((_, reject) => {
+        exitTimeout = setTimeout(
+          () => reject(new Error(`press login did not exit within 15s: ${stderr || stdout}`)),
+          15_000,
         )
+        exitTimeout.unref()
+      }),
+    ]).finally(() => {
+      if (exitTimeout) {
+        clearTimeout(exitTimeout)
       }
     })
-    setTimeout(
-      () => reject(new Error('press login did not print an authorize URL within 15s')),
-      15_000,
-    ).unref()
-  })
-  await signIn(authorizeUrl)
-  const result = await exit
-  if (result.code !== 0) {
-    fail(`press login exited with ${result.signal ?? result.code}: ${stderr || stdout}`)
+    if (result.code !== 0) {
+      fail(`press login exited with ${result.signal ?? result.code}: ${stderr || stdout}`)
+    }
+    if (!stdout.includes(`logged in as ${user.email}`)) {
+      fail(`press login did not confirm sign-in as ${user.email}: ${stdout.trim()}`)
+    }
+    console.log(`  ok: press login → logged in as ${user.email}`)
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill('SIGTERM')
+    }
   }
-  if (!stdout.includes(`logged in as ${user.email}`)) {
-    fail(`press login did not confirm sign-in as ${user.email}: ${stdout.trim()}`)
-  }
-  console.log(`  ok: press login → logged in as ${user.email}`)
 }
 
 // press-setup done-when: doctor reports authenticated with the owner identity, and whoami agrees.

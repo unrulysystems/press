@@ -23,7 +23,7 @@ jobs:
       # Non-interactive Tilt so `silo up` (which runs `tilt`) never opens an editor.
       TILT_EDITOR: 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         timeout-minutes: 5
 
       - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0

@@ -15,7 +15,7 @@ const NULL_HASH = null
 const hashA = 'argon2id-hash-AAAAAAAA'
 const hashB = 'argon2id-hash-BBBBBBBB'
 
-describe('page password unlock cookie (REQ-SRV-004 / F1)', () => {
+describe('page password unlock cookie (REQ-SRV-004)', () => {
   test('cookie name is page-scoped', () => {
     expect(pagePasswordCookieName(PAGE)).toBe(`press_pw_${PAGE}`)
     expect(pagePasswordCookieName('other')).not.toBe(pagePasswordCookieName(PAGE))
@@ -63,7 +63,7 @@ describe('page password unlock cookie (REQ-SRV-004 / F1)', () => {
     expect(verifyPagePasswordCookie(SECRET, PAGE, 'no-dot', NOW, NULL_HASH)).toBe(false)
   })
 
-  test('binds the cookie to the page password hash (F-15/19)', () => {
+  test('binds the cookie to the page password hash', () => {
     // A cookie minted under one password must not verify after the hash changes
     // (password reroll / republish replacing the hash) — even before expiry.
     const value = signPagePasswordCookie(SECRET, PAGE, NOW + PAGE_PASSWORD_COOKIE_TTL_MS, hashA)
@@ -73,7 +73,7 @@ describe('page password unlock cookie (REQ-SRV-004 / F1)', () => {
   })
 })
 
-describe('readCookieValue (boundary-tolerant cookie parsing / F1 review)', () => {
+describe('readCookieValue (boundary-tolerant cookie parsing)', () => {
   test('returns the named cookie value', () => {
     expect(readCookieValue('a=1; press_pw_x=abc.def; b=2', 'press_pw_x')).toBe('abc.def')
   })

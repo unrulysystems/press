@@ -4,22 +4,27 @@ import {
   COLLECTION_DEFAULT_VISIBILITIES,
   PAGE_REDIRECT_MODES,
   PAGE_VISIBILITIES,
-  SlugValidationError,
   decideAcl,
   parseCollectionSlug,
   parseFileSlug,
 } from '@press/core'
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 
 import { verifyApiToken } from '../auth/apiTokens'
-import { db, dbConfig, pool } from '../db/client'
+import { getDb, getDbConfig, getPool } from '../db/client'
 import { auditEvent, collection, page, pageRedirect, schema } from '../db/schema'
-import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
+import {
+  HttpError,
+  jsonErrorResponse,
+  jsonResponse,
+  logServerWarning,
+  readBoundedJsonObject,
+} from '../http/responses'
 import { MIN_PAGE_PASSWORD_LENGTH, hashPagePassword, isStrongPagePassword } from './passwords'
 import { withPagePathLocks } from './pagePathLocks'
 import { moveResponseBody, publishResponseBody } from './responseShape'
-import { extractTitle } from './title'
+import { MAX_TITLE_LENGTH, extractTitle } from './title'
 import { archiveBlob, installBlob, moveBlob, removeTempBlob, writeTempBlob } from './storage'
 
 import type { MoveResponseBody, PublishResponseBody } from './responseShape'
@@ -38,15 +43,8 @@ import type { InferSelectModel } from 'drizzle-orm'
 type CollectionRow = InferSelectModel<typeof collection>
 type PageRow = InferSelectModel<typeof page>
 
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'HttpError'
-  }
-}
+const MAX_ALLOWLIST_ENTRIES = 500
+const MAX_LIST_ROWS = 1000
 
 type PageRoute = {
   readonly collectionSlug: CollectionSlug
@@ -54,43 +52,11 @@ type PageRoute = {
   readonly suffix?: 'move' | 'password'
 }
 
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status })
-}
-
-function errorResponse(error: unknown): Response {
-  if (error instanceof HttpError) {
-    return json({ error: error.message }, error.status)
-  }
-  if (error instanceof BodyTooLargeError) {
-    return json({ error: error.message }, error.status)
-  }
-  if (error instanceof SlugValidationError) {
-    return json({ error: error.message }, 400)
-  }
-  return json({ error: 'internal server error' }, 500)
-}
-
-// Mutation JSON bodies (move / page patch / collection patch) read through the
-// bounded reader (F-34): a caller holding a token must not be able to make the server
-// buffer an unbounded body, unlike the anonymous endpoints which already cap (M-3).
-// The bound is the dedicated PRESS_MAX_METADATA_BYTES config (REQ-CFG-001), independent
-// of PRESS_MAX_UPLOAD_BYTES which scopes the HTML publish body.
 export async function readMutationJson(
   request: Request,
-  byteLimit: number = dbConfig.maxMetadataBytes,
+  byteLimit: number = getDbConfig().maxMetadataBytes,
 ): Promise<Record<string, unknown>> {
-  const text = await readCappedBodyText(request, byteLimit)
-  let body: unknown
-  try {
-    body = JSON.parse(text)
-  } catch {
-    throw new HttpError(400, 'request body must be JSON')
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object')
-  }
-  return body as Record<string, unknown>
+  return await readBoundedJsonObject(request, byteLimit)
 }
 
 function viewerFromToken(user: {
@@ -109,10 +75,8 @@ function viewerFromToken(user: {
 function decodePathSegments(raw: string): string[] {
   try {
     return raw.split('/').map((segment) => decodeURIComponent(segment))
-  } catch {
-    // A syntactically valid but non-decodable percent-sequence (e.g. a truncated
-    // UTF-8 escape) is client input, not a server fault: answer 400, never 500 (M-2).
-    throw new HttpError(400, 'malformed percent-encoding in path')
+  } catch (error) {
+    throw new HttpError(400, 'malformed percent-encoding in path', { cause: error })
   }
 }
 
@@ -220,6 +184,9 @@ function parseOptionalString(value: unknown, field: string): string | undefined 
   if (!trimmed) {
     throw new HttpError(400, `${field} must not be empty`)
   }
+  if (trimmed.length > MAX_TITLE_LENGTH) {
+    throw new HttpError(400, `${field} must be at most ${MAX_TITLE_LENGTH} characters`)
+  }
   return trimmed
 }
 
@@ -241,6 +208,9 @@ function parseAllowlist(value: string | null): string[] | undefined {
 function parseAllowlistArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     throw new HttpError(400, 'allowlist must be an array of emails')
+  }
+  if (value.length > MAX_ALLOWLIST_ENTRIES) {
+    throw new HttpError(400, `allowlist cannot exceed ${MAX_ALLOWLIST_ENTRIES} entries`)
   }
   const emails = value
     .map((entry) => {
@@ -265,23 +235,23 @@ function generatePagePassword(): string {
   return randomBytes(18).toString('base64url')
 }
 
-// A publisher-supplied custom password (REQ-PUB-005 / F3) arrives in a request
-// header, never a query param (which access logs would capture) — see INV-4. The
-// raw value is used as-is for hashing.
+// A publisher-supplied custom password (REQ-PUB-005) arrives in a request header,
+// never a query param (INV-4).
 function readCustomPagePassword(request: Request): string | undefined {
   const raw = request.headers.get('x-press-page-password')
   return raw === null ? undefined : raw
 }
 
 async function readHtmlBody(request: Request): Promise<Uint8Array> {
+  const maxUploadBytes = getDbConfig().maxUploadBytes
   const type = request.headers.get('content-type')?.toLowerCase() ?? ''
   if (!type.split(';')[0]?.trim().startsWith('text/html')) {
     throw new HttpError(415, 'content-type must be text/html')
   }
 
   const declaredLength = request.headers.get('content-length')
-  if (declaredLength && Number(declaredLength) > dbConfig.maxUploadBytes) {
-    await rejectOversizedBody(request)
+  if (declaredLength && Number(declaredLength) > maxUploadBytes) {
+    await rejectOversizedBody(request, maxUploadBytes)
   }
 
   const chunks: Uint8Array[] = []
@@ -299,7 +269,9 @@ async function readHtmlBody(request: Request): Promise<Uint8Array> {
       break
     }
     total += value.byteLength
-    if (total > dbConfig.maxUploadBytes) {
+    if (total > maxUploadBytes) {
+      // oxlint-disable-next-line no-await-in-loop -- Cancel happens once at the bounded rejection point.
+      await reader.cancel('request body exceeds PRESS_MAX_UPLOAD_BYTES').catch(() => undefined)
       throw new HttpError(413, 'request body exceeds PRESS_MAX_UPLOAD_BYTES')
     }
     chunks.push(value)
@@ -314,11 +286,11 @@ async function readHtmlBody(request: Request): Promise<Uint8Array> {
   return body
 }
 
-async function rejectOversizedBody(request: Request): Promise<never> {
+async function rejectOversizedBody(request: Request, maxUploadBytes: number): Promise<never> {
   // One's Node production server can reset the socket if a handler returns while
   // the client is still uploading. Drain the smallest contract-relevant body
   // prefix, then cancel anything larger without buffering it.
-  await disposeOversizedRequestBody(request, dbConfig.maxUploadBytes + 1).catch(() => undefined)
+  await disposeOversizedRequestBody(request, maxUploadBytes + 1).catch(() => undefined)
   throw new HttpError(413, 'request body exceeds PRESS_MAX_UPLOAD_BYTES')
 }
 
@@ -378,7 +350,7 @@ function assertMutationAllowed(input: {
   readonly operation: AclOperation
 }): void {
   const decision = decideAcl(input.user, pageAcl(input.page), collectionAcl(input.collection), {
-    allowedDomains: dbConfig.allowedDomains,
+    allowedDomains: getDbConfig().allowedDomains,
     operation: input.operation,
   })
   if (!decision.allowed) {
@@ -401,11 +373,11 @@ function pageResponse(input: {
   readonly password?: string
   readonly allowlist?: readonly string[]
 }): PublishResponseBody {
-  return publishResponseBody({ baseUrl: dbConfig.baseUrl, ...input })
+  return publishResponseBody({ baseUrl: getDbConfig().baseUrl, ...input })
 }
 
 async function authenticatedViewer(request: Request) {
-  const verified = await verifyApiToken(db, request.headers, dbConfig.adminEmails)
+  const verified = await verifyApiToken(getDb(), request.headers, getDbConfig().adminEmails)
   if (!verified) {
     throw new HttpError(401, 'valid bearer token required')
   }
@@ -415,18 +387,37 @@ async function authenticatedViewer(request: Request) {
   }
 }
 
+async function rollbackBlobPreservingError(
+  error: unknown,
+  rollbackBlob: (() => Promise<void>) | undefined,
+  operation: string,
+): Promise<never> {
+  if (rollbackBlob) {
+    let rollbackError: unknown
+    try {
+      await rollbackBlob()
+    } catch (caught) {
+      rollbackError = caught
+    }
+    if (rollbackError !== undefined) {
+      throw new AggregateError([error, rollbackError], `${operation} rollback failed`)
+    }
+  }
+  throw error
+}
+
 export async function pagesEndpoint(request: Request): Promise<Response> {
   try {
     const route = parsePagePath(request)
     if (route.suffix === 'password') {
       if (request.method !== 'POST') {
-        return json({ error: 'method not allowed' }, 405)
+        return jsonResponse({ error: 'method not allowed' }, 405)
       }
       return await rerollPassword(request, route)
     }
     if (route.suffix === 'move') {
       if (request.method !== 'POST') {
-        return json({ error: 'method not allowed' }, 405)
+        return jsonResponse({ error: 'method not allowed' }, 405)
       }
       return await movePage(request, route)
     }
@@ -438,10 +429,10 @@ export async function pagesEndpoint(request: Request): Promise<Response> {
       case 'DELETE':
         return await deletePage(request, route)
       default:
-        return json({ error: 'method not allowed' }, 405)
+        return jsonResponse({ error: 'method not allowed' }, 405)
     }
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('pagesEndpoint', error, request)
   }
 }
 
@@ -470,6 +461,8 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
     }
   }
 
+  const db = getDb()
+  const config = getDbConfig()
   const existingCollection = await db.query.collection.findFirst({
     where: eq(collection.slug, route.collectionSlug),
   })
@@ -516,7 +509,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
   const html = new TextDecoder().decode(body)
   const title = extractTitle(html, route.fileSlug, titleOverride)
   const tempPath = await writeTempBlob(
-    dbConfig.storageDir,
+    config.storageDir,
     route.collectionSlug,
     route.fileSlug,
     body,
@@ -527,7 +520,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
 
   try {
     return await withPagePathLocks(
-      () => pool.connect(),
+      () => getPool().connect(),
       [route],
       async (connection) => {
         const lockedDb = drizzle(connection, { schema })
@@ -537,9 +530,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
               where: eq(collection.slug, route.collectionSlug),
             })
             if (!txCollection) {
-              // Two concurrent first publishes to separate files of a brand-new
-              // collection must not race on the insert (M-1): the loser no-ops
-              // and re-reads the winner's row instead of surfacing a 500.
+              // Concurrent first publishes to a new collection must not collide on insert.
               await tx
                 .insert(collection)
                 .values({ slug: route.collectionSlug, ownerId: viewer.userId })
@@ -586,17 +577,13 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
               operation: { kind: action },
             })
 
-            // A live overwrite keeps the page's current settings (status quo). A
-            // publish — first publish or republish of an archived path — starts
-            // neutral, so stale visibility/allowlist/passwordHash can never
-            // silently resurrect (F-18).
+            // Live overwrite preserves current settings; fresh publish or republish
+            // over an archived path starts neutral so stale ACL never resurrects.
             const keepsCurrentSettings = action === 'overwrite'
             const visibility =
               requestedVisibility ?? (keepsCurrentSettings ? (txPage?.visibility ?? null) : null)
             const allowlist =
               requestedAllowlist ?? (keepsCurrentSettings ? (txPage?.allowlist ?? []) : [])
-            // Publisher-supplied password when provided (validated above), else a strong
-            // server-generated one; only when the publish sets visibility=password.
             const effectivePassword =
               requestedVisibility === 'password'
                 ? (customPassword ?? generatePagePassword())
@@ -608,7 +595,7 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
                 : null
 
             const blob = await installBlob(
-              dbConfig.storageDir,
+              config.storageDir,
               route.collectionSlug,
               route.fileSlug,
               tempPath,
@@ -675,14 +662,19 @@ async function publishPage(request: Request, route: PageRoute): Promise<Response
           rollbackBlob = undefined
           commitBlob = undefined
           if (cleanupBlob) {
-            await cleanupBlob()
+            try {
+              await cleanupBlob()
+            } catch (cleanupError) {
+              logServerWarning(
+                'publishPage.cleanupBlob',
+                { collection: route.collectionSlug, file: route.fileSlug },
+                cleanupError,
+              )
+            }
           }
-          return json(result)
+          return jsonResponse(result)
         } catch (error) {
-          if (rollbackBlob) {
-            await rollbackBlob()
-          }
-          throw error
+          return await rollbackBlobPreservingError(error, rollbackBlob, 'publishPage')
         }
       },
     )
@@ -739,6 +731,8 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
     throw new HttpError(400, 'destination must differ from source')
   }
 
+  const db = getDb()
+  const config = getDbConfig()
   const existingCollection = await db.query.collection.findFirst({
     where: eq(collection.slug, route.collectionSlug),
   })
@@ -777,7 +771,7 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
 
   let rollbackBlob: (() => Promise<void>) | undefined
   return await withPagePathLocks(
-    () => pool.connect(),
+    () => getPool().connect(),
     [
       { collectionSlug: route.collectionSlug, fileSlug: route.fileSlug },
       {
@@ -861,7 +855,7 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
           }
 
           const blob = await moveBlob(
-            dbConfig.storageDir,
+            config.storageDir,
             route.collectionSlug,
             route.fileSlug,
             destination.collectionSlug,
@@ -880,7 +874,6 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
               )
           }
           if (destinationRedirect) {
-            // Moving back to the page's own alias reclaims that canonical path.
             await tx
               .delete(pageRedirect)
               .where(
@@ -891,8 +884,6 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
               )
           }
           if (destinationPage) {
-            // Republish already reclaims archived paths. A move does the same while
-            // retaining the moving page's stable identity and prior aliases.
             await tx.delete(page).where(eq(page.id, destinationPage.id))
           }
 
@@ -943,7 +934,7 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
           })
 
           return moveResponseBody({
-            baseUrl: dbConfig.baseUrl,
+            baseUrl: config.baseUrl,
             sourceCollectionSlug: route.collectionSlug,
             sourceFileSlug: route.fileSlug,
             destinationCollectionSlug: destination.collectionSlug,
@@ -954,12 +945,9 @@ async function movePage(request: Request, route: PageRoute): Promise<Response> {
           })
         })
         rollbackBlob = undefined
-        return json(result)
+        return jsonResponse(result)
       } catch (error) {
-        if (rollbackBlob) {
-          await rollbackBlob()
-        }
-        throw error
+        return await rollbackBlobPreservingError(error, rollbackBlob, 'movePage')
       }
     },
   )
@@ -971,18 +959,32 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
   const visibility = parseOptionalVisibilityPatch(input.visibility)
   const allowlist = input.allowlist === undefined ? undefined : parseAllowlistArray(input.allowlist)
   const title = parseOptionalString(input.title, 'title')
-  if (visibility === undefined && allowlist === undefined && title === undefined) {
+  const customPassword = readCustomPagePassword(request)
+  if (customPassword !== undefined) {
+    if (visibility !== undefined && visibility !== 'password') {
+      throw new HttpError(400, 'a custom page password requires visibility=password')
+    }
+    if (!isStrongPagePassword(customPassword)) {
+      throw new HttpError(
+        400,
+        `page password must be at least ${MIN_PAGE_PASSWORD_LENGTH} characters`,
+      )
+    }
+  }
+  if (
+    visibility === undefined &&
+    allowlist === undefined &&
+    title === undefined &&
+    customPassword === undefined
+  ) {
     throw new HttpError(400, 'at least one patch field is required')
   }
 
-  const result = await db.transaction(async (tx) => {
+  const result = await getDb().transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${route.collectionSlug}), hashtext(${route.fileSlug}))`,
     )
 
-    // A move can win the path lock while this mutation is waiting. Resolve the
-    // page and its authorization only after the lock so no stale source row can
-    // produce a successful no-op update or an audit event.
     const txCollection = await tx.query.collection.findFirst({
       where: eq(collection.slug, route.collectionSlug),
     })
@@ -1003,18 +1005,23 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
       operation: { kind: 'change-visibility' },
     })
 
+    const effectiveVisibilityPatch = customPassword !== undefined ? 'password' : visibility
     const password =
-      visibility === 'password' && !txPage.passwordHash ? generatePagePassword() : undefined
+      customPassword !== undefined
+        ? customPassword
+        : effectiveVisibilityPatch === 'password' && !txPage.passwordHash
+          ? generatePagePassword()
+          : undefined
     const passwordHash = password
       ? await hashPagePassword(password)
-      : visibility && visibility !== 'password'
+      : effectiveVisibilityPatch !== undefined && effectiveVisibilityPatch !== 'password'
         ? null
         : txPage.passwordHash
 
     await tx
       .update(page)
       .set({
-        ...(visibility !== undefined ? { visibility } : {}),
+        ...(effectiveVisibilityPatch !== undefined ? { visibility: effectiveVisibilityPatch } : {}),
         ...(allowlist !== undefined ? { allowlist } : {}),
         ...(title !== undefined ? { title } : {}),
         passwordHash,
@@ -1036,14 +1043,14 @@ async function patchPage(request: Request, route: PageRoute): Promise<Response> 
       fileSlug: route.fileSlug,
       title: title ?? txPage.title,
       visibility: resolvedVisibility(
-        visibility === undefined ? txPage.visibility : visibility,
+        effectiveVisibilityPatch === undefined ? txPage.visibility : effectiveVisibilityPatch,
         collectionAcl(txCollection).defaultVisibility,
       ),
       allowlist: allowlist ?? txPage.allowlist,
       ...(password ? { password } : {}),
     })
   })
-  return json(result)
+  return jsonResponse(result)
 }
 
 async function rerollPassword(request: Request, route: PageRoute): Promise<Response> {
@@ -1055,7 +1062,7 @@ async function rerollPassword(request: Request, route: PageRoute): Promise<Respo
       `page password must be at least ${MIN_PAGE_PASSWORD_LENGTH} characters`,
     )
   }
-  const result = await db.transaction(async (tx) => {
+  const result = await getDb().transaction(async (tx) => {
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtext(${route.collectionSlug}), hashtext(${route.fileSlug}))`,
     )
@@ -1107,14 +1114,15 @@ async function rerollPassword(request: Request, route: PageRoute): Promise<Respo
     })
   })
 
-  return json(result)
+  return jsonResponse(result)
 }
 
 async function deletePage(request: Request, route: PageRoute): Promise<Response> {
   const { viewer } = await authenticatedViewer(request)
+  const storageDir = getDbConfig().storageDir
   let rollbackBlob: (() => Promise<void>) | undefined
   return await withPagePathLocks(
-    () => pool.connect(),
+    () => getPool().connect(),
     [route],
     async (connection) => {
       const lockedDb = drizzle(connection, { schema })
@@ -1140,7 +1148,7 @@ async function deletePage(request: Request, route: PageRoute): Promise<Response>
             operation: { kind: 'unpublish' },
           })
 
-          const blob = await archiveBlob(dbConfig.storageDir, route.collectionSlug, route.fileSlug)
+          const blob = await archiveBlob(storageDir, route.collectionSlug, route.fileSlug)
           rollbackBlob = blob.rollback
           await tx
             .update(page)
@@ -1156,12 +1164,9 @@ async function deletePage(request: Request, route: PageRoute): Promise<Response>
           })
         })
         rollbackBlob = undefined
-        return json({ ok: true })
+        return jsonResponse({ ok: true })
       } catch (error) {
-        if (rollbackBlob) {
-          await rollbackBlob()
-        }
-        throw error
+        return await rollbackBlobPreservingError(error, rollbackBlob, 'deletePage')
       }
     },
   )
@@ -1170,10 +1175,11 @@ async function deletePage(request: Request, route: PageRoute): Promise<Response>
 export async function collectionsIndexEndpoint(request: Request): Promise<Response> {
   try {
     if (request.method !== 'GET') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
     const { viewer } = await authenticatedViewer(request)
-    const rows = await db
+    const allowedDomains = getDbConfig().allowedDomains
+    const rows = await getDb()
       .select({
         collection,
         page,
@@ -1181,26 +1187,32 @@ export async function collectionsIndexEndpoint(request: Request): Promise<Respon
       .from(page)
       .innerJoin(collection, eq(page.collectionSlug, collection.slug))
       .where(isNull(page.archivedAt))
+      .orderBy(desc(page.updatedAt), asc(page.id))
+      .limit(MAX_LIST_ROWS + 1)
+
+    const hasMore = rows.length > MAX_LIST_ROWS
+    const boundedRows = hasMore ? rows.slice(0, MAX_LIST_ROWS) : rows
 
     const collections = new Map<string, CollectionRow>()
-    for (const row of rows) {
+    for (const row of boundedRows) {
       const decision = decideAcl(viewer, pageAcl(row.page), collectionAcl(row.collection), {
-        allowedDomains: dbConfig.allowedDomains,
+        allowedDomains,
       })
       if (decision.allowed) {
         collections.set(row.collection.slug, row.collection)
       }
     }
 
-    return json({
+    return jsonResponse({
       collections: [...collections.values()].map((row) => ({
         slug: row.slug,
         title: row.title,
         defaultVisibility: collectionAcl(row).defaultVisibility,
       })),
+      hasMore,
     })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('collectionsIndexEndpoint', error, request)
   }
 }
 
@@ -1216,9 +1228,9 @@ export async function collectionsEndpoint(request: Request): Promise<Response> {
     if (request.method === 'PATCH' && !route.suffix) {
       return await patchCollection(request, route.collectionSlug)
     }
-    return json({ error: 'method not allowed' }, 405)
+    return jsonResponse({ error: 'method not allowed' }, 405)
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('collectionsEndpoint', error, request)
   }
 }
 
@@ -1227,6 +1239,8 @@ async function listCollectionPages(
   collectionSlug: CollectionSlug,
 ): Promise<Response> {
   const { viewer } = await authenticatedViewer(request)
+  const db = getDb()
+  const allowedDomains = getDbConfig().allowedDomains
   const existingCollection = await db.query.collection.findFirst({
     where: eq(collection.slug, collectionSlug),
   })
@@ -1237,15 +1251,18 @@ async function listCollectionPages(
 
   const rows = await db.query.page.findMany({
     where: and(eq(page.collectionSlug, collectionSlug), isNull(page.archivedAt)),
-    orderBy: (fields, { desc }) => [desc(fields.publishedAt)],
+    orderBy: (fields) => [desc(fields.publishedAt)],
+    limit: MAX_LIST_ROWS + 1,
   })
+  const hasMore = rows.length > MAX_LIST_ROWS
+  const boundedRows = hasMore ? rows.slice(0, MAX_LIST_ROWS) : rows
 
-  return json({
-    pages: rows
+  return jsonResponse({
+    pages: boundedRows
       .filter(
         (row) =>
           decideAcl(viewer, pageAcl(row), collectionAcl(existingCollection), {
-            allowedDomains: dbConfig.allowedDomains,
+            allowedDomains,
           }).allowed,
       )
       .map((row) => ({
@@ -1256,6 +1273,7 @@ async function listCollectionPages(
         contentHash: row.contentHash,
         updatedAt: row.updatedAt.toISOString(),
       })),
+    hasMore,
   })
 }
 
@@ -1274,27 +1292,28 @@ async function patchCollection(
     throw new HttpError(400, 'at least one patch field is required')
   }
 
-  const existingCollection = await db.query.collection.findFirst({
-    where: eq(collection.slug, collectionSlug),
-  })
-  if (!existingCollection) {
-    throw new HttpError(404, 'collection not found')
-  }
-  const existingCollectionDefault = collectionAcl(existingCollection).defaultVisibility
-  assertMutationAllowed({
-    user: viewer,
-    collection: existingCollection,
-    page: {
-      collectionSlug,
-      fileSlug: 'index.html',
-      visibility: defaultVisibility ?? existingCollectionDefault,
-      passwordHash: null,
-      allowlist: [],
-    },
-    operation: { kind: 'change-visibility' },
-  })
+  const updated = await getDb().transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${collectionSlug}))`)
+    const existingCollection = await tx.query.collection.findFirst({
+      where: eq(collection.slug, collectionSlug),
+    })
+    if (!existingCollection) {
+      throw new HttpError(404, 'collection not found')
+    }
+    const existingCollectionDefault = collectionAcl(existingCollection).defaultVisibility
+    assertMutationAllowed({
+      user: viewer,
+      collection: existingCollection,
+      page: {
+        collectionSlug,
+        fileSlug: 'index.html',
+        visibility: defaultVisibility ?? existingCollectionDefault,
+        passwordHash: null,
+        allowlist: [],
+      },
+      operation: { kind: 'change-visibility' },
+    })
 
-  await db.transaction(async (tx) => {
     await tx
       .update(collection)
       .set({
@@ -1308,13 +1327,13 @@ async function patchCollection(
       action: 'visibility-change',
       collectionSlug,
     })
-  })
 
-  return json({
-    collection: {
+    return {
       slug: collectionSlug,
       title: title === undefined ? existingCollection.title : title,
       defaultVisibility: defaultVisibility ?? existingCollectionDefault,
-    },
+    }
   })
+
+  return jsonResponse({ collection: updated })
 }

@@ -4,12 +4,12 @@ import { parseCollectionSlug, parseFileSlug } from '@press/core'
 import { and, eq, or } from 'drizzle-orm'
 import { drizzle } from 'drizzle-orm/node-postgres'
 
-import { closeDb, db, dbConfig, pool } from '../db/client'
+import { closeDb, getDb, getDbConfig, getPool } from '../db/client'
 import { auditEvent, collection, page, pageRedirect, schema, user } from '../db/schema'
 import { withPagePathLocks } from '../publish/pagePathLocks'
 import { hashPagePassword } from '../publish/passwords'
 import { installBlob, removeBlob, removeTempBlob, writeTempBlob } from '../publish/storage'
-import { auth } from './server'
+import { getAuth } from './server'
 import { localnetDemoCollections, localnetDemoPages, localnetUsers } from './localnetFixtures'
 
 import type { LocalnetDemoPage } from './localnetFixtures'
@@ -18,11 +18,13 @@ import type { InferSelectModel } from 'drizzle-orm'
 async function ensureSeedUser(
   seedUser: (typeof localnetUsers)[keyof typeof localnetUsers],
 ): Promise<void> {
+  const db = getDb()
+  const dbConfig = getDbConfig()
   const existing = await db.query.user.findFirst({
     where: eq(user.email, seedUser.email),
   })
   if (!existing) {
-    await auth.api.signUpEmail({
+    await getAuth().api.signUpEmail({
       body: {
         email: seedUser.email,
         password: seedUser.password,
@@ -52,7 +54,7 @@ function sha256(value: string): string {
 }
 
 async function findSeedUser(email: string): Promise<InferSelectModel<typeof user>> {
-  const row = await db.query.user.findFirst({
+  const row = await getDb().query.user.findFirst({
     where: eq(user.email, email),
   })
   if (!row) {
@@ -65,6 +67,8 @@ async function seedDemoPage(
   demoPage: LocalnetDemoPage,
   publisher: InferSelectModel<typeof user>,
 ): Promise<void> {
+  const db = getDb()
+  const dbConfig = getDbConfig()
   const html = pageHtml(demoPage)
   const body = new TextEncoder().encode(html)
   const passwordHash =
@@ -98,7 +102,7 @@ async function seedDemoPage(
 
   try {
     await withPagePathLocks(
-      () => pool.connect(),
+      () => getPool().connect(),
       lockedPaths,
       async (connection) => {
         const lockedDb = drizzle(connection, { schema })
@@ -221,6 +225,7 @@ async function seedDemoPage(
 }
 
 async function ensureDemoContent(): Promise<void> {
+  const db = getDb()
   const users = new Map<string, InferSelectModel<typeof user>>()
   for (const seedUser of Object.values(localnetUsers)) {
     // oxlint-disable-next-line no-await-in-loop -- Seed fixtures are small and easier to fail by email.
@@ -278,7 +283,7 @@ async function ensureDemoContent(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  if (!dbConfig.credentialAuthEnabled) {
+  if (!getDbConfig().credentialAuthEnabled) {
     return
   }
 

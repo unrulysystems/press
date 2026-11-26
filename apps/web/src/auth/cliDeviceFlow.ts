@@ -2,33 +2,21 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
 import { and, eq } from 'drizzle-orm'
 
-import { db, dbConfig } from '../db/client'
+import { getDb, getDbConfig } from '../db/client'
 import { user, verification } from '../db/schema'
-import { BodyTooLargeError, readCappedBodyText } from '../http/readBody'
-import { mintApiTokenForUser } from './apiTokens'
+import { readCappedBodyText } from '../http/readBody'
+import {
+  HttpError,
+  escapeHtml,
+  jsonErrorResponse,
+  jsonResponse,
+  readBoundedJsonObject,
+} from '../http/responses'
+import { isUserActivelyBanned, mintApiTokenForUser } from './apiTokens'
+import { loadActiveCliSession, type CliAuthorizeSession } from './cliFlow'
 import { consumeRateLimit } from './rateLimit'
+import { roleForEmail } from './role'
 import { sweepExpiredCliVerificationRowsBestEffort } from './verificationCleanup'
-import { auth } from './server'
-
-class HttpError extends Error {
-  constructor(
-    readonly status: number,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'HttpError'
-  }
-}
-
-type CliAuthorizeSession = {
-  readonly user: {
-    readonly id: string
-    readonly email?: string | null
-  }
-  readonly session?: {
-    readonly impersonatedBy?: string | null | undefined
-  } | null
-}
 
 export type VerificationInsert = {
   readonly id: string
@@ -37,15 +25,18 @@ export type VerificationInsert = {
   readonly expiresAt: Date
 }
 
-export type CliDeviceGrant = {
+type CliDeviceGrantBase = {
   readonly kind: 'cli-device'
   readonly challenge: string
-  readonly userId: string | null
-  readonly denied: boolean
   readonly lastPollAt: number | null
   readonly intervalSeconds: number
   readonly userCodeIdentifier: string
 }
+
+export type CliDeviceGrant =
+  | (CliDeviceGrantBase & { readonly status: 'pending' })
+  | (CliDeviceGrantBase & { readonly status: 'approved'; readonly userId: string })
+  | (CliDeviceGrantBase & { readonly status: 'denied' })
 
 type CliDeviceUserIndex = {
   readonly kind: 'cli-device-user'
@@ -70,20 +61,6 @@ const ACTIVATE_LIMIT_MAX = 5
 const ACTIVATE_LIMIT_WINDOW_MS = 60 * 1000
 const USER_CODE_RETRY_LIMIT = 8
 
-function json(body: unknown, status = 200): Response {
-  return Response.json(body, { status })
-}
-
-function errorResponse(error: unknown): Response {
-  if (error instanceof BodyTooLargeError) {
-    return json({ error: error.message }, error.status)
-  }
-  if (error instanceof HttpError) {
-    return json({ error: error.message }, error.status)
-  }
-  return json({ error: 'internal server error' }, 500)
-}
-
 export function hashSecret(value: string): string {
   return createHash('sha256').update(value).digest('base64url')
 }
@@ -100,12 +77,12 @@ export function deviceConsentIdentifier(consent: string): string {
   return `cli:device:consent:${hashSecret(consent)}`
 }
 
-function startLimitIdentifier(ip: string): string {
-  return `cli:device:rl:start:${hashSecret(ip)}`
+function startLimitIdentifier(key: string): string {
+  return `cli:device:rl:start:${hashSecret(key)}`
 }
 
-function activateLimitIdentifier(ip: string): string {
-  return `cli:device:rl:activate:${hashSecret(ip)}`
+function activateLimitIdentifier(userId: string): string {
+  return `cli:device:rl:activate:${hashSecret(userId)}`
 }
 
 export function normalizeUserCode(value: string): string {
@@ -143,15 +120,6 @@ export function generateUserCode(bytes: Uint8Array): string {
   return code
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
-
 const ACTIVATE_PAGE_STYLE = `
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -170,7 +138,6 @@ body {
 }
 h1 { font-weight: 600; font-size: clamp(1.6rem, 5vw, 2.2rem); line-height: 1.15; margin: 0 0 1rem; }
 p { max-width: 34ch; opacity: 0.8; margin: 0 0 1.5rem; }
-.meta { font-size: 0.85rem; overflow-wrap: break-word; }
 label { display: block; font-weight: 600; margin-bottom: 0.5rem; }
 input[name="user_code"] {
   font: inherit; letter-spacing: 0.08em; padding: 0.6rem 0.7rem;
@@ -274,23 +241,9 @@ function htmlPage(html: string): Response {
   })
 }
 
-function parseChallenge(value: string | null): string {
+function parseTokenField(value: string | null, errorMessage: string): string {
   if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
-    throw new HttpError(400, 'challenge is required')
-  }
-  return value
-}
-
-function parseDeviceCode(value: string): string {
-  if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
-    throw new HttpError(400, 'invalid_grant')
-  }
-  return value
-}
-
-function parseConsent(value: string | null): string {
-  if (!value || !/^[A-Za-z0-9_-]{32,128}$/.test(value)) {
-    throw new HttpError(400, 'consent is required')
+    throw new HttpError(400, errorMessage)
   }
   return value
 }
@@ -302,20 +255,6 @@ function parseActivateAction(value: string | null): 'approve' | 'deny' {
   throw new HttpError(400, 'authorization request is invalid or expired')
 }
 
-async function readJsonObject(request: Request): Promise<Record<string, unknown>> {
-  const text = await readCappedBodyText(request, CLI_SMALL_BODY_LIMIT_BYTES)
-  let body: unknown
-  try {
-    body = JSON.parse(text)
-  } catch {
-    throw new HttpError(400, 'request body must be JSON')
-  }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'request body must be a JSON object')
-  }
-  return body as Record<string, unknown>
-}
-
 function readString(input: Record<string, unknown>, field: string): string {
   const value = input[field]
   if (typeof value !== 'string' || !value.trim()) {
@@ -324,40 +263,58 @@ function readString(input: Record<string, unknown>, field: string): string {
   return value
 }
 
-export function parseDeviceGrant(value: string): CliDeviceGrant {
-  const parsed = JSON.parse(value) as unknown
-  if (!parsed || typeof parsed !== 'object') {
-    throw new HttpError(400, 'invalid_grant')
+function parseJsonObjectString(value: string, errorMessage: string): Record<string, unknown> {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(value)
+  } catch (error) {
+    throw new HttpError(400, errorMessage, { cause: error })
   }
-  const record = parsed as Partial<CliDeviceGrant>
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new HttpError(400, errorMessage)
+  }
+  return parsed as Record<string, unknown>
+}
+
+export function parseDeviceGrant(value: string): CliDeviceGrant {
+  const record = parseJsonObjectString(value, 'invalid_grant')
   if (
     record.kind !== 'cli-device' ||
     typeof record.challenge !== 'string' ||
-    (record.userId !== null && typeof record.userId !== 'string') ||
-    typeof record.denied !== 'boolean' ||
     (record.lastPollAt !== null && typeof record.lastPollAt !== 'number') ||
     typeof record.intervalSeconds !== 'number' ||
     typeof record.userCodeIdentifier !== 'string'
   ) {
     throw new HttpError(400, 'invalid_grant')
   }
-  return {
+  const base: CliDeviceGrantBase = {
     kind: 'cli-device',
     challenge: record.challenge,
-    userId: record.userId,
-    denied: record.denied,
     lastPollAt: record.lastPollAt,
     intervalSeconds: record.intervalSeconds,
     userCodeIdentifier: record.userCodeIdentifier,
   }
+  if (record.status === 'pending') {
+    return { ...base, status: 'pending' }
+  }
+  if (record.status === 'denied') {
+    return { ...base, status: 'denied' }
+  }
+  if (
+    record.status === 'approved' &&
+    typeof record.userId === 'string' &&
+    record.userId.length > 0
+  ) {
+    return { ...base, status: 'approved', userId: record.userId }
+  }
+  throw new HttpError(400, 'invalid_grant')
 }
 
 function parseUserIndex(value: string): CliDeviceUserIndex {
-  const parsed = JSON.parse(value) as unknown
-  if (!parsed || typeof parsed !== 'object') {
-    throw new HttpError(400, 'authorization request is invalid or expired')
-  }
-  const record = parsed as Partial<CliDeviceUserIndex>
+  const record = parseJsonObjectString(
+    value,
+    'authorization request is invalid or expired',
+  ) as Partial<CliDeviceUserIndex>
   if (record.kind !== 'cli-device-user' || typeof record.deviceIdentifier !== 'string') {
     throw new HttpError(400, 'authorization request is invalid or expired')
   }
@@ -368,21 +325,18 @@ function parseUserIndex(value: string): CliDeviceUserIndex {
 }
 
 function parseConsentValue(value: string): CliDeviceConsent {
-  const parsed = JSON.parse(value) as unknown
-  if (!parsed || typeof parsed !== 'object') {
-    throw new HttpError(400, 'authorization request is invalid or expired')
-  }
-  const record = parsed as Partial<CliDeviceConsent>
+  const record = parseJsonObjectString(
+    value,
+    'authorization request is invalid or expired',
+  ) as Partial<CliDeviceConsent>
   if (record.kind !== 'cli-device-consent' || typeof record.userId !== 'string') {
     throw new HttpError(400, 'authorization request is invalid or expired')
   }
   return { kind: 'cli-device-consent', userId: record.userId }
 }
 
-// Fetch Request has no trusted peer address. X-Forwarded-For is
-// client-controlled unless we terminate TLS ourselves, so start rate-limits
-// are a single global bucket (bounded grant creation) and activate limits
-// by the authenticated user id.
+// Fetch Request has no trusted peer address. Start rate-limits use a single global
+// bucket (bounded grant creation); activate limits by authenticated user id.
 export const DEVICE_START_RATE_LIMIT_KEY = 'global'
 
 export function deviceStartRateLimitKey(_request: Request): string {
@@ -396,14 +350,6 @@ function rejectImpersonation(session: CliAuthorizeSession): void {
   }
 }
 
-function randomDeviceCode(): string {
-  return randomBytes(32).toString('base64url')
-}
-
-function randomConsentToken(): string {
-  return randomBytes(32).toString('base64url')
-}
-
 export type CliDeviceStartDependencies = {
   readonly baseUrl: string
   readonly now?: () => number
@@ -411,7 +357,7 @@ export type CliDeviceStartDependencies = {
   readonly randomUserCode?: () => string
   readonly randomId?: () => string
   readonly consumeStartLimit: (key: string) => Promise<boolean>
-  readonly insertRow: (row: VerificationInsert) => Promise<void>
+  readonly insertRows: (rows: readonly VerificationInsert[]) => Promise<void>
   readonly hasIdentifier: (identifier: string) => Promise<boolean>
 }
 
@@ -421,16 +367,19 @@ export async function startCliDeviceRequest(
 ): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
     if (!(await dependencies.consumeStartLimit(deviceStartRateLimitKey(request)))) {
-      return json({ error: 'rate limited' }, 429)
+      return jsonResponse({ error: 'rate limited' }, 429)
     }
-    const input = await readJsonObject(request)
-    const challenge = parseChallenge(typeof input.challenge === 'string' ? input.challenge : null)
+    const input = await readBoundedJsonObject(request, CLI_SMALL_BODY_LIMIT_BYTES)
+    const challenge = parseTokenField(
+      typeof input.challenge === 'string' ? input.challenge : null,
+      'challenge is required',
+    )
     const now = dependencies.now?.() ?? Date.now()
-    const deviceCode = dependencies.randomDeviceCode?.() ?? randomDeviceCode()
-    parseDeviceCode(deviceCode)
+    const deviceCode = dependencies.randomDeviceCode?.() ?? randomBytes(32).toString('base64url')
+    parseTokenField(deviceCode, 'invalid_grant')
 
     let normalizedUserCode = ''
     for (let attempt = 0; attempt < USER_CODE_RETRY_LIMIT; attempt += 1) {
@@ -456,33 +405,34 @@ export async function startCliDeviceRequest(
     const newId = () => dependencies.randomId?.() ?? randomUUID()
     const grant: CliDeviceGrant = {
       kind: 'cli-device',
+      status: 'pending',
       challenge,
-      userId: null,
-      denied: false,
       lastPollAt: null,
       intervalSeconds: CLI_DEVICE_INTERVAL_SECONDS,
       userCodeIdentifier: userIdentifier,
     }
-    await dependencies.insertRow({
-      id: newId(),
-      identifier: deviceIdentifier,
-      value: JSON.stringify(grant),
-      expiresAt,
-    })
     const userIndex: CliDeviceUserIndex = {
       kind: 'cli-device-user',
       deviceIdentifier,
     }
-    await dependencies.insertRow({
-      id: newId(),
-      identifier: userIdentifier,
-      value: JSON.stringify(userIndex),
-      expiresAt,
-    })
+    await dependencies.insertRows([
+      {
+        id: newId(),
+        identifier: deviceIdentifier,
+        value: JSON.stringify(grant),
+        expiresAt,
+      },
+      {
+        id: newId(),
+        identifier: userIdentifier,
+        value: JSON.stringify(userIndex),
+        expiresAt,
+      },
+    ])
 
     const verificationUri = `${dependencies.baseUrl}/cli/activate`
     const formatted = formatUserCode(normalizedUserCode)
-    return json({
+    return jsonResponse({
       device_code: deviceCode,
       user_code: formatted,
       verification_uri: verificationUri,
@@ -491,7 +441,7 @@ export async function startCliDeviceRequest(
       interval: CLI_DEVICE_INTERVAL_SECONDS,
     })
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('startCliDeviceRequest', error, request)
   }
 }
 
@@ -519,15 +469,15 @@ async function mintFromConsumedGrant(
     throw new HttpError(400, 'invalid_grant')
   }
   const consumedGrant = parseDeviceGrant(consumed.value)
-  if (consumedGrant.denied) {
+  if (consumedGrant.status === 'denied') {
     throw new HttpError(400, 'access_denied')
   }
-  if (!consumedGrant.userId || consumedGrant.challenge !== hashSecret(verifier)) {
+  if (consumedGrant.status !== 'approved' || consumedGrant.challenge !== hashSecret(verifier)) {
     throw new HttpError(400, 'invalid_grant')
   }
   await dependencies.consumeRow(consumedGrant.userCodeIdentifier)
   const minted = await dependencies.mintToken(consumedGrant.userId)
-  return json({
+  return jsonResponse({
     token: minted.token,
     user: minted.user,
   })
@@ -547,10 +497,10 @@ async function continueAfterLostPollCas(
     throw new HttpError(400, 'expired_token')
   }
   const grant = parseDeviceGrant(fresh.value)
-  if (grant.denied) {
+  if (grant.status === 'denied') {
     throw new HttpError(400, 'access_denied')
   }
-  if (!grant.userId) {
+  if (grant.status === 'pending') {
     throw new HttpError(400, 'authorization_pending')
   }
   if (grant.challenge !== hashSecret(verifier)) {
@@ -565,10 +515,10 @@ export async function pollCliDeviceRequest(
 ): Promise<Response> {
   try {
     if (request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
-    const input = await readJsonObject(request)
-    const deviceCode = parseDeviceCode(readString(input, 'device_code'))
+    const input = await readBoundedJsonObject(request, CLI_SMALL_BODY_LIMIT_BYTES)
+    const deviceCode = parseTokenField(readString(input, 'device_code'), 'invalid_grant')
     const verifier = readString(input, 'verifier')
     const now = dependencies.now?.() ?? Date.now()
     const identifier = deviceGrantIdentifier(deviceCode)
@@ -580,7 +530,7 @@ export async function pollCliDeviceRequest(
       throw new HttpError(400, 'expired_token')
     }
     const grant = parseDeviceGrant(row.value)
-    if (grant.denied) {
+    if (grant.status === 'denied') {
       throw new HttpError(400, 'access_denied')
     }
     if (grant.lastPollAt !== null && now < grant.lastPollAt + grant.intervalSeconds * 1000) {
@@ -598,7 +548,7 @@ export async function pollCliDeviceRequest(
       throw new HttpError(400, 'slow_down')
     }
 
-    if (!grant.userId) {
+    if (grant.status === 'pending') {
       const pending: CliDeviceGrant = { ...grant, lastPollAt: now }
       const saved = await dependencies.compareAndSaveRow({
         expectedValue: row.value,
@@ -616,7 +566,7 @@ export async function pollCliDeviceRequest(
 
     return await mintFromConsumedGrant(identifier, verifier, dependencies)
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('pollCliDeviceRequest', error, request)
   }
 }
 
@@ -639,7 +589,7 @@ async function issueActivatePage(
   userCode: string,
   error?: string,
 ): Promise<Response> {
-  const consent = dependencies.randomConsent?.() ?? randomConsentToken()
+  const consent = dependencies.randomConsent?.() ?? randomBytes(32).toString('base64url')
   const now = dependencies.now?.() ?? Date.now()
   const consentValue: CliDeviceConsent = {
     kind: 'cli-device-consent',
@@ -669,7 +619,7 @@ async function readActivateForm(request: Request): Promise<{
   const text = await readCappedBodyText(request, CLI_SMALL_BODY_LIMIT_BYTES)
   const params = new URLSearchParams(text)
   return {
-    consent: parseConsent(params.get('consent')),
+    consent: parseTokenField(params.get('consent'), 'consent is required'),
     userCode: params.get('user_code') ?? '',
     action: parseActivateAction(params.get('action')),
   }
@@ -681,7 +631,7 @@ export async function activateCliDeviceRequest(
 ): Promise<Response> {
   try {
     if (request.method !== 'GET' && request.method !== 'POST') {
-      return json({ error: 'method not allowed' }, 405)
+      return jsonResponse({ error: 'method not allowed' }, 405)
     }
     const session = await dependencies.getSession(request.headers)
     if (!session) {
@@ -693,16 +643,13 @@ export async function activateCliDeviceRequest(
           302,
         )
       }
-      return json({ error: 'authentication required' }, 401)
+      return jsonResponse({ error: 'authentication required' }, 401)
     }
     rejectImpersonation(session)
 
     if (request.method === 'GET') {
       const url = new URL(request.url)
       const prefilled = url.searchParams.get('user_code') ?? ''
-      // F-32: the GET renders a fresh consent row, so it shares the activate
-      // budget with the POST — an authenticated user must not be able to grow
-      // the verification table without bound by re-rendering the page.
       if (!(await dependencies.consumeActivateLimit(session.user.id))) {
         throw new HttpError(429, 'rate limited')
       }
@@ -743,17 +690,24 @@ export async function activateCliDeviceRequest(
       return await issueActivatePage(dependencies, session, form.userCode, genericError)
     }
     const grant = parseDeviceGrant(grantRow.value)
-    if (grant.denied) {
+    if (grant.status === 'denied') {
       return await issueActivatePage(dependencies, session, form.userCode, genericError)
     }
-    if (grant.userId && grant.userId !== session.user.id) {
+    if (grant.status === 'approved' && grant.userId !== session.user.id) {
       return await issueActivatePage(dependencies, session, form.userCode, genericError)
     }
 
+    const base: CliDeviceGrantBase = {
+      kind: 'cli-device',
+      challenge: grant.challenge,
+      lastPollAt: grant.lastPollAt,
+      intervalSeconds: grant.intervalSeconds,
+      userCodeIdentifier: grant.userCodeIdentifier,
+    }
     const nextGrant: CliDeviceGrant =
       form.action === 'deny'
-        ? { ...grant, denied: true, userId: null }
-        : { ...grant, userId: session.user.id, denied: false }
+        ? { ...base, status: 'denied' }
+        : { ...base, status: 'approved', userId: session.user.id }
     await dependencies.saveRow({
       ...grantRow,
       value: JSON.stringify(nextGrant),
@@ -774,16 +728,22 @@ export async function activateCliDeviceRequest(
       }),
     )
   } catch (error) {
-    return errorResponse(error)
+    return jsonErrorResponse('activateCliDeviceRequest', error, request)
   }
 }
 
 async function insertVerificationRow(row: VerificationInsert): Promise<void> {
-  await db.insert(verification).values(row)
+  await getDb().insert(verification).values(row)
+}
+
+async function insertVerificationRows(rows: readonly VerificationInsert[]): Promise<void> {
+  await getDb().transaction(async (tx) => {
+    await tx.insert(verification).values([...rows])
+  })
 }
 
 async function loadVerificationRow(identifier: string): Promise<VerificationInsert | undefined> {
-  const row = await db.query.verification.findFirst({
+  const row = await getDb().query.verification.findFirst({
     where: eq(verification.identifier, identifier),
   })
   if (!row) {
@@ -798,7 +758,7 @@ async function loadVerificationRow(identifier: string): Promise<VerificationInse
 }
 
 async function saveVerificationRow(row: VerificationInsert): Promise<void> {
-  await db
+  await getDb()
     .update(verification)
     .set({ value: row.value, updatedAt: new Date() })
     .where(eq(verification.identifier, row.identifier))
@@ -808,7 +768,7 @@ async function compareAndSaveVerificationRow(input: {
   readonly expectedValue: string
   readonly next: VerificationInsert
 }): Promise<boolean> {
-  const updated = await db
+  const updated = await getDb()
     .update(verification)
     .set({ value: input.next.value, updatedAt: new Date() })
     .where(
@@ -822,7 +782,7 @@ async function compareAndSaveVerificationRow(input: {
 }
 
 async function consumeVerificationRow(identifier: string): Promise<VerificationInsert | undefined> {
-  const rows = await db
+  const rows = await getDb()
     .delete(verification)
     .where(eq(verification.identifier, identifier))
     .returning()
@@ -839,27 +799,31 @@ async function consumeVerificationRow(identifier: string): Promise<VerificationI
 }
 
 async function hasVerificationIdentifier(identifier: string): Promise<boolean> {
-  const row = await db.query.verification.findFirst({
+  const row = await getDb().query.verification.findFirst({
     where: eq(verification.identifier, identifier),
   })
   return Boolean(row)
 }
 
 export async function cliDeviceStartEndpoint(request: Request): Promise<Response> {
-  // F-33: sweep stale cli:* rows before creating new device-flow rows.
-  await sweepExpiredCliVerificationRowsBestEffort(db)
-  return await startCliDeviceRequest(request, {
-    baseUrl: dbConfig.baseUrl,
-    consumeStartLimit: async (key) =>
-      consumeRateLimit(db, {
-        identifier: startLimitIdentifier(key),
-        max: START_LIMIT_MAX,
-        windowMs: START_LIMIT_WINDOW_MS,
-        now: Date.now(),
-      }),
-    insertRow: insertVerificationRow,
-    hasIdentifier: hasVerificationIdentifier,
-  })
+  try {
+    const db = getDb()
+    await sweepExpiredCliVerificationRowsBestEffort(db)
+    return await startCliDeviceRequest(request, {
+      baseUrl: getDbConfig().baseUrl,
+      consumeStartLimit: async (key) =>
+        consumeRateLimit(db, {
+          identifier: startLimitIdentifier(key),
+          max: START_LIMIT_MAX,
+          windowMs: START_LIMIT_WINDOW_MS,
+          now: Date.now(),
+        }),
+      insertRows: insertVerificationRows,
+      hasIdentifier: hasVerificationIdentifier,
+    })
+  } catch (error) {
+    return jsonErrorResponse('cliDeviceStartEndpoint', error, request)
+  }
 }
 
 export async function cliDevicePollEndpoint(request: Request): Promise<Response> {
@@ -868,22 +832,29 @@ export async function cliDevicePollEndpoint(request: Request): Promise<Response>
     compareAndSaveRow: compareAndSaveVerificationRow,
     consumeRow: consumeVerificationRow,
     mintToken: async (userId) => {
-      const token = await mintApiTokenForUser(db, {
-        userId,
-        name: `press cli ${new Date().toISOString()}`,
-      })
+      const db = getDb()
+      const config = getDbConfig()
       const sessionUser = await db.query.user.findFirst({
         where: eq(user.id, userId),
       })
       if (!sessionUser) {
         throw new HttpError(400, 'authorization user not found')
       }
+      if (
+        isUserActivelyBanned({ banned: sessionUser.banned, banExpires: sessionUser.banExpires })
+      ) {
+        throw new HttpError(403, 'account is suspended')
+      }
+      const token = await mintApiTokenForUser(db, {
+        userId: sessionUser.id,
+        name: `press cli ${new Date().toISOString()}`,
+      })
       return {
         token,
         user: {
           id: sessionUser.id,
           email: sessionUser.email,
-          role: sessionUser.role,
+          role: roleForEmail(sessionUser.email, config.adminEmails),
         },
       }
     },
@@ -891,22 +862,25 @@ export async function cliDevicePollEndpoint(request: Request): Promise<Response>
 }
 
 export async function cliDeviceActivateEndpoint(request: Request): Promise<Response> {
-  // F-33: sweep stale cli:* rows before the GET/POST can create a new consent row.
-  await sweepExpiredCliVerificationRowsBestEffort(db)
-  return await activateCliDeviceRequest(request, {
-    baseUrl: dbConfig.baseUrl,
-    getSession: async (headers) =>
-      (await auth.api.getSession({ headers })) as CliAuthorizeSession | null,
-    consumeActivateLimit: async (userId) =>
-      consumeRateLimit(db, {
-        identifier: activateLimitIdentifier(userId),
-        max: ACTIVATE_LIMIT_MAX,
-        windowMs: ACTIVATE_LIMIT_WINDOW_MS,
-        now: Date.now(),
-      }),
-    insertRow: insertVerificationRow,
-    consumeRow: consumeVerificationRow,
-    loadRow: loadVerificationRow,
-    saveRow: saveVerificationRow,
-  })
+  try {
+    const db = getDb()
+    await sweepExpiredCliVerificationRowsBestEffort(db)
+    return await activateCliDeviceRequest(request, {
+      baseUrl: getDbConfig().baseUrl,
+      getSession: loadActiveCliSession,
+      consumeActivateLimit: async (userId) =>
+        consumeRateLimit(db, {
+          identifier: activateLimitIdentifier(userId),
+          max: ACTIVATE_LIMIT_MAX,
+          windowMs: ACTIVATE_LIMIT_WINDOW_MS,
+          now: Date.now(),
+        }),
+      insertRow: insertVerificationRow,
+      consumeRow: consumeVerificationRow,
+      loadRow: loadVerificationRow,
+      saveRow: saveVerificationRow,
+    })
+  } catch (error) {
+    return jsonErrorResponse('cliDeviceActivateEndpoint', error, request)
+  }
 }

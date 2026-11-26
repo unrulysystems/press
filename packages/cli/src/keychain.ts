@@ -1,22 +1,15 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { dlopen, FFIType as T, ptr, read, toArrayBuffer, type Pointer } from 'bun:ffi'
 
-// Per-host token storage for the `press` CLI (REQ-AUTH-006: OS keychain first, then PRESS_TOKEN).
-//
-// Why not shell out to `security add-generic-password … -w`? Empirically, `security -w` reads the
-// value from the controlling terminal (`/dev/tty`), NOT piped stdin — so in a non-TTY shell it
-// stores an EMPTY password and still exits 0 (issue #7: silent false "logged in"). The only inline
-// alternative, `-w <value>`, puts the secret in argv (forbidden by the secret-handling rule). So the
-// store path binds the macOS Keychain Services API directly via bun:ffi: the token travels as a
-// CFData in-process — no argv, no TTY — which works headless and lets us fail closed by reading the
-// value back after writing.
+// Per-host token storage for the `press` CLI (REQ-AUTH-006: OS keychain first,
+// then XDG 0600 file store, then PRESS_TOKEN). Binds macOS Keychain Services
+// directly via bun:ffi so secrets travel in-process as CFData without argv or TTY.
 
-// Keep this long enough that CoreFoundation allocates a normal CFString. Very short strings can be
-// tagged pointers above JS's precise integer range; Bun's current `ptr` FFI args cannot pass those
-// BigInt-exact, which breaks cross-process Keychain lookups.
+// Long enough that CoreFoundation allocates a normal CFString rather than a tagged pointer.
 const account = 'press-cli-token'
 
 function serviceName(host: string): string {
@@ -24,15 +17,15 @@ function serviceName(host: string): string {
 }
 
 export class KeychainUnavailableError extends Error {
-  constructor(message = 'macOS keychain is unavailable') {
-    super(message)
+  constructor(message = 'macOS keychain is unavailable', options?: ErrorOptions) {
+    super(message, options)
     this.name = 'KeychainUnavailableError'
   }
 }
 
 export class KeychainWriteError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'KeychainWriteError'
   }
 }
@@ -43,28 +36,54 @@ type Backend = {
   readonly remove: (service: string) => void
 }
 
-// ---- File backend: the faithful test/harness seam ----------------------------------------------
-// A JSON file named by PRESS_E2E_KEYCHAIN_FILE stands in for the OS keychain so a real `press login`
-// round-trips a real token in hermetic tests without touching the operator's keychain (which would
-// trip a biometric/Boundary prompt). It mirrors the real backend's contract: reject empty, round-trip
-// non-empty, missing => null. (The old PATH-shadowed `security` stub read stdin — which real
-// `security -w` never does — so it masked issue #7. This in-process seam cannot drift that way.)
 type FileState = Record<string, string>
 
 function readFileState(file: string): FileState {
+  let raw: string
   try {
-    return JSON.parse(readFileSync(file, 'utf8')) as FileState
-  } catch {
-    return {}
+    raw = readFileSync(file, 'utf8')
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+      return {}
+    }
+    throw new KeychainWriteError(
+      `failed to read token store ${file}: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    )
   }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (error) {
+    throw new KeychainWriteError(`token store ${file} contains invalid JSON`, { cause: error })
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new KeychainWriteError(`token store ${file} must contain a JSON object`)
+  }
+  return parsed as FileState
 }
 
 function fileBackend(file: string): Backend {
   const key = (service: string): string => `${service}:${account}`
   const persist = (state: FileState): void => {
-    mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-    writeFileSync(file, JSON.stringify(state), { mode: 0o600 })
-    chmodSync(file, 0o600)
+    const dir = dirname(file)
+    mkdirSync(dir, { recursive: true, mode: 0o700 })
+    const tempPath = join(dir, `.${basename(file)}.${process.pid}.${randomUUID()}.tmp`)
+    try {
+      writeFileSync(tempPath, JSON.stringify(state), { mode: 0o600 })
+      chmodSync(tempPath, 0o600)
+      renameSync(tempPath, file)
+    } catch (error) {
+      try {
+        rmSync(tempPath, { force: true })
+      } catch {
+        // Ignore cleanup error while propagating the write failure.
+      }
+      throw new KeychainWriteError(
+        `failed to write token store ${file}: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      )
+    }
   }
   return {
     store(service, token) {
@@ -74,10 +93,13 @@ function fileBackend(file: string): Backend {
     },
     find(service) {
       const value = readFileState(file)[key(service)]
-      return value ? value : null
+      return typeof value === 'string' && value.length > 0 ? value : null
     },
     remove(service) {
       const state = readFileState(file)
+      if (!(key(service) in state)) {
+        return
+      }
       delete state[key(service)]
       persist(state)
     },
@@ -134,30 +156,31 @@ function cstr(value: string): Uint8Array {
 }
 
 function createFfiBackend(): Backend {
-  // dlopen/dlsym from libSystem so we can read Security/CoreFoundation *data* symbols (the kSec*/kCF*
-  // constants are `const CFStringRef` globals — bun:ffi's dlopen resolves functions, not data). dlsym
-  // returns the variable's address; deref once to get the CFxxxRef pointer the APIs compare by value.
+  // dlopen/dlsym from libSystem so we can read Security/CoreFoundation data symbols
+  // (kSec*/kCF* constants are const CFStringRef globals).
   const libc = dlopen(LIBSYSTEM, {
     dlopen: { args: [T.ptr, T.i32], returns: T.ptr },
     dlsym: { args: [T.ptr, T.ptr], returns: T.ptr },
   })
-  const cstrPtr = (value: string): Pointer => ptr(cstr(value))
   const RTLD_NOW = 2
-  const cfHandle = Number(libc.symbols.dlopen(cstrPtr(CORE_FOUNDATION), RTLD_NOW))
-  const secHandle = Number(libc.symbols.dlopen(cstrPtr(SECURITY), RTLD_NOW))
+  const cfPathBuf = cstr(CORE_FOUNDATION)
+  const secPathBuf = cstr(SECURITY)
+  const cfHandle = Number(libc.symbols.dlopen(ptr(cfPathBuf), RTLD_NOW))
+  const secHandle = Number(libc.symbols.dlopen(ptr(secPathBuf), RTLD_NOW))
   if (!cfHandle || !secHandle) {
     throw new KeychainUnavailableError('failed to load Security.framework')
   }
   const constRef = (handle: number, name: string): number => {
-    const addr = Number(libc.symbols.dlsym(asPointer(handle), cstrPtr(name)))
+    const nameBuf = cstr(name)
+    const addr = Number(libc.symbols.dlsym(asPointer(handle), ptr(nameBuf)))
     if (!addr) {
       throw new KeychainUnavailableError(`missing keychain constant ${name}`)
     }
     return Number(read.ptr(asPointer(addr), 0))
   }
-  // A callbacks-struct constant is passed BY ADDRESS (it is the struct, not a pointer to it).
   const structAddr = (handle: number, name: string): number => {
-    const addr = Number(libc.symbols.dlsym(asPointer(handle), cstrPtr(name)))
+    const nameBuf = cstr(name)
+    const addr = Number(libc.symbols.dlsym(asPointer(handle), ptr(nameBuf)))
     if (!addr) {
       throw new KeychainUnavailableError(`missing keychain constant ${name}`)
     }
@@ -260,7 +283,6 @@ function createFfiBackend(): Backend {
       try {
         const status = security.symbols.SecItemAdd(asPointer(addDict), null)
         if (status === ERR_SEC_DUPLICATE_ITEM) {
-          // Item exists: update its data (mirrors the old `-U` upsert).
           const query = cfDict(baseQuery)
           const attrs = cfDict([[kSecValueData, data]])
           created.push(query, attrs)
@@ -288,8 +310,11 @@ function createFfiBackend(): Backend {
       const result = new BigUint64Array(1)
       try {
         const status = security.symbols.SecItemCopyMatching(asPointer(query), ptr(result))
-        if (status === ERR_SEC_ITEM_NOT_FOUND || status !== ERR_SEC_SUCCESS) {
+        if (status === ERR_SEC_ITEM_NOT_FOUND) {
           return null
+        }
+        if (status !== ERR_SEC_SUCCESS) {
+          throw new KeychainUnavailableError(`SecItemCopyMatching failed (OSStatus ${status})`)
         }
         const dataRef = Number(result[0])
         if (!dataRef) {
@@ -329,11 +354,8 @@ function createFfiBackend(): Backend {
   }
 }
 
-// Compile-time build gate (F-16): buildCliBinary defines
-// process.env.PRESS_TEST_BUILD as the literal "1" (hermetic test/e2e binaries)
-// or "0" (release binaries). Running from source (unit tests) leaves it unset,
-// which keeps the seam enabled. A runtime environment value can never change
-// the compiled decision.
+// Compile-time build gate: buildCliBinary defines process.env.PRESS_TEST_BUILD
+// as "0" (release) or "1" (hermetic test/e2e). Running from source leaves it unset.
 function testBuildKeychainSeamEnabled(): boolean {
   return !process.env.PRESS_TEST_BUILD || process.env.PRESS_TEST_BUILD !== '0'
 }
@@ -349,11 +371,9 @@ function loadFfiBackend(): Backend {
       ffiBackend = createFfiBackend()
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      const unavailable = new KeychainUnavailableError(`macOS keychain is unavailable: ${detail}`)
-      if (error instanceof Error && error.stack) {
-        unavailable.stack = error.stack
-      }
-      throw unavailable
+      throw new KeychainUnavailableError(`macOS keychain is unavailable: ${detail}`, {
+        cause: error,
+      })
     }
   }
   if (!ffiBackend) {
@@ -362,10 +382,6 @@ function loadFfiBackend(): Backend {
   return ffiBackend
 }
 
-// Resolve the active backend: the file seam wins when PRESS_E2E_KEYCHAIN_FILE is
-// set (test builds only), else the macOS FFI backend, else the last-resort 0600
-// XDG file store. The seam reports as keychain so hermetic tests stay a stand-in
-// for the OS store (F-16).
 function selectStore(): SelectedStore {
   const testBuild = testBuildKeychainSeamEnabled()
   const seam = testBuild ? process.env.PRESS_E2E_KEYCHAIN_FILE : undefined
@@ -381,8 +397,11 @@ function selectStore(): SelectedStore {
   if (choice === 'keychain') {
     try {
       return { backend: loadFfiBackend(), reportAs: 'keychain' }
-    } catch {
-      return { backend: fileBackend(resolveFileTokenPath()), reportAs: 'file' }
+    } catch (error) {
+      if (error instanceof KeychainUnavailableError) {
+        return { backend: fileBackend(resolveFileTokenPath()), reportAs: 'file' }
+      }
+      throw error
     }
   }
   return { backend: fileBackend(resolveFileTokenPath()), reportAs: 'file' }
@@ -402,9 +421,8 @@ export async function readKeychainToken(host: string): Promise<string | null> {
   return (await readCliToken(host))?.token ?? null
 }
 
-// Store the token, then read it back and assert it round-trips. `security -w`/misconfigured stores
-// can persist an empty or truncated value and still "succeed"; the readback converts any such silent
-// failure into a loud one (issue #7) so `press login` never reports success on an unusable token.
+// Store the token, then read it back and assert it round-trips so silent keychain
+// truncation fails loudly instead of reporting a broken login as successful.
 export async function writeKeychainToken(host: string, token: string): Promise<void> {
   if (!token) {
     throw new KeychainWriteError('refusing to store an empty token')

@@ -4,20 +4,18 @@ import { resolve } from 'node:path'
 
 import { sql } from 'drizzle-orm'
 
-const migrationsDir = resolve(import.meta.dirname, 'migrations')
+import type { SQLWrapper } from 'drizzle-orm'
 
-type QueryResult<Row> = {
-  readonly rows: readonly Row[]
+const migrationsDir = resolve(import.meta.dirname, 'migrations')
+const MIGRATION_LOCK_KEY = 'press_schema_migrations'
+
+type QueryResult = {
+  readonly rows: readonly Record<string, unknown>[]
 }
 
 export type MigrationDatabase = {
-  readonly execute: <Row = unknown>(query: unknown) => Promise<QueryResult<Row>>
+  readonly execute: (query: SQLWrapper) => Promise<QueryResult>
   readonly transaction: (callback: (tx: MigrationDatabase) => Promise<void>) => Promise<void>
-}
-
-type AppliedMigration = {
-  readonly id: string
-  readonly checksum: string | null
 }
 
 function checksum(contents: string): string {
@@ -34,48 +32,75 @@ async function appliedMigrations(db: MigrationDatabase): Promise<Map<string, str
   `)
   await db.execute(sql`alter table "__press_migrations" add column if not exists checksum text`)
 
-  const result = await db.execute<AppliedMigration>(
-    sql`select id, checksum from "__press_migrations"`,
-  )
-  return new Map(result.rows.map((row) => [row.id, row.checksum]))
+  const result = await db.execute(sql`select id, checksum from "__press_migrations"`)
+  const map = new Map<string, string | null>()
+  for (const row of result.rows) {
+    if (
+      typeof row.id !== 'string' ||
+      (row.checksum !== null && row.checksum !== undefined && typeof row.checksum !== 'string')
+    ) {
+      throw new Error('__press_migrations row has unexpected shape')
+    }
+    map.set(row.id, row.checksum ?? null)
+  }
+  return map
 }
 
 export async function applyMigrations(
   db: MigrationDatabase,
   directory = migrationsDir,
 ): Promise<void> {
-  const applied = await appliedMigrations(db)
   const migrationFiles = (await readdir(directory)).filter((file) => file.endsWith('.sql'))
   // oxlint-disable-next-line unicorn/no-array-sort -- ES2022 target lacks Array#toSorted.
   const files = [...migrationFiles].sort()
+  const migrationContents = await Promise.all(
+    files.map(async (file) => {
+      const migrationSql = await readFile(resolve(directory, file), 'utf8')
+      return { file, migrationSql, migrationChecksum: checksum(migrationSql) }
+    }),
+  )
 
-  for (const file of files) {
-    // oxlint-disable-next-line no-await-in-loop -- Migration contents are read before per-file integrity checks.
-    const migrationSql = await readFile(resolve(directory, file), 'utf8')
-    const migrationChecksum = checksum(migrationSql)
-    const storedChecksum = applied.get(file)
-    if (storedChecksum !== undefined) {
-      if (storedChecksum !== null && storedChecksum !== migrationChecksum) {
-        throw new Error(
-          `migration ${file} checksum mismatch: applied ${storedChecksum}, current ${migrationChecksum}`,
-        )
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${MIGRATION_LOCK_KEY}))`)
+    const applied = await appliedMigrations(tx)
+
+    for (const { file, migrationSql, migrationChecksum } of migrationContents) {
+      const storedChecksum = applied.get(file)
+      if (storedChecksum !== undefined) {
+        if (storedChecksum !== null && storedChecksum !== migrationChecksum) {
+          throw new Error(
+            `migration ${file} checksum mismatch: applied ${storedChecksum}, current ${migrationChecksum}`,
+          )
+        }
+        continue
       }
-      continue
-    }
-    // oxlint-disable-next-line no-await-in-loop -- Each migration depends on the prior one.
-    await db.transaction(async (tx) => {
+      // oxlint-disable-next-line no-await-in-loop -- Each migration depends on the prior one.
       await tx.execute(sql.raw(migrationSql))
+      // oxlint-disable-next-line no-await-in-loop -- Record each migration immediately after applying it.
       await tx.execute(
         sql`insert into "__press_migrations" (id, checksum) values (${file}, ${migrationChecksum})`,
       )
-    })
-  }
+    }
+  })
 }
 
 async function main(): Promise<void> {
-  const { closeDb, db } = await import('./client')
+  const { closeDb, getDb } = await import('./client')
+  const database = getDb()
+  const migrationDb: MigrationDatabase = {
+    execute: async (query) => await database.execute(query),
+    transaction: async (callback) => {
+      await database.transaction(async (tx) => {
+        const txDb: MigrationDatabase = {
+          execute: async (query) => await tx.execute(query),
+          transaction: async (inner) => inner(txDb),
+        }
+        await callback(txDb)
+      })
+    },
+  }
   try {
-    await applyMigrations(db as unknown as MigrationDatabase)
+    await applyMigrations(migrationDb)
   } finally {
     await closeDb()
   }

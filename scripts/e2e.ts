@@ -95,9 +95,12 @@ async function runRequired(command: string, args: readonly string[], env: E2EEnv
   }
 }
 
-// F-20 floor: the localnet Postgres host port must be reachable only on
-// loopback. A 0.0.0.0/:: binding would expose a known-credential dev database
-// (press/press) to the LAN on every machine that boots localnet.
+// Localnet Postgres must bind only to loopback: a 0.0.0.0/:: binding would
+// expose a known-credential dev database (press/press) to the LAN.
+function isLoopbackHost(host: string): boolean {
+  return host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+}
+
 async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEnv): Promise<void> {
   const docker = spawnSync(
     'docker',
@@ -120,10 +123,7 @@ async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEn
     throw new Error(`localnet postgres container ${composeProjectName}-postgres-1 not found`)
   }
   const joined = ports.join(' ')
-  // Fail closed on the host address: anything that is not explicitly loopback
-  // (127.0.0.0/8 or ::1) — including a concrete LAN IP — violates F-20.
-  const loopbackHost = (host: string): boolean =>
-    host === '::1' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)
+  // Fail closed on the host address: anything not explicitly loopback is rejected.
   const nonLoopback = joined
     .split(',')
     .map((token) => /^\s*(\[[^\]]+\]|[^:]+):\d+->/.exec(token)?.[1])
@@ -132,11 +132,11 @@ async function assertPostgresLoopbackOnly(composeProjectName: string, env: E2EEn
         return true // unparseable published port -> fail closed
       }
       const normalized = host.startsWith('[') ? host.slice(1, -1) : host
-      return !loopbackHost(normalized)
+      return !isLoopbackHost(normalized)
     })
   if (nonLoopback.length > 0) {
     throw new Error(
-      `localnet postgres must publish loopback only (F-20): ${joined} (bad: ${nonLoopback.join(', ')})`,
+      `localnet postgres must publish loopback only: ${joined} (bad: ${nonLoopback.join(', ')})`,
     )
   }
 }

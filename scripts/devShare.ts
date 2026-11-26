@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { chmod, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-import type { db as dbClient } from '../apps/web/src/db/client'
+import type { PressDb } from '../apps/web/src/db/client'
 
 import {
   localnetDemoCollections,
@@ -19,7 +19,7 @@ const shutdownTimeoutMs = 20_000
 const devDir = resolve(root, '.dev')
 const agentEnvPath = resolve(devDir, 'agent.env')
 let agentTokenId: string | undefined
-let tokenDb: typeof dbClient | undefined
+let tokenDb: PressDb | undefined
 let closeTokenDb: (() => Promise<void>) | undefined
 let cleanupStarted = false
 
@@ -320,11 +320,11 @@ async function mintAgentToken(baseUrl: string, env: Record<string, string>): Pro
     import('../apps/web/src/auth/apiTokens'),
     import('../apps/web/src/db/client'),
   ])
-  tokenDb = dbModule.db
+  tokenDb = dbModule.getDb()
   closeTokenDb = dbModule.closeDb
 
-  const userId = await findUserIdByEmail(dbModule.db, localnetUsers.owner.email)
-  const minted = await mintApiTokenRecordForUser(dbModule.db, { userId, name: tokenName() })
+  const userId = await findUserIdByEmail(tokenDb, localnetUsers.owner.email)
+  const minted = await mintApiTokenRecordForUser(tokenDb, { userId, name: tokenName() })
   agentTokenId = minted.id
   await writeAgentEnv(baseUrl, minted.token)
   console.log('')

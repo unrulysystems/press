@@ -1,14 +1,21 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  assertCollectionDefaultVisibility,
   deniedAclResponse,
   passwordGateResponse,
   renderPasswordGatePage,
-  servedPageHeaders,
   viewerFromChannels,
 } from './serveAcl'
 
 import type { AclDecision, AclDenyReason } from '@press/core'
+
+const REQUIRED_SERVED_HEADERS = {
+  'Content-Security-Policy': 'sandbox allow-scripts allow-popups',
+  'X-Content-Type-Options': 'nosniff',
+  'Referrer-Policy': 'no-referrer',
+  'Cache-Control': 'no-store',
+} as const
 
 function denied(reason: AclDenyReason): AclDecision {
   return { allowed: false, reason, resolvedVisibility: 'default' }
@@ -21,7 +28,7 @@ function request(accept: string): Request {
 }
 
 function expectServedHeaders(response: Response): void {
-  for (const [name, value] of Object.entries(servedPageHeaders)) {
+  for (const [name, value] of Object.entries(REQUIRED_SERVED_HEADERS)) {
     expect(response.headers.get(name)).toBe(value)
   }
 }
@@ -98,7 +105,7 @@ describe('viewerFromChannels', () => {
   })
 })
 
-describe('renderPasswordGatePage (REQ-SRV-004 / F1)', () => {
+describe('renderPasswordGatePage (REQ-SRV-004)', () => {
   test('renders a branded post-to-unlock form for the page', () => {
     const html = renderPasswordGatePage({
       title: 'Quarterly Numbers',
@@ -140,7 +147,7 @@ describe('renderPasswordGatePage (REQ-SRV-004 / F1)', () => {
   })
 })
 
-describe('passwordGateResponse CSP (REQ-SRV-004 / F1)', () => {
+describe('passwordGateResponse CSP (REQ-SRV-004)', () => {
   test('allows the unlock form to submit to self but blocks scripts', async () => {
     const response = passwordGateResponse({
       title: 'X',
@@ -165,5 +172,19 @@ describe('passwordGateResponse CSP (REQ-SRV-004 / F1)', () => {
     })
     expect(response.status).toBe(401)
     expect(await response.text()).toContain('Incorrect password.')
+  })
+})
+
+describe('assertCollectionDefaultVisibility', () => {
+  test('accepts the three valid collection default visibilities and throws on password or unknown values', () => {
+    expect(assertCollectionDefaultVisibility('default')).toBe('default')
+    expect(assertCollectionDefaultVisibility('public')).toBe('public')
+    expect(assertCollectionDefaultVisibility('private')).toBe('private')
+    expect(() => assertCollectionDefaultVisibility('password')).toThrow(
+      /unexpected collection default visibility/,
+    )
+    expect(() => assertCollectionDefaultVisibility('unknown')).toThrow(
+      /unexpected collection default visibility/,
+    )
   })
 })

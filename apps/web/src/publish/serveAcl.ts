@@ -1,9 +1,21 @@
+import { COLLECTION_DEFAULT_VISIBILITIES } from '@press/core'
+
 import type {
   AclDecision,
   AclViewer,
   AuthenticatedViewer,
   BasicPasswordVerification,
+  CollectionDefaultVisibility,
 } from '@press/core'
+
+import { escapeHtml } from '../http/responses'
+
+export function assertCollectionDefaultVisibility(value: string): CollectionDefaultVisibility {
+  if ((COLLECTION_DEFAULT_VISIBILITIES as readonly string[]).includes(value)) {
+    return value as CollectionDefaultVisibility
+  }
+  throw new Error(`unexpected collection default visibility in database: ${value}`)
+}
 
 export const servedPageHeaders = {
   'Content-Security-Policy': 'sandbox allow-scripts allow-popups',
@@ -76,19 +88,6 @@ export function deniedAclResponse(request: Request, decision: AclDecision): Resp
   }
 }
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;')
-}
-
-// Self-contained editorial styling for the standalone gate page: the /p/ sandbox CSP
-// gives the document an opaque origin, so the page must not depend on external CSS or
-// fonts. It holds the web design floors (no horizontal scroll at any width, AA
-// contrast, light + dark) with an inline, restrained, magazine-adjacent look.
 const GATE_PAGE_STYLE = `
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -144,9 +143,8 @@ button {
 }
 `.trim()
 
-// The branded password-entry page (REQ-SRV-004 / F1). Rendered for HTML readers of a
-// `password` page who have not unlocked it; it never contains the report body. The
-// title and error are HTML-escaped because the title originates from the report author.
+// Branded password-entry page (REQ-SRV-004). Never contains the report body; title and
+// error are HTML-escaped because titles originate from the report author.
 export function renderPasswordGatePage(input: {
   readonly title: string
   readonly actionPath: string
@@ -181,10 +179,8 @@ ${error}
 </html>`
 }
 
-// The gate is press's own trusted chrome, not an untrusted report, so it does NOT use
-// the report sandbox of REQ-SRV-002 — that sandbox omits `allow-forms` and would block
-// the unlock form. Instead a strict policy: no scripts, no external anything, inline
-// styles only, and form submission restricted to same-origin (REQ-SRV-004).
+// Strict form-capable CSP for press's own unlock chrome (REQ-SRV-004): no scripts,
+// inline styles only, same-origin form submission.
 export const passwordGateHeaders = {
   'Content-Security-Policy':
     "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",

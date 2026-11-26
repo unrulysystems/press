@@ -4,34 +4,24 @@ import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const dist = resolve(root, 'apps/web/dist')
+const MAX_WALK_DEPTH = 16
 
 const env = {
   ...process.env,
   NODE_ENV: process.env.NODE_ENV ?? 'production',
   ONE_SERVER_URL: process.env.ONE_SERVER_URL ?? 'http://127.0.0.1:4174',
-  PRESS_BASE_URL: process.env.PRESS_BASE_URL ?? 'http://127.0.0.1:4174',
-  PRESS_ALLOWED_DOMAINS: process.env.PRESS_ALLOWED_DOMAINS ?? 'send.it',
-  PRESS_ADMIN_EMAILS: process.env.PRESS_ADMIN_EMAILS ?? 'admin@send.it',
-  DATABASE_URL: process.env.DATABASE_URL ?? 'postgres://press:press@127.0.0.1:54329/press',
-  PRESS_STORAGE_DIR: process.env.PRESS_STORAGE_DIR ?? resolve(root, '.press/build/storage'),
-  // Build-time config import requires this value; runtime still requires a real secret.
-  BETTER_AUTH_SECRET:
-    process.env.BETTER_AUTH_SECRET ?? 'build-placeholder-better-auth-secret-at-least-32-bytes',
-  PRESS_ENABLE_CREDENTIAL_AUTH: process.env.PRESS_ENABLE_CREDENTIAL_AUTH ?? '0',
-  PRESS_MAX_UPLOAD_BYTES: process.env.PRESS_MAX_UPLOAD_BYTES ?? `${25 * 1024 * 1024}`,
-  // Build-time production config validation requires this value; it is not used for OAuth.
-  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? 'build-placeholder',
-  // Paired with GOOGLE_CLIENT_ID for config validation only; runtime still validates real OAuth env.
-  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? 'build-placeholder',
 }
 
-async function findDevelopmentArtifacts(directory: string): Promise<string[]> {
+async function findDevelopmentArtifacts(directory: string, depth = 0): Promise<string[]> {
+  if (depth > MAX_WALK_DEPTH) {
+    throw new Error(`dist directory exceeded max walk depth (${MAX_WALK_DEPTH}): ${directory}`)
+  }
   const entries = await readdir(directory, { withFileTypes: true })
   const nested = await Promise.all(
     entries.map(async (entry) => {
       const path = resolve(directory, entry.name)
       if (entry.isDirectory()) {
-        return findDevelopmentArtifacts(path)
+        return findDevelopmentArtifacts(path, depth + 1)
       }
       return entry.isFile() && entry.name.endsWith('.development.js') ? [path] : []
     }),

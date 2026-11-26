@@ -93,7 +93,7 @@ async function readSiloEnv(): Promise<SiloEnv> {
   }
 }
 
-function redactCommand(command: string, args: readonly string[]): string {
+function formatCommand(command: string, args: readonly string[]): string {
   return [command, ...args].join(' ')
 }
 
@@ -146,13 +146,13 @@ function run(
         stderr: Buffer.concat(stderr),
       }
       if (timedOut) {
-        reject(new Error(`${redactCommand(command, args)} timed out after ${options.timeoutMs}ms`))
+        reject(new Error(`${formatCommand(command, args)} timed out after ${options.timeoutMs}ms`))
         return
       }
       if (!options.allowFailure && result.code !== 0) {
         reject(
           new Error(
-            `${redactCommand(command, args)} exited with ${signal ?? result.code}\n${result.stderr.toString()}`,
+            `${formatCommand(command, args)} exited with ${signal ?? result.code}\n${result.stderr.toString()}`,
           ),
         )
         return
@@ -188,7 +188,7 @@ function runForeground(
 async function runRequired(command: string, args: readonly string[], env: DrillEnv): Promise<void> {
   const result = await runForeground(command, args, env)
   if (result.code !== 0) {
-    throw new Error(`${redactCommand(command, args)} exited with ${result.signal ?? result.code}`)
+    throw new Error(`${formatCommand(command, args)} exited with ${result.signal ?? result.code}`)
   }
 }
 
@@ -453,11 +453,13 @@ async function querySingle(env: DrillEnv, sql: string): Promise<string> {
 async function probeAcl(env: DrillEnv): Promise<AclFacts> {
   const publicResponse = await fetch(`${env.PRESS_BASE_URL}/p/${publicCollection}/${publicFile}`, {
     headers: { Accept: 'text/html' },
+    signal: AbortSignal.timeout(15_000),
   })
   const defaultResponse = await fetch(
     `${env.PRESS_BASE_URL}/p/${defaultCollection}/${defaultFile}`,
     {
       headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
     },
   )
   return {

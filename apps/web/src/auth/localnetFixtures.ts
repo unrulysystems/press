@@ -2,8 +2,7 @@ import { parseCollectionSlug, parseFileSlug } from '@press/core'
 
 import type { CollectionSlug, FileSlug, PageVisibility } from '@press/core'
 
-export const localnetAllowedDomains = ['send.it'] as const
-export const localnetAdminEmails = ['admin@send.it'] as const
+// Seeded localnet fixture users and demo content.
 
 export const localnetUsers = {
   owner: {

@@ -5,12 +5,13 @@ import { betterAuth } from 'better-auth/minimal'
 
 import type { Auth, BetterAuthOptions } from 'better-auth'
 
-import { db, dbConfig } from '../db/client'
+import { getDb, getDbConfig } from '../db/client'
 import { account, session, user, verification } from '../db/schema'
 import { buildAuthProviderConfig } from './providerConfig'
 import { roleForEmail } from './role'
 
-const authProviderConfig = buildAuthProviderConfig(dbConfig)
+import type { PressDb } from '../db/client'
+import type { WebDbConfig } from '../db/config'
 
 const socialOAuthPaths = new Set(['/sign-in/social', '/link-social'])
 
@@ -42,14 +43,8 @@ export const stripClientRequestedOAuthScopesHook = createAuthMiddleware(async (c
 })
 
 // press uses Google solely to establish identity at sign-in; it never calls Google APIs
-// afterward. Better Auth would otherwise persist the provider's access/refresh/id tokens in
-// the `account` row — and its ID-token sign-in flow (/sign-in/social, /link-social) persists
-// CLIENT-supplied `idToken.accessToken`/`refreshToken`, which are not tied to the enforced
-// identity-only authorize scopes. Null every provider token before it is stored so no Google
-// auth material is ever kept at rest. Identity is already resolved from the validated ID
-// token by the time this hook runs, so nulling the stored copies is safe. This uses Better
-// Auth's supported account databaseHook (like the user/session hooks below), NOT an adapter
-// override or schema change — the columns remain; we simply store null.
+// afterward. Null every provider token before persistence so no Google auth material is
+// ever stored at rest.
 type NulledProviderTokens = {
   accessToken: null
   refreshToken: null
@@ -71,98 +66,105 @@ export function stripStoredProviderTokens<T extends Record<string, unknown>>(
   }
 }
 
-export const authOptions = {
-  baseURL: `${dbConfig.baseUrl}/api/auth`,
-  secret: dbConfig.betterAuthSecret,
-  database: drizzleAdapter(db, {
-    provider: 'pg',
-    schema: {
-      account,
-      session,
-      user,
-      verification,
-    },
-    camelCase: true,
-    transaction: true,
-  }),
-  ...authProviderConfig,
-  trustedOrigins: [dbConfig.baseUrl],
-  rateLimit: {
-    enabled: true,
-    window: dbConfig.authRateLimit.global.window,
-    max: dbConfig.authRateLimit.global.max,
-    customRules: {
-      '/sign-in/email': {
-        window: dbConfig.authRateLimit.signInEmail.window,
-        max: dbConfig.authRateLimit.signInEmail.max,
+export function buildAuthOptions(config: WebDbConfig, database: PressDb) {
+  const authProviderConfig = buildAuthProviderConfig(config)
+  return {
+    baseURL: `${config.baseUrl}/api/auth`,
+    secret: config.betterAuthSecret,
+    database: drizzleAdapter(database, {
+      provider: 'pg',
+      schema: {
+        account,
+        session,
+        user,
+        verification,
       },
-    },
-  },
-  session: {
-    storeSessionInDatabase: true,
-  },
-  advanced: {
-    useSecureCookies: dbConfig.nodeEnv === 'production',
-    defaultCookieAttributes: {
-      httpOnly: true,
-      sameSite: 'lax',
-      secure: dbConfig.nodeEnv === 'production',
-    },
-  },
-  plugins: [],
-  hooks: {
-    before: stripClientRequestedOAuthScopesHook,
-  },
-  databaseHooks: {
-    user: {
-      create: {
-        async before(newUser) {
-          const email = typeof newUser.email === 'string' ? newUser.email.toLowerCase() : ''
-          return {
-            data: {
-              ...newUser,
-              role: roleForEmail(email, dbConfig.adminEmails),
-            },
-          }
+      camelCase: true,
+      transaction: true,
+    }),
+    ...authProviderConfig,
+    trustedOrigins: [config.baseUrl],
+    rateLimit: {
+      enabled: true,
+      window: config.authRateLimit.global.window,
+      max: config.authRateLimit.global.max,
+      customRules: {
+        '/sign-in/email': {
+          window: config.authRateLimit.signInEmail.window,
+          max: config.authRateLimit.signInEmail.max,
         },
       },
     },
     session: {
-      create: {
-        async before(newSession) {
-          // Keep the role cache in sync in BOTH directions: promotion and, when
-          // an email leaves PRESS_ADMIN_EMAILS, demotion (B-2 / REQ-AUTH-007).
-          // Authorization never trusts this cache — it re-derives from config.
-          const existingUser = await db.query.user.findFirst({
-            where: eq(user.id, newSession.userId),
-          })
-          if (existingUser) {
-            await db
-              .update(user)
-              .set({ role: roleForEmail(existingUser.email, dbConfig.adminEmails) })
-              .where(eq(user.id, existingUser.id))
-          }
+      storeSessionInDatabase: true,
+    },
+    advanced: {
+      useSecureCookies: config.nodeEnv === 'production',
+      defaultCookieAttributes: {
+        httpOnly: true,
+        sameSite: 'lax',
+        secure: config.nodeEnv === 'production',
+      },
+    },
+    plugins: [],
+    hooks: {
+      before: stripClientRequestedOAuthScopesHook,
+    },
+    databaseHooks: {
+      user: {
+        create: {
+          async before(newUser) {
+            const email = typeof newUser.email === 'string' ? newUser.email.toLowerCase() : ''
+            return {
+              data: {
+                ...newUser,
+                role: roleForEmail(email, config.adminEmails),
+              },
+            }
+          },
+        },
+      },
+      session: {
+        create: {
+          async before(newSession) {
+            // Keep the role cache in sync on sign-in (REQ-AUTH-007); authorization
+            // always re-derives the effective role from PRESS_ADMIN_EMAILS.
+            const existingUser = await database.query.user.findFirst({
+              where: eq(user.id, newSession.userId),
+            })
+            if (existingUser) {
+              await database
+                .update(user)
+                .set({ role: roleForEmail(existingUser.email, config.adminEmails) })
+                .where(eq(user.id, existingUser.id))
+            }
+          },
+        },
+      },
+      account: {
+        create: {
+          async before(newAccount) {
+            return { data: stripStoredProviderTokens(newAccount) }
+          },
+        },
+        update: {
+          async before(newAccount) {
+            return { data: stripStoredProviderTokens(newAccount) }
+          },
         },
       },
     },
-    account: {
-      create: {
-        async before(newAccount) {
-          return { data: stripStoredProviderTokens(newAccount) }
-        },
-      },
-      update: {
-        async before(newAccount) {
-          return { data: stripStoredProviderTokens(newAccount) }
-        },
-      },
+    logger: {
+      level: 'warn',
     },
-  },
-  logger: {
-    level: 'warn',
-  },
-} satisfies BetterAuthOptions
+  } satisfies BetterAuthOptions
+}
 
-export const auth: Auth<typeof authOptions> = betterAuth(authOptions)
+type PressAuth = Auth<ReturnType<typeof buildAuthOptions>>
 
-export type PressSession = Awaited<ReturnType<typeof auth.api.getSession>>
+let cachedAuth: PressAuth | undefined
+
+export function getAuth(): PressAuth {
+  cachedAuth ??= betterAuth(buildAuthOptions(getDbConfig(), getDb()))
+  return cachedAuth
+}

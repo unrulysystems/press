@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useLoader } from 'one'
 
-import { dbConfig } from '@press/web/db/client'
-import { loginAffordances } from '@press/web/auth/loginAffordances'
+import { getDbConfig } from '@press/web/db/client'
+import { loginAffordances, safeNext } from '@press/web/auth/loginAffordances'
 import { localnetUsers } from '@press/web/auth/localnetFixtures'
 
 import type { FormEvent } from 'react'
@@ -17,19 +17,17 @@ type LoginData = {
   readonly seeded?: { readonly email: string; readonly password: string }
 }
 
-function safeNext(raw: string | null): string {
-  if (!raw || !raw.startsWith('/') || raw.startsWith('//')) {
-    return '/'
-  }
-  return raw
-}
+const AUTH_REQUEST_TIMEOUT_MS = 15_000
+
+type SubmittingMode = 'idle' | 'credential' | 'google'
 
 export function loader({ request }: LoaderProps): LoginData {
-  const url = new URL(request?.url ?? dbConfig.baseUrl)
-  const credentialEnabled = dbConfig.credentialAuthEnabled
+  const config = getDbConfig()
+  const url = new URL(request?.url ?? config.baseUrl)
+  const credentialEnabled = config.credentialAuthEnabled
   return {
     credentialEnabled,
-    googleEnabled: Boolean(dbConfig.googleClientId && dbConfig.googleClientSecret),
+    googleEnabled: Boolean(config.google),
     next: safeNext(url.searchParams.get('next')),
     ...(credentialEnabled
       ? { seeded: { email: localnetUsers.owner.email, password: localnetUsers.owner.password } }
@@ -41,53 +39,88 @@ export function LoginPage() {
   const data = useLoader(loader)
   const view = loginAffordances(data)
   const [error, setError] = useState<string | null>(null)
-  const [submitting, setSubmitting] = useState(false)
+  const [submittingMode, setSubmittingMode] = useState<SubmittingMode>('idle')
+  const submitting = submittingMode !== 'idle'
+
+  useEffect(() => {
+    function handlePageShow(event: PageTransitionEvent): void {
+      if (event.persisted) {
+        setSubmittingMode('idle')
+      }
+    }
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [])
 
   // better-auth's /sign-in/social is POST-only and returns { url } to redirect to; a plain
   // GET link 404s. Since production refuses credential auth, this is the only way in.
   async function continueWithGoogle(): Promise<void> {
     setError(null)
-    setSubmitting(true)
-    const response = await fetch('/api/auth/sign-in/social', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ provider: 'google', callbackURL: data.next }),
-    })
-    if (!response.ok) {
-      setSubmitting(false)
-      setError('Could not start Google sign-in. Please try again.')
-      return
+    setSubmittingMode('google')
+    try {
+      const response = await fetch('/api/auth/sign-in/social', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: 'google', callbackURL: data.next }),
+        signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+      })
+      if (!response.ok) {
+        setSubmittingMode('idle')
+        if (response.status === 429) {
+          setError('Too many sign-in attempts. Please wait a moment and try again.')
+        } else {
+          setError('Could not start Google sign-in. Please try again.')
+        }
+        return
+      }
+      const body = (await response.json()) as { readonly url?: string }
+      if (!body.url) {
+        setSubmittingMode('idle')
+        setError('Google sign-in did not return a redirect URL.')
+        return
+      }
+      window.location.assign(body.url)
+    } catch {
+      setSubmittingMode('idle')
+      setError('Could not reach the sign-in service. Please try again.')
     }
-    const body = (await response.json()) as { readonly url?: string }
-    if (!body.url) {
-      setSubmitting(false)
-      setError('Google sign-in did not return a redirect URL.')
-      return
-    }
-    window.location.assign(body.url)
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setError(null)
-    setSubmitting(true)
+    setSubmittingMode('credential')
 
     const form = new FormData(event.currentTarget)
     const email = String(form.get('email') ?? '')
     const password = String(form.get('password') ?? '')
-    const response = await fetch('/api/auth/sign-in/email', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ email, password, rememberMe: true }),
-    })
+    try {
+      const response = await fetch('/api/auth/sign-in/email', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email, password, rememberMe: true }),
+        signal: AbortSignal.timeout(AUTH_REQUEST_TIMEOUT_MS),
+      })
 
-    if (!response.ok) {
-      setSubmitting(false)
-      setError('The email and password did not match a localnet account.')
-      return
+      if (!response.ok) {
+        setSubmittingMode('idle')
+        if (response.status === 429) {
+          setError('Too many sign-in attempts. Please wait a moment and try again.')
+        } else if (response.status >= 500) {
+          setError('Sign-in is temporarily unavailable. Please try again.')
+        } else {
+          setError('The email and password did not match a localnet account.')
+        }
+        return
+      }
+
+      window.location.assign(data.next)
+    } catch {
+      setSubmittingMode('idle')
+      setError('Could not reach the sign-in service. Please try again.')
     }
-
-    window.location.assign(data.next)
   }
 
   return (
@@ -118,13 +151,8 @@ export function LoginPage() {
                 <span>Password</span>
                 <input name="password" type="password" autoComplete="current-password" required />
               </label>
-              {error ? (
-                <p className="press-form-error" role="alert">
-                  {error}
-                </p>
-              ) : null}
               <button type="submit" disabled={submitting}>
-                {submitting ? 'Signing in' : 'Sign in'}
+                {submittingMode === 'credential' ? 'Signing in' : 'Sign in'}
               </button>
             </form>
           ) : null}
@@ -136,8 +164,14 @@ export function LoginPage() {
               onClick={continueWithGoogle}
               disabled={submitting}
             >
-              Continue with Google
+              {submittingMode === 'google' ? 'Continuing with Google' : 'Continue with Google'}
             </button>
+          ) : null}
+
+          {error ? (
+            <p className="press-form-error" role="alert">
+              {error}
+            </p>
           ) : null}
 
           {view.unavailable ? (
